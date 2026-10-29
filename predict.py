@@ -37,6 +37,9 @@ def _team_report():
     except Exception as e:
         print("team report failed:", e); return None
 
+class ModelMissing(Exception):
+    """There is no saved model file. Loading never trains one (training takes minutes and must not happen inside a web request)."""
+
 class StaleModel(Exception):
     """The saved model was trained under different feature definitions (or has no version) and must be retrained first."""
 
@@ -108,7 +111,9 @@ def train(report=True):
     from model import evaluate
     rep = dict(evaluate(full), team=_team_report(), alpha_window=[str(w0), str(full.date.max())], alpha_train_method="out-of-sample")
     ok, bad = validate(rep, alphas)
-    bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=rep, schema=FEATURE_SCHEMA)
+    import hashlib
+    mid = hashlib.sha1((FEATURE_SCHEMA + str(full.date.max()) + json.dumps(alphas, sort_keys=True)).encode()).hexdigest()[:12]   # stamped on every projection
+    bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=rep, schema=FEATURE_SCHEMA, model_id=mid)
     target = MODELS if ok else MODELS + ".rejected"      # a model that fails validation is kept for inspection but never used
     tmp = target + ".tmp"                                # write beside the live file, then swap: a crash never leaves a half-written model
     with open(tmp, "wb") as f: pickle.dump(bundle, f)
@@ -116,8 +121,11 @@ def train(report=True):
     if not ok: raise RuntimeError(f"new model rejected: {'; '.join(bad)}")
     return m, alphas, corr
 
+def bundle_id(b):
+    return b.get("model_id")
+
 def load_models(strict=True):
-    if not os.path.exists(MODELS): train()
+    if not os.path.exists(MODELS): raise ModelMissing("no saved model")
     b = pickle.load(open(MODELS, "rb"))
     if strict and b.get("schema") != FEATURE_SCHEMA: raise StaleModel("saved model predates the current feature definitions; retrain first")
     return b
@@ -259,7 +267,7 @@ def project(days=2):
     pdd = m["dd"].predict_proba(X)[:, 1]; ptd = m["td"].predict_proba(feats)
     for k, (_, f) in enumerate(feats.iterrows()):
         mt = mk[(f.game_id, f.player_id)]; g = mt["game"]
-        rec = dict(game_id=f.game_id, start=g["start"], date=g["date"], player_id=f.player_id, player=f.player, team=f.team, opp=f.opp,
+        rec = dict(model_id=bundle_id(bundle), game_id=f.game_id, start=g["start"], date=g["date"], player_id=f.player_id, player=f.player, team=f.team, opp=f.opp,
                    home=int(f.home), starting=bool(mt["starting"]), lineup_status=mt["lineup_status"], injury=mt["injury"],
                    min=float(f.min_m10) if pd.notna(f.min_m10) else None, rest=float(f.rest) if pd.notna(f.rest) else None,
                    p_dd=float(pdd[k]), p_td=float(min(ptd[k], pdd[k])), proj={}, ladders={})

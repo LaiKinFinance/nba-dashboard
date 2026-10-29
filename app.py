@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Header, Body
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import predict, parlay as pl, slate as sl
+from features import FEATURE_SCHEMA
 from inputs import BetInput, PickInput, ParlayInput
 
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
@@ -201,14 +202,30 @@ def odds_status():
 @app.get("/api/meta")
 def meta(x_code: str = Header("")):
     check(x_code)
-    b = predict.load_models(strict=False)
+    b, why = model_status(projections_all())
     with closing(con()) as c:
         last = c.execute("SELECT max(date) d FROM games").fetchone()["d"]
         made = c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"]
-    return dict(data_through=last, projections_made=made, trained_through=b["trained_through"],
+    return dict(data_through=last, projections_made=made, trained_through=(b or {}).get("trained_through"), model_current=why is None, model_note=why,
                 odds_api=__import__("odds").available(), open_access=not ACCESS_CODE, odds=__import__("odds").status(c) if False else odds_status())
 
 def _cats(r): return sum(int(r[k] >= 10) for k in ("pts", "reb", "ast", "stl", "blk"))   # official double/triple-double count five categories
+def model_status(preds=None):
+    """(saved model or None, reason it should not be used for bets or None). Never trains."""
+    try: b = predict.load_models(strict=False)
+    except predict.ModelMissing: return None, "There is no prediction model yet"
+    if b.get("schema") != FEATURE_SCHEMA: return b, "Predictions are from an older version of the model and are being updated"
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    if preds and any(p.get("model_id") != b.get("model_id") for p in preds if p.get("start", "") >= now):    # games already under way keep their old projections
+        return b, "Predictions are being refreshed after a model update"
+    return b, None
+
+def require_current_model(preds=None):
+    """Models for any route that turns predictions into bet probabilities: refuse (503) unless model and projections match."""
+    b, why = model_status(preds)
+    if why: raise HTTPException(503, why + ". Please try again in a few minutes.")
+    return b
+
 def _dd(r): return int(_cats(r) >= 2)
 def _td(r): return int(_cats(r) >= 3)
 
@@ -229,7 +246,9 @@ def enriched():
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
         book = odds.load(c); ages = odds.fetch_ages(c)
-    alphas = predict.load_models(strict=False)["alphas"]
+    mb, _ = model_status()
+    if mb is None: raise HTTPException(503, "There is no prediction model yet. Please try again in a few minutes.")
+    alphas = mb["alphas"]
     # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
     hist = {}
     if ids:
@@ -522,6 +541,8 @@ def min_edge(p):
 
 def compute_value():
     preds = enriched(); out = []
+    _, why = model_status(preds)
+    if why: return dict(picks=[], odds_connected=bool(__import__("odds").available()), notice=why)
     for p in preds:
         if (p.get("injury") or {}).get("status") in ("Out",): continue
         if (p.get("odds_age_h") or 0) > MAX_AGE_H: continue      # prices this old are too stale to call "value"
@@ -579,6 +600,8 @@ def best(x_code: str = Header("")):
 
 def compute_best():
     preds = enriched(); cands = []
+    _, why = model_status(preds)
+    if why: return dict(legs=[], combo=dict(legs=[], joint=None, fair_odds=None), notice=why)
     for p in preds:
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
         for s in ("pts", "reb", "ast"):
@@ -593,7 +616,7 @@ def compute_best():
     cands.sort(key=lambda x: -x["score"])
     combo, used, games = [], set(), set()
     pmap = {(p["game_id"], p["player_id"]): p for p in preds}
-    alph = predict.load_models(strict=False); res = None
+    alph = require_current_model(preds); res = None
     for c in cands:
         if c["player_id"] in used or c["game_id"] in games: continue  # spread across players and games to limit correlation
         combo.append(c); used.add(c["player_id"]); games.add(c["game_id"])
@@ -731,7 +754,7 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner, handicap or margin leg per game")
     tot_games = [l["game_id"] for l in tm_legs if l["stat"] in TOTAL_GROUP]
     if len(tot_games) != len(set(tot_games)): raise HTTPException(400, "Pick only one game total or team total per game")
-    b = predict.load_models(strict=False)
+    b = require_current_model(list(preds.values()))
     rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
     tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
     pi, ti = iter(rp["leg_probs"]), iter(tp)
@@ -749,7 +772,9 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
 @app.get("/api/scorecard")
 def scorecard(x_code: str = Header("")):
     check(x_code)
-    rep = predict.load_models(strict=False)["report"]
+    mb, _ = model_status()
+    if mb is None: raise HTTPException(503, "There is no prediction model yet.")
+    rep = mb["report"]
     with closing(con()) as c:
         bets = [dict(r) for r in c.execute("SELECT * FROM bets ORDER BY id DESC")]
     users = {}

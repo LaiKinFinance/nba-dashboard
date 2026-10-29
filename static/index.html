@@ -383,7 +383,7 @@ async function today(a){await loadSlate();
   if(!slate.length){a.innerHTML='<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
   const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
-  a.innerHTML=`<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
+  a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
    <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div>
