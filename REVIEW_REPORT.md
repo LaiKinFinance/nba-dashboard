@@ -82,3 +82,20 @@ Commit `6a1a4ca` (refunds) had accidentally included a changed `data/nba.db` (ca
 - Whether Fly keeps daily volume snapshots (I cannot see the account).
 - UI beyond a headless Chromium run on a scratch copy; no phone testing.
 - That points chances are fixed: they are not (see section 7).
+
+## 9. Speed  (`review/15-speed`)
+Cause (profiled): `enriched()` made ~13,000 one-at-a-time `scipy` calls (about 70% of its time); every tab (Best picks, Games, Value, Lineups) rebuilt it; `get_slate` rebuilt every game block once per player (78 times, not 13); `predict.project` ran 12 minutes **inside the web process** after the last live deploy; pages were not compressed (91 KB page, ~1.8 MB slate JSON).
+- Fix: vectorised `over_prob` calls (identical numbers: every strip entry compared before/after, equal to 9 decimals); `enriched()` shared per (latest projection, latest price fetch, model file time, minute); each game block built once; `GZipMiddleware`; `project_quietly` and the daily checks run via `run_quietly` (a niced, one-core child process).
+- Measured here (not on Fly): enriched 1.19 s → 0.40 s; Games page 1.27 s → 0.4 s cold and 0.07 s warm; Best/Value/Lineups ~0.07 s warm; page 95,654 → 29,980 bytes compressed. Compared full slate, best and value JSON old vs new: identical.
+- Tests: `tests/test_speed.py` (cache refreshes when data changes; batched = one-at-a-time; gzip; heavy work goes to the child process).
+- Not verified: speed on Fly's shared CPU.
+
+## 10. Best picks first  (`review/16-best-picks-first`)
+Tab order and landing page changed (the app always opens on Best picks, today's picks view even if the last visit was elsewhere); the games list is requested alongside best/value instead of before them. Checked in headless Chromium with old saved tab/view values set.
+
+## 11. Automatic marking of My bets  (`review/17-auto-grade-bets`, `settle.py`)
+- Rules: won / lost / push (tie on a whole-number line) / void (player did not play); a bet is lost as soon as any leg is lost; won when every leg has finished and none lost (push and void legs drop out); full refund (`void`) when every leg dropped out. A game whose box score is not stored yet stays pending (never "did not play").
+- Payout: when legs dropped out and every leg has a saved price, payout odds are the product of the remaining legs' prices (`payout_odds`); otherwise the full odds are kept and a note says to check Sportsbet. New bets now save each leg's price.
+- Manual marks are kept (`manual=1`); "undo" hands the bet back to automatic marking. `grade_bets()` runs in every refresh cycle and when the scorecard is opened.
+- Tests: `tests/test_auto_marking.py` (47). Real-data smoke test on a copy of the repaired database: a bet on the top scorer of the latest game was marked won / lost / refunded as expected.
+- Limits: same-game combos with correlated legs are still marked leg by leg (correct). Cash-outs and boosts cannot be seen by the app; that is what the manual override is for.
