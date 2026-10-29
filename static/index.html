@@ -108,7 +108,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1 1 280px}
 .foot{font-size:12px;color:var(--mute);margin-top:6px}
 .sec{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
-.sec>.sh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;font-weight:800;font-size:15px}.sec>.sh:hover{background:var(--card2)}
+.sec>.sh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;font-weight:800;font-size:15px;width:100%;background:none;border:0;text-align:left}.sec>.sh:hover{background:var(--card2)}
 .sec .cv{flex:none;width:30px;height:30px;border-radius:50%;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--mute);transition:transform .15s,background .15s}
 .sec .cv::before{content:"▾";font-size:15px;line-height:1}.sec.open .cv{background:var(--acc);color:#fff;transform:rotate(180deg)}
 .sec>.sbody{display:none;padding:0 14px 14px}.sec.open>.sbody{display:block}
@@ -333,8 +333,8 @@ function ttHTML(g){const x=_mx(g);if(!x)return"";const {m,H,A,id}=x,tT=mbg(id,"t
   return `<div class="mhd"><div class="sbt" style="margin:0">Team Total</div>${segc(id,"ttT",[["away",nm(A)],["home",nm(H)]])}${segc(id,"ttO",[["over","Over"],["under","Under"]])}</div>${stripH(tt)}`}
 const gsec={},SECDEF={top:true,players:true,margin:false,tteam:false,h2h:false};
 const secOpen=(id,k)=>(gsec[id]&&gsec[id][k]!==undefined)?gsec[id][k]:SECDEF[k];
-const sec=(id,k,title,body)=>`<div class="sec ${secOpen(id,k)?"open":""}" data-k="${k}"><div class="sh" onclick="togSec('${id}','${k}')"><span>${title}</span><span class="cv"></span></div><div class="sbody">${body}</div></div>`;
-function togSec(id,k){(gsec[id]=gsec[id]||{})[k]=!secOpen(id,k);const el=document.querySelector(`#g${id} .sec[data-k="${k}"]`);el.classList.toggle("open");if(secOpen(id,k)){paintSel();centerStrips(el)}}
+const sec=(id,k,title,body)=>`<div class="sec ${secOpen(id,k)?"open":""}" data-k="${k}"><button class="sh" aria-expanded="${secOpen(id,k)}" aria-controls="section-${id}-${k}" onclick="togSec('${id}','${k}')"><span>${title}</span><span class="cv" aria-hidden="true"></span></button><div class="sbody" id="section-${id}-${k}">${body}</div></div>`;
+function togSec(id,k){(gsec[id]=gsec[id]||{})[k]=!secOpen(id,k);const el=document.querySelector(`#g${id} .sec[data-k="${k}"]`);el.classList.toggle("open");el.querySelector('.sh').setAttribute('aria-expanded',String(secOpen(id,k)));if(secOpen(id,k)){paintSel();centerStrips(el)}}
 const ptsNote='<div class="note" style="margin:0 0 8px">Points chances (points, points+rebounds, points+assists, PRA) have been running too confident in testing, so no VALUE or "safe" labels are shown for them. Treat the percentages as rough.</div>';
 function playersHTML(g){return ptsNote+playersHTML0(g)}
 function playersHTML0(g){const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
