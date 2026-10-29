@@ -56,9 +56,11 @@ def test_no_vig_moneyline(home, away, expected):
 
 def test_same_player_in_different_games_has_separate_marginals():
     legs = [dict(game_id=g, player_id='p', stat='pts', line=20.5, side='over') for g in ['a', 'b']]
-    preds = {(g, 'p'): dict(proj=dict(pts=mu), team='BOS') for g, mu in [('a', 8), ('b', 35)]}
+    # High mean first makes the original shared-draw bug exceed the smaller marginal.
+    preds = {(g, 'p'): dict(proj=dict(pts=mu), team='BOS') for g, mu in [('a', 35), ('b', 8)]}
     r = parlay.parlay(legs, preds, {'pts': .1}, {'same': np.eye(3).tolist()})
     assert abs(r['joint']-r['independent']) < .003
+    assert r['joint'] <= min(r['leg_probs']) + .003
 
 
 def test_binary_under_and_integer_push_are_not_wins():
