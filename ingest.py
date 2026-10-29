@@ -109,7 +109,12 @@ def run(start, end):
         for g, res in ex.map(work, todo):
             if res is None: continue
             rows, lines = res
-            con.execute("INSERT OR REPLACE INTO games VALUES(:game_id,:date,:season,:season_type,:home_id,:home,:away_id,:away,:home_pts,:away_pts)", g)
+            # name the columns: the table has grown (market lines, referee/foul totals), and an upsert keeps those extra columns intact
+            con.execute("""INSERT INTO games(game_id,date,season,season_type,home_id,home,away_id,away,home_pts,away_pts)
+                           VALUES(:game_id,:date,:season,:season_type,:home_id,:home,:away_id,:away,:home_pts,:away_pts)
+                           ON CONFLICT(game_id) DO UPDATE SET date=excluded.date, season=excluded.season, season_type=excluded.season_type,
+                             home_id=excluded.home_id, home=excluded.home, away_id=excluded.away_id, away=excluded.away,
+                             home_pts=excluded.home_pts, away_pts=excluded.away_pts""", g)
             con.executemany("INSERT OR REPLACE INTO player_games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
             if lines: con.execute("UPDATE games SET ou=:ou, spread_home=:spread_home, ml_home=:ml_home, ml_away=:ml_away WHERE game_id=:gid", dict(lines, gid=g["game_id"]))
             done += 1
