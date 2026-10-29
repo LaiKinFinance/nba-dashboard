@@ -38,7 +38,7 @@ def test_player_who_did_not_play_is_cancelled_not_lost():
 
 @pytest.mark.parametrize("results,expect", [
     (["won", "won"], "won"), (["won", "lost"], "lost"), (["won", None], "open"), (["lost", None], "open"),     # wait for the complete pick before scoring it
-    (["won", "push"], "void"), (["push", "void"], "void"), (["void"], "void"), (["push", None], "open"), (["lost", "push"], "void"),
+    (["won", "push"], "void"), (["push", "void"], "void"), (["void"], "void"), (["push", None], "open"), (["lost", "push"], "lost"), (["void", "lost"], "lost"),
 ])
 def test_whole_bet(results, expect):
     assert settle.settle_bet([{}] * len(results), results) == expect
@@ -90,7 +90,7 @@ def test_incomplete_combination_waits_even_if_one_pick_is_wrong(db):
 
 @pytest.mark.parametrize("legs", [
     [L("pts", 24.5), L("pts", 27)],
-    [L("pts", 30.5), dict(game_id="g", player_id="absent", stat="reb", line=4.5, side="over")],
+    [L("pts", 24.5), dict(game_id="g", player_id="absent", stat="reb", line=4.5, side="over")],
 ])
 def test_unscorable_picks_are_left_out_of_win_loss_count(db, legs):
     b = _bet(db, legs); app.grade_bets()
@@ -170,3 +170,10 @@ def test_only_the_owner_can_change_a_result(db):
 def test_grading_twice_changes_nothing(db):
     b = _bet(db, [L("pts", 24.5)]); app.grade_bets(); first = _row(db, b)
     assert app.grade_bets()["graded"] == 0 and _row(db, b) == first
+
+
+def test_a_lost_leg_is_not_hidden_by_a_cancelled_leg(db):
+    b = _bet(db, [L("pts", 30.5), dict(game_id="g", player_id="absent", stat="reb", line=4.5, side="over")]); app.grade_bets()
+    assert _row(db, b)["result"] == "lost"
+    me = TestClient(app.app).get("/api/scorecard").json()["users"][0]
+    assert me["losses"] == 1 and me["not_counted"] == 0

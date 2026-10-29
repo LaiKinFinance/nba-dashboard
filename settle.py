@@ -40,9 +40,9 @@ def leg_result(leg, game, player):
     return _cmp(val, float(leg["line"]), side)
 
 def settle_bet(legs, results):
-    """Keep incomplete picks pending and unscorable picks out of the win/loss count."""
+    """Unfinished picks wait. A lost leg makes the pick lost even if another leg tied or was cancelled."""
     if not results: return "void"
     if any(r is None for r in results): return "open"
-    if any(r in ("push", "void") for r in results): return "void"
     if "lost" in results: return "lost"
+    if any(r in ("push", "void") for r in results): return "void"
     return "won"
