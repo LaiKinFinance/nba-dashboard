@@ -3,7 +3,7 @@
 Credit cost on the API = markets x regions per event call, so we fetch each upcoming game once (not on every page view)
 and stop when the remaining credits get low.
 """
-import os, re, sqlite3, time, unicodedata, datetime as dt
+import os, re, sqlite3, time, unicodedata, datetime as dt, math
 import requests
 
 BASE = "https://api.the-odds-api.com/v4"
@@ -63,12 +63,15 @@ def parse_event(js, name_to_pid):
             for o in m.get("outcomes", []):
                 pid = name_to_pid.get(norm_name(o.get("description") or ""))
                 side = (o.get("name") or "").lower()
-                if not pid or side not in ("over", "under", "yes"): continue
-                if stat in ("dd", "td"): line = 0.0
-                else:
-                    if o.get("point") is None: continue
-                    line = float(o["point"])
-                rows.append((pid, stat, line, "over" if side == "yes" else side, float(o["price"]), b["key"]))
+                if not pid: continue
+                binary = stat in ("dd", "td")
+                if side not in (("yes", "no") if binary else ("over", "under")): continue
+                try:
+                    line = 0.0 if binary else float(o["point"])
+                    price = float(o["price"])
+                except (KeyError, TypeError, ValueError): continue
+                if not math.isfinite(line) or line < 0 or not math.isfinite(price) or price <= 1: continue
+                rows.append((pid, stat, line, {"yes": "over", "no": "under"}.get(side, side), price, b["key"]))
     return rows
 
 def refresh(games, players_by_game):
