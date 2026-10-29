@@ -1,17 +1,22 @@
-"""Model schema + validation gate. Run: python3 tests/test_model_gate.py"""
-import os, sys, pickle, tempfile
-d = tempfile.mkdtemp(); os.environ["DATA_DIR"] = d; sys.path.insert(0, ".")
+"""Saved-model version check and the validation gate."""
+import os, pickle, pytest
 import predict, features
-# an unversioned (old) model must be refused for projections, but readable for display
-pickle.dump(dict(models={}, alphas={}, corr={}, trained_through="2026-01-01", report={}), open(predict.MODELS, "wb"))
-assert predict.model_stale()
-try: predict.load_models(); raise SystemExit("old model was accepted")
-except predict.StaleModel: pass
-assert predict.load_models(strict=False)["trained_through"] == "2026-01-01"
-pickle.dump(dict(models={}, alphas={}, corr={}, trained_through="x", report={}, schema=features.FEATURE_SCHEMA), open(predict.MODELS, "wb"))
-assert not predict.model_stale() and predict.load_models()["trained_through"] == "x"
-# gate: a model worse than the plain 10-game average is rejected
-good = {"stats": {t: dict(mae_model=4.0, mae_10game_avg=4.1) for t in predict.TARGETS}}
-bad = {"stats": {**good["stats"], "pts": dict(mae_model=6.0, mae_10game_avg=4.1)}}
-assert predict.validate(good) == (True, []) and predict.validate(bad) == (False, ["pts"])
-print("model gate tests passed")
+
+@pytest.fixture
+def models_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(predict, "MODELS", str(tmp_path / "models.pkl")); return predict.MODELS
+
+def test_old_model_refused_for_projection_but_readable(models_path):
+    pickle.dump(dict(models={}, alphas={}, corr={}, trained_through="2026-01-01", report={}), open(models_path, "wb"))
+    assert predict.model_stale()
+    with pytest.raises(predict.StaleModel): predict.load_models()
+    assert predict.load_models(strict=False)["trained_through"] == "2026-01-01"
+
+def test_current_model_accepted(models_path):
+    pickle.dump(dict(models={}, alphas={}, corr={}, trained_through="x", report={}, schema=features.FEATURE_SCHEMA), open(models_path, "wb"))
+    assert not predict.model_stale() and predict.load_models()["trained_through"] == "x"
+
+def test_gate_rejects_model_worse_than_plain_average():
+    good = {"stats": {t: dict(mae_model=4.0, mae_10game_avg=4.1) for t in predict.TARGETS}}
+    bad = {"stats": {**good["stats"], "pts": dict(mae_model=6.0, mae_10game_avg=4.1)}}
+    assert predict.validate(good) == (True, []) and predict.validate(bad) == (False, ["pts"])
