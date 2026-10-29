@@ -62,17 +62,18 @@ def model_stale():
 
 MIN_TEST_ROWS = 1000
 
-def published_check(min_games=20, boots=400, seed=3):
-    """Check what we actually PUBLISHED: the chances saved before tip-off (prediction_log), against what happened. Chances from the same game
-    are not independent, so uncertainty is measured by resampling whole games."""
-    con = sqlite3.connect(DB)
-    try:
-        df = pd.read_sql("""SELECT l.game_id, l.player_id, l.stat, l.line, l.p_over, l.model_id, g.pts, g.reb, g.ast FROM prediction_log l
-                            JOIN player_games g ON g.game_id=l.game_id AND g.player_id=l.player_id""", con)
-    except Exception:
-        return dict(status="waiting", kind="published", games=0)
+def ensure_prediction_log(con):
+    """The record of published chances. Once a game's start time has passed, its rows can no longer be changed or deleted (enforced by the database)."""
+    con.execute("CREATE TABLE IF NOT EXISTS prediction_log(game_id TEXT, player_id TEXT, stat TEXT, line REAL, p_over REAL, model_id TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id, stat, line))")
+    if "start" not in {r[1] for r in con.execute("PRAGMA table_info(prediction_log)")}: con.execute("ALTER TABLE prediction_log ADD COLUMN start TEXT")
+    for ev in ("UPDATE", "DELETE"):
+        con.execute(f"""CREATE TRIGGER IF NOT EXISTS prediction_log_frozen_{ev.lower()} BEFORE {ev} ON prediction_log
+                        WHEN OLD.start IS NULL OR OLD.start <= strftime('%Y-%m-%dT%H:%MZ','now')
+                        BEGIN SELECT RAISE(ABORT, 'published predictions cannot be changed after the game has started'); END""")
+
+def _published_one(df, min_games, boots, seed):
     if df.empty or df.game_id.nunique() < min_games: return dict(status="waiting", kind="published", games=int(df.game_id.nunique()) if not df.empty else 0)
-    df["y"] = np.where(df.stat == "pts", df.pts, np.where(df.stat == "reb", df.reb, df.ast)) > df.line
+    df = df.assign(y=np.where(df.stat == "pts", df.pts, np.where(df.stat == "reb", df.reb, df.ast)) > df.line)
     out = {}; rng = np.random.default_rng(seed)
     for stat, d in df.groupby("stat"):
         hi = d[d.p_over >= 0.75]
@@ -81,10 +82,22 @@ def published_check(min_games=20, boots=400, seed=3):
         gaps = []
         for _ in range(boots):
             r = per[rng.integers(0, len(per), len(per))]; gaps.append(r[:, 1].sum() / r[:, 0].sum() - r[:, 2].sum() / r[:, 0].sum())
-        gap = float(hi.p_over.mean() - hi.y.mean())
         out[stat] = dict(n=int(len(d)), games=int(d.game_id.nunique()), high_n=int(len(hi)), high_pred=float(hi.p_over.mean()), high_actual=float(hi.y.mean()),
-                         gap=gap, gap_low=float(np.percentile(gaps, 2.5)), gap_high=float(np.percentile(gaps, 97.5)))
-    return dict(status="ok", kind="published", games=int(df.game_id.nunique()), by_stat=out, models=sorted(df.model_id.dropna().unique().tolist()))
+                         gap=float(hi.p_over.mean() - hi.y.mean()), gap_low=float(np.percentile(gaps, 2.5)), gap_high=float(np.percentile(gaps, 97.5)))
+    return dict(status="ok", kind="published", games=int(df.game_id.nunique()), by_stat=out)
+
+def published_check(min_games=20, boots=400, seed=3):
+    """Check what we actually PUBLISHED: the chances saved before tip-off (prediction_log) against what happened, ONE MODEL VERSION AT A TIME
+    (an older version's results are never counted as the current version's). Chances from the same game are not independent, so
+    uncertainty is measured by resampling whole games. Returns {'models': {model_id: result}}."""
+    con = sqlite3.connect(DB)
+    try:
+        df = pd.read_sql("""SELECT l.game_id, l.player_id, l.stat, l.line, l.p_over, l.model_id, g.pts, g.reb, g.ast FROM prediction_log l
+                            JOIN player_games g ON g.game_id=l.game_id AND g.player_id=l.player_id""", con)
+    except Exception:
+        return dict(status="waiting", kind="published", models={})
+    df["model_id"] = df.model_id.fillna("unknown")
+    return dict(status="ok", kind="published", models={mid: dict(_published_one(d, min_games, boots, seed), model_id=mid) for mid, d in df.groupby("model_id")})
 
 def _finite(x): return isinstance(x, (int, float)) and np.isfinite(x)
 
@@ -351,12 +364,16 @@ def save(preds):
     for gid, payload in con.execute("SELECT game_id, payload FROM projections").fetchall():
         if json.loads(payload)["start"] < cutoff: con.execute("DELETE FROM projections WHERE game_id=?", (gid,))
     con.executemany("DELETE FROM projections WHERE game_id=?", [(g,) for g in {x["game_id"] for x in preds}])
-    con.execute("CREATE TABLE IF NOT EXISTS prediction_log(game_id TEXT, player_id TEXT, stat TEXT, line REAL, p_over REAL, model_id TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id, stat, line))")
+    ensure_prediction_log(con)
+    nowz = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     for p in preds:
         con.execute("INSERT OR REPLACE INTO projections VALUES(?,?,?,?)", (p["game_id"], p["player_id"], json.dumps(p), now))
-        # permanent record of what we published before tip-off (replaced only until the game starts, never edited afterwards)
-        con.executemany("INSERT OR REPLACE INTO prediction_log VALUES(?,?,?,?,?,?,?)",
-                        [(p["game_id"], p["player_id"], st, l["line"], l["p_over"], p.get("model_id"), now) for st, ls in p["ladders"].items() for l in ls])
+        if p["start"] <= nowz: continue                       # never log a prediction for a game that has begun
+        # permanent record of what we published before tip-off: updated only until the game starts (the database itself refuses later edits)
+        con.executemany("""INSERT INTO prediction_log(game_id,player_id,stat,line,p_over,model_id,made_at,start) VALUES(?,?,?,?,?,?,?,?)
+                           ON CONFLICT(game_id,player_id,stat,line) DO UPDATE SET p_over=excluded.p_over, model_id=excluded.model_id, made_at=excluded.made_at
+                           WHERE prediction_log.start > ?""",
+                        [(p["game_id"], p["player_id"], st, l["line"], l["p_over"], p.get("model_id"), now, p["start"], nowz) for st, ls in p["ladders"].items() for l in ls])
     con.execute("CREATE TABLE IF NOT EXISTS game_preds(game_id TEXT PRIMARY KEY, payload TEXT, made_at TEXT)")
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%MZ")
     for gid, payload in con.execute("SELECT game_id, payload FROM game_preds").fetchall():

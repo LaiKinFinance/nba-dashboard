@@ -107,11 +107,12 @@ def store_served_check():
         last = c.execute("SELECT max(checked_at) FROM model_checks").fetchone()[0]
         if last and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last)).total_seconds() < 20 * 3600: return
     out = run_quietly("import json, predict; print(json.dumps([predict.served_check(), predict.published_check()], default=float))", timeout=1800)
-    results = json.loads(out.strip().splitlines()[-1])
-    mid = (_safe(lambda: predict.load_models(strict=False)) or {}).get("model_id")
+    served, published = json.loads(out.strip().splitlines()[-1])
+    # one stored record per model version, so a version's results can never be read as another version's
+    results = [served] + [dict(r, kind="published") for r in (published.get("models") or {}).values()]
     with closing(con()) as c:
         now = dt.datetime.now(dt.timezone.utc).isoformat()
-        for r in results: c.execute("INSERT INTO model_checks VALUES(?,?)", (now, json.dumps(dict(r, model_id=r.get("model_id") or mid))))
+        for r in results: c.execute("INSERT INTO model_checks VALUES(?,?)", (now, json.dumps(r)))
         c.commit()
 
 def backup_db(keep=7):
@@ -216,8 +217,10 @@ def init():
         CREATE TABLE IF NOT EXISTS manual_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, odds REAL, PRIMARY KEY(game_id, player_id, stat, line, side));
         """)
         have = {r[1] for r in c.execute("PRAGMA table_info(pick_log)")}
-        for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL")):
+        for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL"), ("model_id", "TEXT")):
             if col not in have: c.execute(f"ALTER TABLE pick_log ADD COLUMN {col} {typ}")
+        chave = {r[1] for r in c.execute("PRAGMA table_info(combo_log)")}
+        if "model_id" not in chave: c.execute("ALTER TABLE combo_log ADD COLUMN model_id TEXT")
         c.commit()
 init()
 
@@ -529,27 +532,30 @@ ET = ZoneInfo("America/New_York")
 def et_day(start_iso):
     return dt.datetime.fromisoformat(start_iso.replace("Z", "+00:00")).astimezone(ET).date().isoformat()
 
+def _current_model_id():
+    return _safe(lambda: predict.load_models(strict=False).get("model_id"))
+
 def log_picks(best=None, value=None):
     """Lock today's published picks into the track record the first time they are generated (never edited afterwards, only graded)."""
     now = dt.datetime.now(dt.timezone.utc); now_s = now.strftime("%Y-%m-%dT%H:%MZ")
-    best = best or compute_best(); value = value or compute_value()
+    best = best or compute_best(); value = value or compute_value(); mid = _current_model_id()
     with closing(con()) as c:
         in_combo = {(x["game_id"], x["player_id"], x["stat"]) for x in best["combo"]["legs"]}
         for l in best["legs"]:
             if l["start"] <= now_s: continue   # only picks made before tip-off count
-            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created,model_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (et_day(l["start"]), l["game_id"], l["player_id"], l["player"], l["team"], "leg", l["stat"], l["line"], "over", l["p"], l["hit"], l["n"], l["price"], None,
-                       int((l["game_id"], l["player_id"], l["stat"]) in in_combo), now.isoformat()))
+                       int((l["game_id"], l["player_id"], l["stat"]) in in_combo), now.isoformat(), mid))
         cl = best["combo"]["legs"]
         if cl and best["combo"]["joint"] and min(x["start"] for x in cl) > now_s:
-            c.execute("INSERT OR IGNORE INTO combo_log(day,legs,joint,fair_odds,created) VALUES(?,?,?,?,?)",
+            c.execute("INSERT OR IGNORE INTO combo_log(day,legs,joint,fair_odds,created,model_id) VALUES(?,?,?,?,?,?)",
                       (et_day(min(x["start"] for x in cl)), json.dumps([dict(game_id=x["game_id"], player_id=x["player_id"], player=x["player"], team=x["team"], stat=x["stat"], line=x["line"], p=x["p"]) for x in cl]),
-                       best["combo"]["joint"], best["combo"]["fair_odds"], now.isoformat()))
+                       best["combo"]["joint"], best["combo"]["fair_odds"], now.isoformat(), mid))
         for o in value["picks"]:
             if o["start"] <= now_s: continue
-            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created,model_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (et_day(o["start"]), o["game_id"], o.get("player_id", ""), o.get("player") or o.get("text"), o.get("team", ""), "value", o["stat"], o["line"], o["side"], o["p"],
-                       o.get("hit"), o.get("n"), o["price"], o.get("book"), 0, now.isoformat()))
+                       o.get("hit"), o.get("n"), o["price"], o.get("book"), 0, now.isoformat(), mid))
         c.commit()
 
 def record_closing_prices(c):
@@ -602,8 +608,11 @@ def track_record(x_code: str = Header("")):
         g = [r for r in rows if r["result"] in ("won", "lost")]
         return dict(n=len(g), won=sum(1 for r in g if r["result"] == "won"), avg_p=(sum(r["model_p"] for r in g) / len(g)) if g else None,
                     pending=sum(1 for r in rows if r["result"] is None), void=sum(1 for r in rows if r["result"] == "void"))
+    cur = _current_model_id()
+    older = [r for r in legs if r.get("model_id") != cur]; legs = [r for r in legs if r.get("model_id") == cur]; ocombos = [x for x in combos if x.get("model_id") != cur]; combos = [x for x in combos if x.get("model_id") == cur]
     L = [r for r in legs if r["kind"] == "leg"]; V = [r for r in legs if r["kind"] == "value"]
-    out = dict(legs=summ(L), value=summ(V))
+    out = dict(legs=summ(L), value=summ(V), model_id=cur,
+               earlier_versions=dict(legs=summ([r for r in older if r["kind"] == "leg"]), value=summ([r for r in older if r["kind"] == "value"]), combos=dict(n=sum(1 for x in ocombos if x["result"] in ("won", "lost")))))
     bins = []
     for lo, hi in ((0.0, 0.7), (0.7, 0.8), (0.8, 1.01)):
         g = [r for r in L if r["result"] in ("won", "lost") and lo <= r["model_p"] < hi]
