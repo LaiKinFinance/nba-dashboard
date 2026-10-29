@@ -18,7 +18,7 @@ Not included: a fix for points chances being too confident (points VALUE and "sa
 ## Release steps (Claude does these; Mark approves each stage)
 1. Put the 13 steps on the website in one go (one publish).
 2. Open `https://nba-dashboard.fly.dev/api/health`. For the first 10–20 minutes it will say **problem** because the model is being retrained (expected). The Games tab shows "predictions are being updated".
-3. After about 15 minutes it should say **ok**. Rehearsal (copy of today's data, old model): see the figures below.
+3. After about 15 minutes it should say **ok**. Rehearsal on a copy of today's data and the old model with the final code: the whole update took **120 seconds** here, every step finished "ok" (repair, download of 5 missing games, retraining, projections, grading, checks, backup), the points correction was accepted. Training alone: **50 seconds on one core, peak memory 284 MB** (this environment, not Fly).
 4. Check the Games, Best, Value, Lineups and Live tabs, a saved pick and the bet slip on a phone.
 5. For a week: look at the health page each morning (Melbourne time).
 
@@ -34,7 +34,7 @@ Not included: a fix for points chances being too confident (points VALUE and "sa
 - **Fly or GitHub outage during release:** nothing changes on the website until the publish succeeds (this happened earlier today; retry later).
 
 ## Known risks I cannot remove
-- Training needs memory on a 1 GB machine; the rehearsal figures below are from this environment, not from Fly.
+- Training used about 284 MB at peak here (Fly's machine has 1 GB), but Fly's shared processor may be several times slower than this environment.
 - Prices are fetched at most every 10 hours (credit limits), so VALUE will often be switched off for old prices.
 - Points chances remain too confident; first weeks of a season are worst.
 - No profit is proven. The Track record tab needs weeks of saved prices and results before it means anything.
