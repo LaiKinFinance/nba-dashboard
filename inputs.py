@@ -1,7 +1,7 @@
 """Bounded request data for saved picks, bets and probability calculations."""
 from typing import Literal
 
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, Field, FiniteFloat, model_validator
 
 
 class Leg(BaseModel):
@@ -14,6 +14,22 @@ class Leg(BaseModel):
     lo: int | None = Field(default=None, ge=1, le=1000)
     hi: int | None = Field(default=None, ge=1, le=1000)
     text: str = Field(default='', max_length=200)
+
+    @model_validator(mode='after')
+    def market_fields(self):
+        player = self.stat not in ('ml', 'spread', 'total', 'tt', 'band')
+        allowed = ('over', 'under') if player or self.stat in ('total', 'tt') else ('home', 'away')
+        if self.side not in allowed:
+            raise ValueError('Side does not match this market')
+        if player and not self.player_id:
+            raise ValueError('Player market requires a player')
+        if self.stat in ('tt', 'band') and self.team is None:
+            raise ValueError('This market requires a team')
+        if self.stat == 'band' and (self.lo is None or (self.hi is not None and self.hi < self.lo)):
+            raise ValueError('Margin band requires valid bounds')
+        if self.stat != 'spread' and self.line < 0:
+            raise ValueError('Line must be nonnegative')
+        return self
 
 
 class ParlayInput(BaseModel):

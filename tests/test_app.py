@@ -49,4 +49,13 @@ def test_numeric_inputs_are_finite():
     from pydantic import ValidationError
     from inputs import BetInput
     with pytest.raises(ValidationError):
-        BetInput(legs=[dict(game_id='g', stat='pts')], odds=2, stake=float('inf'))
+        BetInput(legs=[dict(game_id='g', player_id='p', stat='pts')], odds=2, stake=float('inf'))
+
+
+@pytest.mark.parametrize('leg', [dict(game_id='g', stat='pts'), dict(game_id='g', stat='ml', side='over'),
+                                dict(game_id='g', stat='tt', line=110.5), dict(game_id='g', stat='band', side='home', team='home', lo=10, hi=5)])
+def test_incomplete_or_inconsistent_markets_are_validation_errors(leg):
+    from pydantic import ValidationError
+    from inputs import Leg
+    with pytest.raises(ValidationError):
+        Leg(**leg)
