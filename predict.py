@@ -128,6 +128,19 @@ def with_without(real, team, pid, apid):
     def agg(x): return dict(n=int(len(x)), pts=float(x.pts.mean()), reb=float(x.reb.mean()), ast=float(x.ast.mean()), min=float(x["min"].mean())) if len(x) else None
     return agg(mine[has]), agg(mine[without])
 
+def attach_current_team(raw, cur):
+    """Add each player's current team. EVERY historical game is kept (training saw them all); the current roster only decides who may
+    be picked as a top-3 player, so players who have since left still count in team history."""
+    return raw.merge(cur, on="player_id", how="left")
+
+def apply_scheduled_rest(feats):
+    """A player's second upcoming game counts rest from his first upcoming game (not from his last played one)."""
+    feats = feats.sort_values(["player_id", "date", "game_id"]).reset_index(drop=True)
+    prev = feats.groupby("player_id").date.shift(1); later = prev.notna()
+    feats.loc[later, "rest"] = (pd.to_datetime(feats.date[later]) - pd.to_datetime(prev[later])).dt.days.clip(upper=10)
+    feats["b2b"] = (feats.rest == 1).astype(int)
+    return feats
+
 def current_teams():
     """player_id -> team from the stored ESPN rosters (repair.refresh_rosters); None if the table is missing or looks incomplete."""
     try:
@@ -144,7 +157,7 @@ def project(days=2):
     cur = current_teams()
     if cur is None:                                       # no roster feed yet: fall back to the team he last played for
         cur = raw.sort_values("date").groupby("player_id").tail(1)[["player_id", "team"]].rename(columns={"team": "cur_team"})
-    raw = raw.merge(cur, on="player_id")                  # players on no current roster drop out (waived, retired, overseas)
+    raw = attach_current_team(raw, cur)
     real = raw.drop(columns=["cur_team"])
     af, state = absence.track(real)
     recent = {t: af.xs(t, level="team").tail(10).mean() for t in set(af.index.get_level_values("team"))}
@@ -182,11 +195,7 @@ def project(days=2):
     for w in sorted(ph.wave.unique()):
         f = build(pd.concat([base, ph[ph.wave == w].drop(columns="wave")], ignore_index=True))
         parts.append(f[f._upcoming == 1])
-    feats = pd.concat(parts, ignore_index=True)
-    feats = feats.sort_values(["player_id", "date", "game_id"]).reset_index(drop=True)
-    prev = feats.groupby("player_id").date.shift(1); later = prev.notna()     # rest before his 2nd game counts from his 1st upcoming game
-    feats.loc[later, "rest"] = (pd.to_datetime(feats.date[later]) - pd.to_datetime(prev[later])).dt.days.clip(upper=10)
-    feats["b2b"] = (feats.rest == 1).astype(int)
+    feats = apply_scheduled_rest(pd.concat(parts, ignore_index=True))
     out = []
     for (_, f), mt in zip(feats.sort_values(["game_id", "team"]).iterrows(), sorted(meta, key=lambda x: (x["game"]["game_id"], 0)), ) if False else []:
         pass
