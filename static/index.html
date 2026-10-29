@@ -307,9 +307,9 @@ function topHTML(g){const x=_mx(g);if(!x)return'<p class="mute" style="margin:6p
   const win=(side,t,p)=>tbtn(id,"ml",side,0,{label:`${nm(t)} to win`,nolabel:true,prob:p,price:bh[side]&&bh[side][0],book:bh[side]&&bh[side][1],alt:ah[side],edge:ed(p,bh[side]),text:`${nm(t)} to win`});
   const hd=mbg(id,"hand"),to=mbg(id,"tot");
   const hs=(hd=="home"?m.handicaps:[...m.handicaps].reverse()).map(l=>{const home=hd=="home",tm=home?H:A,ln=home?l.line:-l.line,p=home?l.p_home:l.p_away,pr=home?l.price_home:l.price_away,al=home?l.alt_home:l.alt_away;
-    return tbtn(id,"spread",hd,l.line,{label:`${nm(tm)} ${sgn(ln)}`,prob:p,price:pr,book:l.book,alt:al,edge:pr?p-1/pr:null,text:`${nm(tm)} ${sgn(ln)}`})}).join("");
+    return tbtn(id,"spread",hd,l.line,{label:`${nm(tm)} ${sgn(ln)}`,prob:p,price:pr,book:home?l.book_home:l.book_away,alt:al,edge:pr?p-1/pr:null,text:`${nm(tm)} ${sgn(ln)}`})}).join("");
   const ts=m.totals.map(l=>{const o=to=="over",p=o?l.p_over:l.p_under,pr=o?l.price_over:l.price_under,al=o?l.alt_over:l.alt_under;
-    return tbtn(id,"total",to,l.line,{label:`${o?"Over":"Under"} ${l.line}`,prob:p,price:pr,book:l.book,alt:al,edge:pr?p-1/pr:null,text:`${o?"Over":"Under"} ${l.line} total points`})}).join("");
+    return tbtn(id,"total",to,l.line,{label:`${o?"Over":"Under"} ${l.line}`,prob:p,price:pr,book:o?l.book_over:l.book_under,alt:al,edge:pr?p-1/pr:null,text:`${o?"Over":"Under"} ${l.line} total points`})}).join("");
   return `<div class="sumln" style="margin:0 0 6px">Expected score${m.source=="market"?" (from the betting market)":" (our model)"}: <b>${nm(A)} ${m.away_pts.toFixed(0)}</b> – <b>${nm(H)} ${m.home_pts.toFixed(0)}</b> · total <b>${m.total.toFixed(0)}</b> · ${m.margin>0?nm(H):nm(A)} by <b>${Math.abs(m.margin).toFixed(0)}</b></div>
    <div class="sbt">Match Betting</div><div class="wn big"><div class="wc">${formBadges(g,A)}<div class="wl">${nm(A)}</div>${win("away",A,m.p_away)}</div><div class="wc">${formBadges(g,H)}<div class="wl">${nm(H)}</div>${win("home",H,m.p_home)}</div></div>
    <div class="mhd"><div class="sbt" style="margin:0">Handicap Betting</div>${segc(id,"hand",[["away",nm(A)],["home",nm(H)]])}</div>${stripH(hs)}
