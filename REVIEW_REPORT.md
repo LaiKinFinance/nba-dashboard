@@ -125,4 +125,6 @@ Known effect of item 8: those four games are missing from model training (no pla
 
 ## 13. Fingerprints and tests
 - `data/nba.db` `1a2fa6`, `data/models.pkl` `7336f8` on every branch (same as `main`).
-- Final stack `review/27-final-candidate`: see the figure in the summary message; the repaired-data check ran separately on a repaired copy.
+- Final stack `review/27-final-candidate`: **271 passed, 1 skipped** with automatic refresh off before imports and every test on a private copy of the data. The skipped repaired-data check was run separately on a repaired copy and **passed**. Full update rehearsal from a frozen copy of the final code: 189 s, every step ok, health ok.
+- One rehearsal run gave a false alarm ("model out of date") because I switched code versions in the working folder while it was running; it was repeated from a frozen copy and passed.
+- Not verified: speed and memory on Fly's machine; real Odds API behaviour (no key here); phones; whether Fly keeps daily volume snapshots.

@@ -50,8 +50,8 @@ Not included: any fix that makes points chances accurate. Points VALUE labels, "
 - Fly outages. Earlier today the publish step failed several times because Fly's own servers returned errors; nothing changed on the website until it succeeded. If that happens, wait and retry.
 
 ## What was tested (copies only, nothing live)
-- Full test suite on the final set: see the summary message (the figure is repeated in `REVIEW_REPORT.md` section 13).
-- Full update rehearsal from today's bundled data and old model with the final code: REHEARSAL_PLACEHOLDER
+- Full test suite on the final set: **271 passed, 1 skipped**. The skipped check needs a repaired copy of the data; it was run separately on one and **passed**.
+- Full update rehearsal from today's bundled data and old model with the final code: the whole update took **189 seconds** here and every step finished "ok" (repair, weekly check of every finished game, download of 9 missing games, retraining, projections, grading, marking of bets, checks, backup). The health page ended at **ok**, and listed the four finished playoff games that ESPN has no box score for. (A first attempt looked wrong only because I switched code versions while it was running; the repeat was run from a frozen copy.)
 - Backup download needs the right code, is switched off when no code is set, and is limited to one download per 30 seconds (tests). The backup page never stores the code.
 - Data recovery and code rollback rehearsals: above.
 
