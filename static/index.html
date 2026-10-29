@@ -498,9 +498,9 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
 /* ---------- live scores ---------- */
 let LG=[],boxes={},openLive=new Set(),fullStats=false,myOpen=[],liveTimer=null,showAll=new Set();
 const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g.state=="post"?g.detail:timeOf(g.start);
-function catCount(r){return(r.pts>=10)+(r.reb>=10)+(r.ast>=10)}
+function catCount(r){return["pts","reb","ast","stl","blk"].reduce((n,k)=>n+((r[k]||0)>=10?1:0),0)}   // official rule: any five categories
 function tag(r){const c=catCount(r);if(c>=3)return'<span class="ch2 td">TD</span>';
-  if(c==2&&[r.pts,r.reb,r.ast].some(v=>v>=7&&v<10))return'<span class="ch2 w">TD WATCH</span>';if(c==2)return'<span class="ch2 dd">DD</span>';return""}
+  if(c==2&&[r.pts,r.reb,r.ast,r.stl||0,r.blk||0].some(v=>v>=7&&v<10))return'<span class="ch2 w">TD WATCH</span>';if(c==2)return'<span class="ch2 dd">DD</span>';return""}
 function lineScore(g){if(g.state=="pre")return"";const n=Math.max(4,g.home.lines.length,g.away.lines.length),lab=i=>i<4?String(i+1):(i==4?"OT":(i-3)+"OT");
   const row=(t,o)=>`<tr><td><img src="${logo(t.team)}" alt="" style="width:18px;height:18px;vertical-align:middle;margin-right:6px">${t.team}</td>${Array.from({length:n},(_,i)=>{const v=t.lines[i],ov=o.lines[i];return `<td class="${v!=null&&ov!=null&&v>ov?"qw":""}">${v==null?"–":v}</td>`}).join("")}<td><b>${t.score}</b></td></tr>`;
   return `<div style="overflow-x:auto"><table class="bx ls2"><tr><th></th>${Array.from({length:n},(_,i)=>`<th>${lab(i)}</th>`).join("")}<th>T</th></tr>${row(g.away,g.home)}${row(g.home,g.away)}</table></div>`}
@@ -524,23 +524,29 @@ function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=esc(l.text||"
   else if(l.stat=="tt"){const pts=l.team=="home"?g.home.score:g.away.score;hit=l.side=="over"?pts>l.line:pts<l.line;txt=`${pts} points so far (line ${Number(l.line)})`;frac=l.side=="over"?pts/l.line:1-(pts-l.line*.5)/(l.line*.5)}
   else if(l.stat=="band"){const m=l.team=="home"?hm:-hm;hit=m>=l.lo&&(l.hi==null||m<=l.hi);txt=m>0?`Leading by ${m}`:m<0?`Trailing by ${-m}`:"Tied";frac=hit?1:.15}
   else{hit=l.side=="over"?tot>l.line:tot<l.line;txt=`${tot} points so far (line ${Number(l.line)})`;frac=l.side=="over"?tot/l.line:1-(tot-l.line*.5)/(l.line*.5)}
-  const done=g.state=="post",v=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
-  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${v}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${Math.max(2,Math.min(100,frac*100))}%"></i></div></div>`}
+  const lv=Number(l.line),whole=Number.isInteger(lv)&&["spread","total","tt"].includes(l.stat);
+  const level=whole&&(l.stat=="spread"?(((l.side=="home"?hm:-hm)+(l.side=="home"?lv:-lv))===0):l.stat=="tt"?((l.team=="home"?g.home.score:g.away.score)===lv):(tot===lv));
+  const done=g.state=="post",v=done?(level?' <b>↩ Refunded</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${level?" – exactly on the line: refunded if it stays here":""}${v}</span></div><div class="pbar ${hit&&!level?"hit":""}"><i style="width:${Math.max(2,Math.min(100,frac*100))}%"></i></div></div>`}
 // BEGIN playerLegProgress: pure display calculation, tested without a browser.
 function playerLegProgress(l,r){
-  let cur,tgt,hit,txt;const under=l.side=="under";
+  let cur,tgt,hit,txt,refund=false;const under=l.side=="under";
   if(l.stat=="dd"||l.stat=="td"){
     tgt=l.stat=="dd"?2:3;cur=catCount(r);hit=under?cur<tgt:cur>=tgt;
-    txt=`${cur} of ${tgt} categories at 10+ (PTS ${r.pts}, REB ${r.reb}, AST ${r.ast})`;
+    const cats=`PTS ${r.pts}, REB ${r.reb}, AST ${r.ast}, STL ${r.stl||0}, BLK ${r.blk||0}`;
+    txt=under?(hit?`${cur} of ${tgt} categories at 10+ so far – must stay below (${cats})`:`${cur} categories at 10+ – already reached ${tgt}, this bet has lost (${cats})`)
+             :`${cur} of ${tgt} categories at 10+ (${cats})`;
   }else{
     const parts={pra:["pts","reb","ast"],pr:["pts","reb"],pa:["pts","ast"]}[l.stat]||[l.stat],line=Number(l.line);
     if(!Number.isFinite(line)||parts.some(k=>!Number.isFinite(r[k])))return null;
-    cur=parts.reduce((sum,k)=>sum+r[k],0);tgt=under?Math.ceil(line)-1:Math.floor(line)+1;hit=under?cur<line:cur>line;
-    txt=under?`${cur} ${statName[l.stat]} – ${hit?"below the line so far":"at or above the line"}`:
-      hit?`${cur} ${statName[l.stat]} – cleared`:`${cur} ${statName[l.stat]} – needs ${tgt-cur} more`;
+    const nm=statName[l.stat]||l.stat;cur=parts.reduce((sum,k)=>sum+r[k],0);tgt=under?Math.ceil(line)-1:Math.floor(line)+1;
+    hit=under?cur<line:cur>line;refund=Number.isInteger(line)&&cur===line;
+    if(refund)txt=`${cur} ${nm} – exactly on the line: the stake is refunded if it stays here`;
+    else if(under)txt=hit?`${cur} ${nm} – under the line so far; it must stay under`:`${cur} ${nm} – already over the line, this under has lost`;
+    else txt=hit?`${cur} ${nm} – cleared`:`${cur} ${nm} – needs ${tgt-cur} more`;
   }
   const progress=under?(tgt-cur)/Math.max(1,tgt):cur/Math.max(1,tgt);
-  return{cur,tgt,hit,txt,percent:Math.max(0,Math.min(100,progress*100))};
+  return{cur,tgt,hit,refund,txt,percent:Math.max(0,Math.min(100,progress*100))};
 }
 // END playerLegProgress
 function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
@@ -548,8 +554,8 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
   if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
   if(!r)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
   const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog"><b>${name}</b> <span class="mute">Stats are temporarily unavailable</span></div>`;
-  const {hit,txt,percent}=progress;
-  const done=g.state=="post",verdict=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
+  const {hit,txt,percent,refund}=progress;
+  const done=g.state=="post",verdict=done?(refund?' <b>↩ Refunded</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
 function myHTML(){const blocks=[];
   if(legs.length)blocks.push(`<div class="card"><h2>Your bet slip</h2>${legs.map(legProg).join("")}</div>`);
