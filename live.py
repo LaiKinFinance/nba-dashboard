@@ -1,5 +1,6 @@
 """Live scores and box scores from ESPN's public JSON, with a short server-side cache so many viewers cost few requests."""
 import time, datetime as dt
+from zoneinfo import ZoneInfo
 import requests
 
 H = {"User-Agent": "Mozilla/5.0"}
@@ -22,7 +23,7 @@ def cached(key, ttl, fn):
     val = fn(); _cache[key] = (time.time(), val); return val
 
 def _et_dates():
-    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=-5)))
+    now = dt.datetime.now(ZoneInfo('America/New_York'))
     return [(now + dt.timedelta(days=d)).strftime("%Y%m%d") for d in (-1, 0)]
 
 def _scoreboard():

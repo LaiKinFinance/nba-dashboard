@@ -1,5 +1,6 @@
 """Upcoming games (ESPN), starting lineups + may-not-play lists (Rotowire), injuries (ESPN)."""
 import datetime as dt, re
+from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
@@ -12,7 +13,7 @@ ALIAS = {"NYK": "NY", "SAS": "SA", "GSW": "GS", "NOP": "NO", "WAS": "WSH", "UTA"
 
 def upcoming(days=2):
     """Scheduled (not started) games for the next `days` calendar days (US Eastern dates, as ESPN keys them)."""
-    out, today = [], dt.datetime.now(dt.timezone(dt.timedelta(hours=-5))).date()
+    out, today = [], dt.datetime.now(ZoneInfo('America/New_York')).date()
     for i in range(days):
         d = today + dt.timedelta(days=i)
         js = requests.get(SB, params={"dates": d.strftime("%Y%m%d")}, headers=H, timeout=30).json()
