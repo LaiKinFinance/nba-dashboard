@@ -17,8 +17,10 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Create app and volume if missing
         run: |
-          flyctl apps list | grep -q "^$APP " || flyctl apps create "$APP"
-          flyctl volumes list -a "$APP" | grep -q nba_data || flyctl volumes create nba_data --size 1 --region syd -a "$APP" -y
+          apps=$(flyctl apps list || true)
+          if ! grep -qw "$APP" <<< "$apps"; then flyctl apps create "$APP"; fi
+          vols=$(flyctl volumes list -a "$APP" || true)
+          if ! grep -qw nba_data <<< "$vols"; then flyctl volumes create nba_data --size 1 --region syd -a "$APP" -y; fi
       - name: Set secrets
         env:
           APP_ACCESS_CODE: ${{ secrets.APP_ACCESS_CODE }}
