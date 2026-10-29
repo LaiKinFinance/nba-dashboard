@@ -135,8 +135,7 @@ def project(days=2):
     if not rows: return []
     ph = pd.DataFrame(rows)
     base = raw.drop(columns=["cur_team"]).assign(_upcoming=0)
-    feats = build(pd.concat([base, ph], ignore_index=True))  # placeholder rows only read earlier games
-    feats = feats[feats._upcoming == 1] if "_upcoming" in feats else feats
+    feats = upcoming_features(base, ph)
     out = []
     for (_, f), mt in zip(feats.sort_values(["game_id", "team"]).iterrows(), sorted(meta, key=lambda x: (x["game"]["game_id"], 0)), ) if False else []:
         pass
@@ -183,6 +182,15 @@ def project(days=2):
             rec["ladders"][t] = [dict(line=float(l), p_over=float(nb_over(mu, alphas[t], l))) for l in lines]
         out.append(rec)
     return out
+
+def upcoming_features(history, placeholders):
+    """Each game's features see completed history, never another future game's zeros."""
+    frames = []
+    for _, game in placeholders.groupby("game_id", sort=False):
+        frame = build(pd.concat([history, game], ignore_index=True))
+        frames.append(frame[frame._upcoming == 1])
+    return pd.concat(frames, ignore_index=True)
+
 
 def save(preds):
     con = sqlite3.connect(DB)
