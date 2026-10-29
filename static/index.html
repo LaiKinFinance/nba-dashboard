@@ -159,7 +159,7 @@ table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk 
 <header><div class="hw">
   <div class="brand" style="display:flex;align-items:center;gap:9px"><img src="/icon-v2-192.png" alt="" style="width:30px;height:30px;border-radius:7px">NBA <b>TOP-3</b></div>
   <nav id="nav"></nav>
-  <div class="who"><button id="thm" onclick="toggleTheme()" title="Switch light / dark theme"></button><button class="inst" id="inst" style="display:none" onclick="installApp()">Install app</button><span id="meta"></span><span id="me"></span><button onclick="showLogin()">change</button></div>
+  <div class="who"><button id="thm" onclick="toggleTheme()" title="Switch light / dark theme"></button><button class="inst" id="inst" style="display:none" onclick="installApp()">Install app</button><span id="me"></span><button onclick="showLogin()">change</button></div>
 </div></header>
 <div class="wrap" id="wrap"><main id="app"></main><aside id="slipwrap"></aside></div>
 <div id="modal"></div>
@@ -230,6 +230,7 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
   const mine=alerts.filter(a=>legs.some(l=>l.player_id==a.pid));
   w.innerHTML=`<div class="slip ${slipMin?"min":""}"><h2 onclick="slipMin=!slipMin;drawSlip()"><span>Bet slip <span class="badge">${legs.length}</span></span><span class="mute" style="font-weight:400">${r&&legs.length?pct(r.joint)+" win chance · "+(slipMin?"tap to open":"tap to close"):""}</span></h2><div class="sb">
   ${mine.map(a=>`<div class="alert"><span>⚠ ${esc(a.msg)}</span><a onclick="alerts=alerts.filter(x=>x!==alerts[${alerts.indexOf(a)}]);drawSlip()">dismiss</a></div>`).join("")}
+  ${legs.length>1?`<div style="text-align:right;margin:2px 0 6px"><button class="btn" onclick="clearSlip()">Clear bet slip</button></div>`:""}
   ${legs.length?legs.map((l,i)=>`<div class="lg"><div>${esc(l.text)}<small>${legDesc(l)}${l.price?` · ${l.price.toFixed(2)} ${bkName(l.book)}`:""}${r&&r.legs[i]?` · model ${pct(r.legs[i].p)}`:""}</small></div><a onclick="legs.splice(${i},1);calc=null;paintSel();drawSlip();recalc()">×</a></div>`).join(""):'<p class="mute">Tap any price to add a leg. Aim for 2–3 legs.</p>'}
   ${legs.length?`<div style="margin:10px 0"><div class="mute">Chance all legs win</div><div class="big">${r?pct(r.joint):"…"}</div>
    <div class="kv"><span class="mute">Fair odds</span><b>${r&&r.fair_odds?r.fair_odds.toFixed(2):"–"}</b></div>
@@ -242,6 +243,7 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
    <p class="mute" style="margin:8px 0 0">Model edges are small. Log bets to see how it really performs.</p>`:""}
   </div></div>`;
   if(fid&&$("#"+fid)){const el=$("#"+fid);el.focus();try{el.setSelectionRange(el.value.length,el.value.length)}catch(x){}}}
+function clearSlip(){legs=[];calc=null;oddsManual=false;paintSel();drawSlip()}
 const legsPayload=()=>legs.map(l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:l.side,team:l.team,lo:l.lo,hi:l.hi,text:l.text}));
 async function share(){if(!needName()||!calc)return;await post("picks",{legs:legsPayload(),note:$("#note").value,odds:calc.o,model_prob:calc.r.joint});legs=[];calc=null;go("picks")}
 async function logBet(){if(!needName())return;const s=parseFloat($("#stake").value);if(!s||!calc||!calc.o){alert("Enter the odds and your stake first");return}
@@ -576,7 +578,7 @@ if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this 
 
 (async()=>{paintTheme();$("#me").textContent=localStorage.user||"";nav();
   if(!localStorage.user){showLogin()}
-  try{meta=await api("meta");$("#meta").textContent=`Data to ${meta.data_through}`}catch(e){}
+  try{meta=await api("meta")}catch(e){}
   render()})();
 </script>
 </body>
