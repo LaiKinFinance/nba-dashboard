@@ -1,6 +1,6 @@
 // Network-first so deploys show up immediately; the cached shell is only a fallback when offline.
-const CACHE = "nba-top3-shell-v1";
-self.addEventListener("install", e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/", "/icon-192.png"]))); });
+const CACHE = "nba-top3-shell-v2";
+self.addEventListener("install", e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/", "/icon-v2-192.png"]))); });
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", e => {
   const u = new URL(e.request.url);
