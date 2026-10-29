@@ -172,6 +172,21 @@ def enriched():
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
     return preds
 
+def _results_table():
+    with closing(con()) as c:
+        return pd.read_sql("SELECT date, home, away, home_pts, away_pts FROM games ORDER BY date, game_id", c)
+
+def _insight(h, home, away, date):
+    """Recent form (last 5 results per team, oldest first) and the last head-to-head meetings, from completed games before `date`."""
+    h = h[h.date < date]
+    def form(t):
+        x = h[(h.home == t) | (h.away == t)].tail(5)
+        return [dict(r="W" if (r.home_pts > r.away_pts) == (r.home == t) else "L", opp=(r.away if r.home == t else r.home), date=r.date,
+                     score=f"{int(r.home_pts)}-{int(r.away_pts)}") for r in x.itertuples()]
+    m = h[((h.home == home) & (h.away == away)) | ((h.home == away) & (h.away == home))].tail(5).iloc[::-1]
+    return dict(form={home: form(home), away: form(away)},
+                h2h=[dict(date=r.date, home=r.home, away=r.away, home_pts=int(r.home_pts), away_pts=int(r.away_pts)) for r in m.itertuples()])
+
 def game_preds():
     with closing(con()) as c:
         try: return {r["game_id"]: json.loads(r["payload"]) for r in c.execute("SELECT game_id, payload FROM game_preds")}
@@ -214,10 +229,11 @@ def stats_norm_cdf(x):
 def get_slate(x_code: str = Header("")):
     check(x_code)
     import odds
-    games = {}; gp = game_preds(); with_c = closing(con())
+    games = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
     with with_c as c: bl = odds.load_lines(c)
     for p in enriched():
-        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]))))
+        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"])),
+                                                insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"])))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
 

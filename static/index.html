@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NBA Dashboard</title>
-<meta name="theme-color" content="#0e2452">
+<meta name="theme-color" content="#0a66b3" id="tc">
+<script>try{document.documentElement.dataset.theme=localStorage.theme||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/logo-v2.svg">
 <link rel="icon" type="image/png" href="/icon-v2-192.png">
@@ -13,29 +14,34 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="NBA Dashboard">
 <style>
-:root{--bg:#0a111d;--bg2:#0f1828;--card:#142034;--card2:#1a2a43;--line:#25365a;--ink:#eef3fb;--mute:#8fa1bf;--acc:#2f80ff;--gold:#ffc83d;--good:#20c27a;--bad:#ff5b5b;--btn:#1d2f4f;--btnh:#27406a}
+:root,[data-theme="light"]{--bg:#e6ebf1;--bg2:#f1f4f8;--card:#fff;--card2:#eef2f7;--line:#d6dfea;--ink:#14233c;--mute:#667a92;--acc:#0a66b3;--gold:#ffd600;--good:#12924b;--bad:#d4252c;--btn:#e4edf7;--btnh:#d2e1f2;--btnb:#c7d7ea;--odd-ink:#0b2a4a;--hdr-bg:#0a66b3;--hdr-mute:#cfe4f8;--day:#0a66b3;
+--c-good-bg:#dcf3e6;--c-good-fg:#0d7a3d;--c-warn-bg:#fff0c9;--c-warn-fg:#8a5a00;--c-bad-bg:#fde3e3;--c-bad-fg:#b3151b;--c-pur-bg:#ece3ff;--c-pur-fg:#5b2fb5;--c-gold-bg:#fff3c4;--c-gold-fg:#7a5a00;
+--best-bg:#e8f6ee;--best-line:#b9dfc8;--val-bg:#eaf7ef;--val-line:#b9dfc8;--edge-g-bg:#e0f5e9;--edge-g-line:#9ad6b4;--edge-b-bg:#fde8e8;--edge-b-line:#efb3b3;--alt-bg:#dbeafe;--alt-fg:#164d8a;--sc-w:#14233c;--shadow:0 1px 3px rgba(20,35,60,.10)}
+[data-theme="dark"]{--bg:#0a111d;--bg2:#0f1828;--card:#142034;--card2:#1a2a43;--line:#25365a;--ink:#eef3fb;--mute:#8fa1bf;--acc:#2f80ff;--gold:#ffc83d;--good:#20c27a;--bad:#ff5b5b;--btn:#1d2f4f;--btnh:#27406a;--btnb:transparent;--odd-ink:#ffc83d;--hdr-bg:linear-gradient(180deg,#12306b,#0e2452);--hdr-mute:#b8c9ea;--day:#ffc83d;
+--c-good-bg:#123d2e;--c-good-fg:#20c27a;--c-warn-bg:#4a2c10;--c-warn-fg:#ffc83d;--c-bad-bg:#4a1a1a;--c-bad-fg:#ff5b5b;--c-pur-bg:#2d1f4d;--c-pur-fg:#c8a6ff;--c-gold-bg:#4a3a10;--c-gold-fg:#ffc83d;
+--best-bg:#16301f;--best-line:#3a5a2a;--val-bg:#10281d;--val-line:#2f6d4a;--edge-g-bg:#0f3a2a;--edge-g-line:#1d7a55;--edge-b-bg:#3d1a1a;--edge-b-line:#8a3030;--alt-bg:#1f4a7a;--alt-fg:#9fd0ff;--sc-w:#fff;--shadow:none}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:env(safe-area-inset-bottom)}
 button{font:inherit;color:inherit;cursor:pointer}
-header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,#12306b,#0e2452);border-bottom:3px solid var(--gold);padding-top:env(safe-area-inset-top)}
+header{position:sticky;top:0;z-index:20;background:var(--hdr-bg);color:#fff;border-bottom:3px solid var(--gold);padding-top:env(safe-area-inset-top)}
 .hw{max-width:1280px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .brand{font-weight:800;font-size:18px;letter-spacing:.3px}.brand b{color:var(--gold)}
-nav{display:flex;gap:2px;overflow-x:auto}nav button{background:none;border:0;color:#b8c9ea;padding:8px 12px;border-radius:6px;font-weight:600;white-space:nowrap}
+nav{display:flex;gap:2px;overflow-x:auto}nav button{background:none;border:0;color:var(--hdr-mute);padding:8px 12px;border-radius:6px;font-weight:600;white-space:nowrap}
 nav button.on{background:rgba(255,255,255,.14);color:#fff}
-.who{margin-left:auto;font-size:12.5px;color:#b8c9ea;display:flex;gap:8px;align-items:center}.who button{background:none;border:0;color:var(--gold);padding:0 2px}
+.who{margin-left:auto;font-size:12.5px;color:var(--hdr-mute);display:flex;gap:8px;align-items:center}.who button{background:none;border:0;color:var(--gold);padding:0 2px}
 .inst{background:var(--gold);color:#101010;border:0;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12.5px}
 .wrap{max-width:1280px;margin:0 auto;padding:14px 16px 90px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start}
 .wrap.nos{grid-template-columns:minmax(0,1fr)}
 @media(max-width:960px){.wrap{grid-template-columns:minmax(0,1fr)}}
 .mute{color:var(--mute);font-size:13px}.good{color:var(--good)}.bad{color:var(--bad)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow)}
 h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:16px 0 8px}
 .tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
 .tools input,.inp{background:var(--bg2);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:9px 12px;font:inherit;width:100%}
 .tools input{flex:1 1 180px;width:auto;background:var(--card)}
 .pill{background:var(--card);border:1px solid var(--line);border-radius:99px;padding:6px 13px;font-size:13px;color:var(--mute)}.pill.on{background:var(--acc);border-color:var(--acc);color:#fff}
-.day{font-size:12px;color:var(--gold);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin:14px 2px 6px}
-.game{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.day{font-size:12px;color:var(--day);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin:14px 2px 6px}
+.game{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
 .gh{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;width:100%;background:none;border:0;text-align:left}.gh:hover{background:var(--card2)}
 .tm{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 0}.tm.r{justify-content:flex-end;text-align:right}
 .tm img{width:34px;height:34px;object-fit:contain;flex:none}.tm b{font-size:15px;line-height:1.1}.tm small{display:block;color:var(--mute);font-size:11.5px;font-weight:400}
@@ -52,17 +58,17 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .pl{padding:10px 0;border-bottom:1px solid var(--line)}.pl:last-child{border:0}
 .pt{display:flex;gap:10px;align-items:center}.pn{font-weight:700;cursor:pointer}.pn:hover{text-decoration:underline}
 .chip{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:700;margin-left:5px;vertical-align:1px;text-transform:uppercase;letter-spacing:.3px}
-.chip.s{background:#123d2e;color:var(--good)}.chip.i{background:#4a2c10;color:var(--gold)}.chip.q{background:var(--btn);color:var(--mute)}
+.chip.s{background:var(--c-good-bg);color:var(--c-good-fg)}.chip.i{background:var(--c-warn-bg);color:var(--c-warn-fg)}.chip.q{background:var(--btn);color:var(--mute)}
 .proj{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:2px;flex-wrap:wrap}.proj b{color:var(--ink);font-size:13px}
 .mk{display:grid;grid-template-columns:34px repeat(3,1fr);gap:5px;align-items:stretch;margin-top:7px}.mk .lb{font-size:11.5px;font-weight:700;color:var(--mute);align-self:center}
-.od{position:relative;background:var(--btn);border:1px solid transparent;border-radius:6px;padding:4px 2px;text-align:center;line-height:1.15;min-width:0}
+.od{position:relative;background:var(--btn);border:1px solid var(--btnb);border-radius:6px;padding:4px 2px;text-align:center;line-height:1.15;min-width:0}
 .od:hover{background:var(--btnh)}.od.on{background:var(--acc);border-color:#7fb0ff}
 .od .l{font-size:11px;color:var(--mute)}.od.on .l{color:#d8e6ff}
-.od .o{font-weight:800;font-size:14.5px;color:var(--gold)}.od.on .o{color:#fff}
+.od .o{font-weight:800;font-size:14.5px;color:var(--odd-ink)}.od.on .o{color:#fff}
 .od .p{font-size:10.5px;color:var(--mute)}.od.on .p{color:#d8e6ff}.od .p .hg{color:var(--good);font-weight:700}.od .p .hb{color:var(--bad);font-weight:700}.od.on .p .hg,.od.on .p .hb{color:#fff}
-.od.val{border-color:var(--good)}.od .vt{position:absolute;top:-7px;right:4px;background:var(--good);color:#04130c;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}
+.od.val{border-color:var(--good)}.od .vt{position:absolute;top:-7px;right:4px;background:var(--good);color:#fff;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}
 .od .bt,.od .ft{position:absolute;bottom:-7px;left:4px;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}.od .bt{background:#a56bff;color:#fff}.od .ft{background:#ff9a3d;color:#1a0d00}.od.bst{border-color:#a56bff}.od.fad{border-color:#ff9a3d}
-.od .alt{position:absolute;bottom:-7px;right:4px;background:#1f4a7a;color:#9fd0ff;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px}
+.od .alt{position:absolute;bottom:-7px;right:4px;background:var(--alt-bg);color:var(--alt-fg);font-size:9px;font-weight:800;border-radius:3px;padding:0 4px}
 .more>summary{font-size:12px;color:var(--acc);cursor:pointer;margin-top:8px}.seg.mini{margin:2px 0 0}.seg.mini button{padding:4px 8px;font-size:12px;flex:none}
 .mhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 2px}.mhd .mt{margin:0}
 .wn4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:6px}.th.clk{cursor:pointer}.th.clk:hover{background:var(--card2)}.lsum{font-size:12px;color:var(--mute);margin:-2px 0 6px}
@@ -76,15 +82,15 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .lg{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}.lg small{color:var(--mute);display:block}.lg a{color:var(--bad);cursor:pointer;font-size:18px;line-height:1}
 .big{font-size:30px;font-weight:800;line-height:1}.kv{display:flex;justify-content:space-between;font-size:13px;margin:4px 0}
 .btn{background:var(--btn);border:1px solid var(--line);border-radius:7px;padding:7px 12px;font-weight:600}.btn:hover{background:var(--btnh)}
-.btn.p{background:var(--gold);border-color:var(--gold);color:#101010}.btn.g{background:var(--good);border-color:var(--good);color:#04130c}.btn.r{background:#5a2323;border-color:#8a3030}
+.btn.p{background:var(--gold);border-color:var(--gold);color:#101010}.btn.g{background:var(--good);border-color:var(--good);color:#fff}.btn.r{background:var(--c-bad-bg);border-color:var(--c-bad-fg);color:var(--c-bad-fg)}
 .btn.xl{padding:12px 16px;font-size:15px;flex:1}
-.edge{border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px}.edge.g{background:#0f3a2a;border:1px solid #1d7a55}.edge.b{background:#3d1a1a;border:1px solid #8a3030}
-.alert{background:#4a2c10;border:1px solid #9a6a1d;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;gap:8px}.alert a{cursor:pointer;color:var(--gold)}
+.edge{border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px}.edge.g{background:var(--edge-g-bg);border:1px solid var(--edge-g-line)}.edge.b{background:var(--edge-b-bg);border:1px solid var(--edge-b-line)}
+.alert{background:var(--c-warn-bg);border:1px solid var(--c-warn-fg);color:var(--c-warn-fg);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;gap:8px}.alert a{cursor:pointer;color:var(--c-warn-fg);text-decoration:underline}
 @media(max-width:960px){.slip{position:fixed;left:0;right:0;bottom:0;top:auto;border-radius:14px 14px 0 0;z-index:30;max-height:75vh;overflow:auto;padding-bottom:calc(12px + env(safe-area-inset-bottom))}.slip.min .sb{display:none}.slip h2{cursor:pointer;margin:0}}
 .note{background:var(--card2);border-left:3px solid var(--acc);border-radius:6px;padding:8px 10px;font-size:13px;color:var(--mute);margin-bottom:12px}
 .empty{text-align:center;color:var(--mute);padding:26px 10px}
-.best{border-color:#3a5a2a;background:linear-gradient(180deg,#16301f,var(--card) 60%)}
-.bl{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2a4a3a}.bl:last-of-type{border:0}.bl .x{flex:1;min-width:0}.bl b{display:block}
+.best{border-color:var(--best-line);background:linear-gradient(180deg,var(--best-bg),var(--card) 60%)}
+.bl{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--best-line)}.bl:last-of-type{border:0}.bl .x{flex:1;min-width:0}.bl b{display:block}
 .pillrow{display:flex;gap:8px;overflow-x:auto;padding:4px 0}.sl{flex:none;background:var(--btn);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:170px;text-align:left}.sl:hover{background:var(--btnh)}.sl small{display:block;color:var(--mute)}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}.tile .v{font-size:24px;font-weight:800}.tile .k{font-size:12px;color:var(--mute)}
 table.t{width:100%;border-collapse:collapse;font-size:13.5px}table.t th,table.t td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:right}table.t th:first-child,table.t td:first-child{text-align:left}table.t th{color:var(--mute);font-weight:500}
@@ -100,9 +106,24 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .modal{position:fixed;inset:0;background:rgba(5,9,16,.85);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}.modal .card{max-width:380px;width:100%}
 .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1 1 280px}
 .foot{font-size:12px;color:var(--mute);margin-top:6px}
+.sec{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
+.sec>.sh{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;font-weight:800;font-size:15px}.sec>.sh:hover{background:var(--card2)}
+.sec .cv{flex:none;width:30px;height:30px;border-radius:50%;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--mute);transition:transform .15s,background .15s}
+.sec .cv::before{content:"▾";font-size:15px;line-height:1}.sec.open .cv{background:var(--acc);color:#fff;transform:rotate(180deg)}
+.sec>.sbody{display:none;padding:0 14px 14px}.sec.open>.sbody{display:block}
+.sbt{font-weight:800;font-size:13.5px;margin:12px 0 4px}.sbt:first-child{margin-top:0}
+.wc{text-align:center}.wl{font-size:13px;margin:4px 0 4px}.fm{display:flex;gap:4px;justify-content:center;margin-bottom:2px}
+.fm i{width:18px;height:18px;border-radius:3px;font-style:normal;font-size:10px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center}.fm .W{background:#2aa84a}.fm .L{background:#e1252b}
+.wn .od .o{font-size:20px}.wn.big .od,.wc .od{display:block;width:100%;padding:12px 6px}
+.hh{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 18px}@media(max-width:760px){.hh{grid-template-columns:minmax(0,1fr)}}
+.hr{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.hr:last-child{border:0}.hr .d{color:var(--mute);width:62px;flex:none;font-size:12px}.hr .sc2{margin-left:auto;font-weight:700}
+.hr i{width:18px;height:18px;border-radius:3px;font-style:normal;font-size:10px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;flex:none}.hr .W{background:#2aa84a}.hr .L{background:#e1252b}
+#thm{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:99px;width:30px;height:30px;font-size:15px;line-height:1;padding:0}
+.slip h2{background:var(--gold);color:#1a1a1a;margin:-12px -12px 10px;padding:10px 12px;border-radius:10px 10px 0 0}.slip.min h2{margin-bottom:0}.slip .mute{color:#3a3a3a}
+.slip .badge{background:#1a1a1a;color:#fff}
 .mkr{display:flex;align-items:center;gap:6px;margin-top:6px}.mkr .lb{width:34px;flex:none;font-size:11.5px;font-weight:700;color:var(--mute)}
 .stw{position:relative;flex:1;min-width:0}.stw::before,.stw::after{content:"";position:absolute;top:0;bottom:0;width:18px;z-index:2;pointer-events:none}
-.stw::before{left:0;background:linear-gradient(90deg,var(--bg2),transparent)}.stw::after{right:0;background:linear-gradient(270deg,var(--bg2),transparent)}
+.stw::before{left:0;background:linear-gradient(90deg,var(--card),transparent)}.stw::after{right:0;background:linear-gradient(270deg,var(--card),transparent)}
 .strip{display:flex;gap:5px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none;padding:9px 14px 9px;cursor:grab;-webkit-overflow-scrolling:touch;user-select:none}
 .strip::-webkit-scrollbar{display:none}.strip .od{flex:0 0 80px;scroll-snap-align:center}.strip:active{cursor:grabbing}
 .seg{display:flex;gap:4px;margin:8px 0 2px}.seg button{flex:1;background:var(--btn);border:1px solid var(--line);color:var(--mute);border-radius:8px;padding:7px;font-weight:600}.seg button.on{background:var(--acc);border-color:var(--acc);color:#fff}
@@ -112,23 +133,23 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .lu{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 18px}@media(max-width:760px){.lu{grid-template-columns:minmax(0,1fr)}}
 .lp{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}.lp:last-child{border:0}.lp .pos{width:26px;font-size:11px;font-weight:800;color:var(--mute);text-align:center;flex:none}
 .lp .nm2{flex:1;min-width:0;font-weight:600;cursor:pointer}.lp .nm2:hover{text-decoration:underline}.lp .dot{width:8px;height:8px;border-radius:50%;flex:none}
-.stc{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;text-transform:uppercase}.stc.out{background:#4a1a1a;color:var(--bad)}.stc.q{background:#4a2c10;color:var(--gold)}.stc.ok{background:#123d2e;color:var(--good)}.stc.ex{background:var(--btn);color:var(--mute)}
-.chip.b{background:#2d1f4d;color:#c8a6ff}.chip.f{background:#4a2c10;color:#ffb36b}
-.vb{border-color:#2f6d4a;background:linear-gradient(180deg,#10281d,var(--card) 70%)}.conf{display:inline-block;border-radius:4px;padding:1px 7px;font-size:10.5px;font-weight:800;text-transform:uppercase}.conf.Strong{background:#123d2e;color:var(--good)}.conf.Medium{background:#4a3a10;color:var(--gold)}.conf.Speculative{background:var(--btn);color:var(--mute)}
+.stc{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;text-transform:uppercase}.stc.out{background:var(--c-bad-bg);color:var(--c-bad-fg)}.stc.q{background:var(--c-warn-bg);color:var(--c-warn-fg)}.stc.ok{background:var(--c-good-bg);color:var(--c-good-fg)}.stc.ex{background:var(--btn);color:var(--mute)}
+.chip.b{background:var(--c-pur-bg);color:var(--c-pur-fg)}.chip.f{background:var(--c-warn-bg);color:var(--c-warn-fg)}
+.vb{border-color:var(--val-line);background:linear-gradient(180deg,var(--val-bg),var(--card) 70%)}.conf{display:inline-block;border-radius:4px;padding:1px 7px;font-size:10.5px;font-weight:800;text-transform:uppercase}.conf.Strong{background:var(--c-good-bg);color:var(--c-good-fg)}.conf.Medium{background:var(--c-gold-bg);color:var(--c-gold-fg)}.conf.Speculative{background:var(--btn);color:var(--mute)}
 .why{font-size:12.5px;color:var(--mute);margin:6px 0 0;padding-left:18px}.why li{margin:2px 0}.why b{color:var(--ink)}
 .newb{background:var(--acc);color:#fff;border-radius:4px;padding:0 5px;font-size:9.5px;font-weight:800;margin-left:4px}
 .mnp{margin-top:8px;font-size:11px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.6px}
 .lv{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
 .lh{display:flex;align-items:center;gap:8px;padding:12px;width:100%;background:none;border:0;text-align:left;cursor:pointer}.lh:hover{background:var(--card2)}
 .lt{flex:1 1 0;display:flex;align-items:center;gap:10px;min-width:0}.lt.r{justify-content:flex-end;text-align:right}.lt img{width:38px;height:38px;object-fit:contain;flex:none}
-.lt .sc{font-size:28px;font-weight:800;line-height:1}.lt .sc.w{color:#fff}.lt .sc.l{color:var(--mute);font-weight:600}.lt small{display:block;color:var(--mute);font-size:11.5px}
+.lt .sc{font-size:28px;font-weight:800;line-height:1}.lt .sc.w{color:var(--sc-w)}.lt .sc.l{color:var(--mute);font-weight:600}.lt small{display:block;color:var(--mute);font-size:11.5px}
 .ls{text-align:center;flex:none;min-width:84px}.ls .st{font-size:12.5px;font-weight:700}.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:5px;animation:pulse 1.2s infinite}
 @keyframes pulse{50%{opacity:.3}}.ls .ft{color:var(--mute)}.ab{display:none}
 @media(max-width:640px){.nm{display:none}.ab{display:inline}.lt{gap:6px}.lt img{width:30px;height:30px}.lt .sc{font-size:23px}.ls{min-width:78px}.lh{padding:10px 8px;gap:4px}}
 .lb2{display:none;border-top:1px solid var(--line);padding:6px 12px 12px;background:var(--bg2)}.lv.open .lb2{display:block}
 table.bx{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}table.bx th,table.bx td{padding:5px 4px;text-align:right;border-bottom:1px solid var(--line)}table.bx th{color:var(--mute);font-weight:500;font-size:11px}
-table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}table.ls2 td.qw{color:#fff;font-weight:700}table.ls2 td{color:var(--mute)}table.ls2 td:last-child{color:var(--ink)}table.ls2 td:first-child{color:var(--ink)}
-.ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--gold)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:#4a2c10;color:var(--gold)}
+table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}table.ls2 td.qw{color:var(--ink);font-weight:700}table.ls2 td{color:var(--mute)}table.ls2 td:last-child{color:var(--ink)}table.ls2 td:first-child{color:var(--ink)}
+.ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--c-warn-fg)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:var(--c-warn-bg);color:var(--c-warn-fg)}
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
 </style>
@@ -137,7 +158,7 @@ table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk 
 <header><div class="hw">
   <div class="brand" style="display:flex;align-items:center;gap:9px"><img src="/icon-v2-192.png" alt="" style="width:30px;height:30px;border-radius:7px">NBA <b>TOP-3</b></div>
   <nav id="nav"></nav>
-  <div class="who"><button class="inst" id="inst" style="display:none" onclick="installApp()">Install app</button><span id="meta"></span><span id="me"></span><button onclick="showLogin()">change</button></div>
+  <div class="who"><button id="thm" onclick="toggleTheme()" title="Switch light / dark theme"></button><button class="inst" id="inst" style="display:none" onclick="installApp()">Install app</button><span id="meta"></span><span id="me"></span><button onclick="showLogin()">change</button></div>
 </div></header>
 <div class="wrap" id="wrap"><main id="app"></main><aside id="slipwrap"></aside></div>
 <div id="modal"></div>
@@ -245,7 +266,7 @@ function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
    <div class="l">O ${o.line}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
 function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return"";
   const full=p.proj_full||{},d=k=>(p.proj[k]-(full[k]??p.proj[k]));const dtxt=["pts","reb","ast"].map(k=>`${d(k)>=0?"+":""}${d(k).toFixed(1)} ${k}`).join(", ");
-  return `<details class="why-d"><summary style="font-size:12px;color:#c8a6ff">Why the change? ${ab.length} teammate${ab.length>1?"s":""} out</summary><ul class="why">`+
+  return `<details class="why-d"><summary style="font-size:12px;color:var(--c-pur-fg)">Why the change? ${ab.length} teammate${ab.length>1?"s":""} out</summary><ul class="why">`+
    ab.map(a=>`<li><b>${esc(a.name)}</b> (${a.pts.toFixed(1)} pts, ${a.reb.toFixed(1)} reb, ${a.ast.toFixed(1)} ast) – ${a.weight>=0.85?"out":"questionable"}</li>`).join("")+
    `<li>Model effect vs a full-strength roster: <b>${dtxt}</b></li>`+
    ev.map(e=>`<li>Without ${esc(e.who)}: <b>${e.without.pts.toFixed(1)}</b> pts / ${e.without.reb.toFixed(1)} reb / ${e.without.ast.toFixed(1)} ast in ${e.without.n} games, vs ${e.with_.pts.toFixed(1)} / ${e.with_.reb.toFixed(1)} / ${e.with_.ast.toFixed(1)} in ${e.with_.n} with him</li>`).join("")+
@@ -272,35 +293,49 @@ function playerHTML(p){
 const gtab={};let gameIdx={};
 const nm=t=>NAMES[t]||t;
 function tbtn(g,stat,side,line,o){const val=o.price&&o.edge>=0.04,k=key({game_id:g,stat,line,side,team:o.team,lo:o.lo});
-  return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pickTeam('${g}','${stat}','${side}',${line},${o.price||0},'${o.book||""}',${o.prob},'${esc(o.text)}','${o.team||""}',${o.lo||0},${o.hi==null?"null":o.hi})">${val?'<span class="vt">VALUE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}<div class="l">${esc(o.label)}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)}</div></button>`}
+  return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pickTeam('${g}','${stat}','${side}',${line},${o.price||0},'${o.book||""}',${o.prob},'${esc(o.text)}','${o.team||""}',${o.lo||0},${o.hi==null?"null":o.hi})">${val?'<span class="vt">VALUE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}${o.nolabel?"":`<div class="l">${esc(o.label)}${o.price?" · "+bk(o.book):""}</div>`}<div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)}${o.nolabel&&o.price?" · "+bk(o.book):""}</div></button>`}
 const stripH=h=>`<div class="stw"><div class="strip">${h}</div></div>`;
 const mb={},MBD={hand:"home",tot:"over",ttT:"home",ttO:"over"};
 const mbg=(id,k)=>(mb[id]&&mb[id][k])||MBD[k];
-function setMB(id,k,v){(mb[id]=mb[id]||{})[k]=v;const el=$("#g"+id);el.querySelector(".gbody").innerHTML=gbodyHTML(gameIdx[id]);paintSel();centerStrips(el)}
+function setMB(id,k,v){(mb[id]=mb[id]||{})[k]=v;const key=(k=='hand'||k=='tot')?'top':'tteam',el=document.querySelector(`#g${id} .sec[data-k="${key}"]`);el.querySelector('.sbody').innerHTML=key=='top'?topHTML(gameIdx[id]):ttHTML(gameIdx[id]);paintSel();centerStrips(el)}
 const segc=(id,k,opts)=>`<div class="seg mini">${opts.map(([v,l])=>`<button class="${mbg(id,k)==v?"on":""}" onclick="setMB('${id}','${k}','${v}')">${esc(l)}</button>`).join("")}</div>`;
-function matchHTML(g){const m=g.match;if(!m)return'<p class="mute" style="margin:10px 0">Match markets appear once the game has been priced (upcoming games only).</p>';
-  const H=m.home,A=m.away,id=g.game_id,bh=m.book_h2h||{},ah=m.alt_h2h||{},ed=(p,b)=>b?p-1/b[0]:null;
-  const win=(side,t,p)=>tbtn(id,"ml",side,0,{label:`${nm(t)} to win`,prob:p,price:bh[side]&&bh[side][0],book:bh[side]&&bh[side][1],alt:ah[side],edge:ed(p,bh[side]),text:`${nm(t)} to win`});
-  const hd=mbg(id,"hand"),to=mbg(id,"tot"),tT=mbg(id,"ttT"),tO=mbg(id,"ttO");
+function _mx(g){const m=g.match;return m?{m,H:m.home,A:m.away,id:g.game_id}:null}
+function topHTML(g){const x=_mx(g);if(!x)return'<p class="mute" style="margin:6px 0">Match markets appear once the game has been priced (upcoming games only).</p>';
+  const {m,H,A,id}=x,bh=m.book_h2h||{},ah=m.alt_h2h||{},ed=(p,b)=>b?p-1/b[0]:null;
+  const win=(side,t,p)=>tbtn(id,"ml",side,0,{label:`${nm(t)} to win`,nolabel:true,prob:p,price:bh[side]&&bh[side][0],book:bh[side]&&bh[side][1],alt:ah[side],edge:ed(p,bh[side]),text:`${nm(t)} to win`});
+  const hd=mbg(id,"hand"),to=mbg(id,"tot");
   const hs=(hd=="home"?m.handicaps:[...m.handicaps].reverse()).map(l=>{const home=hd=="home",tm=home?H:A,ln=home?l.line:-l.line,p=home?l.p_home:l.p_away,pr=home?l.price_home:l.price_away,al=home?l.alt_home:l.alt_away;
     return tbtn(id,"spread",hd,l.line,{label:`${nm(tm)} ${sgn(ln)}`,prob:p,price:pr,book:l.book,alt:al,edge:pr?p-1/pr:null,text:`${nm(tm)} ${sgn(ln)}`})}).join("");
   const ts=m.totals.map(l=>{const o=to=="over",p=o?l.p_over:l.p_under,pr=o?l.price_over:l.price_under,al=o?l.alt_over:l.alt_under;
     return tbtn(id,"total",to,l.line,{label:`${o?"Over":"Under"} ${l.line}`,prob:p,price:pr,book:l.book,alt:al,edge:pr?p-1/pr:null,text:`${o?"Over":"Under"} ${l.line} total points`})}).join("");
+  return `<div class="sumln" style="margin:0 0 6px">Expected score${m.source=="market"?" (from the betting market)":" (our model)"}: <b>${nm(A)} ${m.away_pts.toFixed(0)}</b> – <b>${nm(H)} ${m.home_pts.toFixed(0)}</b> · total <b>${m.total.toFixed(0)}</b> · ${m.margin>0?nm(H):nm(A)} by <b>${Math.abs(m.margin).toFixed(0)}</b></div>
+   <div class="sbt">Match Betting</div><div class="wn big"><div class="wc">${formBadges(g,A)}<div class="wl">${nm(A)}</div>${win("away",A,m.p_away)}</div><div class="wc">${formBadges(g,H)}<div class="wl">${nm(H)}</div>${win("home",H,m.p_home)}</div></div>
+   <div class="mhd"><div class="sbt" style="margin:0">Handicap Betting</div>${segc(id,"hand",[["away",nm(A)],["home",nm(H)]])}</div>${stripH(hs)}
+   <div class="mhd"><div class="sbt" style="margin:0">Total Points</div>${segc(id,"tot",[["over","Over"],["under","Under"]])}</div>${stripH(ts)}
+   <div class="mute" style="font-size:11px;margin-top:8px">Swipe or drag rows sideways for more lines (about 20%–80% chance range). The starting point is the betting market, which beat our own team model in testing; VALUE means Sportsbet's price is out of line with it. A small badge like <b>TAB 2.05</b> means another bookmaker pays at least 3% more. Team results are linked to player stats in the same game, so mixing them in one slip is approximate.</div>`}
+function marginHTML(g){const x=_mx(g);if(!x||!(x.m.bands||[]).length)return"";const {m,H,A,id}=x;
+  const bands=t=>(m.bands||[]).filter(b=>b.team==t).map(b=>{const tm=t=="home"?H:A,r=b.hi?`${b.lo}–${b.hi}`:`${b.lo}+`;return tbtn(id,"band",t,0,{label:`${nm(tm)} by ${r}`,prob:b.p,team:t,lo:b.lo,hi:b.hi,text:`${nm(tm)} to win by ${r}`})}).join("");
+  return `<div class="sbt">Winning Margin</div><div class="wn4">${bands("away")}</div><div class="wn4">${bands("home")}</div>`}
+function ttHTML(g){const x=_mx(g);if(!x)return"";const {m,H,A,id}=x,tT=mbg(id,"ttT"),tO=mbg(id,"ttO");
   const tt=((m.team_totals||{})[tT]||[]).map(l=>{const o=tO=="over",tm=tT=="home"?H:A,p=o?l.p_over:1-l.p_over;
     return tbtn(id,"tt",tO,l.line,{label:`${nm(tm)} ${o?"over":"under"} ${l.line}`,prob:p,team:tT,text:`${nm(tm)} ${o?"over":"under"} ${l.line} points`})}).join("");
-  const bands=(t)=>(m.bands||[]).filter(b=>b.team==t).map(b=>{const tm=t=="home"?H:A,r=b.hi?`${b.lo}–${b.hi}`:`${b.lo}+`;return tbtn(id,"band",t,0,{label:`${nm(tm)} by ${r}`,prob:b.p,team:t,lo:b.lo,hi:b.hi,text:`${nm(tm)} to win by ${r}`})}).join("");
-  return `<div class="sumln">Expected score${m.source=="market"?" (from the betting market)":" (our model)"}: <b>${nm(A)} ${m.away_pts.toFixed(0)}</b> – <b>${nm(H)} ${m.home_pts.toFixed(0)}</b> · total <b>${m.total.toFixed(0)}</b> · ${m.margin>0?nm(H):nm(A)} by <b>${Math.abs(m.margin).toFixed(0)}</b></div>
-   <div class="mt">Match winner</div><div class="wn">${win("away",A,m.p_away)}${win("home",H,m.p_home)}</div>
-   <div class="mhd"><div class="mt">Handicap</div>${segc(id,"hand",[["away",nm(A)],["home",nm(H)]])}</div>${stripH(hs)}
-   <div class="mhd"><div class="mt">Total points</div>${segc(id,"tot",[["over","Over"],["under","Under"]])}</div>${stripH(ts)}
-   ${tt?`<div class="mhd"><div class="mt">Team total</div>${segc(id,"ttT",[["away",nm(A)],["home",nm(H)]])}${segc(id,"ttO",[["over","Over"],["under","Under"]])}</div>${stripH(tt)}`:""}
-   ${(m.bands||[]).length?`<div class="mt">Winning margin</div><div class="wn4">${bands("away")}</div><div class="wn4">${bands("home")}</div>`:""}
-   <div class="mute" style="font-size:11px;margin-top:8px">Swipe or drag rows sideways for more lines (about 20%–80% chance range). Starting point is the betting market, which beat our own team model in testing; VALUE means Sportsbet's price is out of line with it. A small badge like <b>TAB 2.05</b> means another bookmaker pays at least 3% more. Team results are linked to player stats in the same game, so mixing them in one slip is approximate.</div>`}
-function gbodyHTML(g){const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
-  if((gtab[g.game_id]||"players")=="match")return matchHTML(g);
+  return `<div class="mhd"><div class="sbt" style="margin:0">Team Total</div>${segc(id,"ttT",[["away",nm(A)],["home",nm(H)]])}${segc(id,"ttO",[["over","Over"],["under","Under"]])}</div>${stripH(tt)}`}
+const gsec={},SECDEF={top:true,players:true,margin:false,tteam:false,h2h:false};
+const secOpen=(id,k)=>(gsec[id]&&gsec[id][k]!==undefined)?gsec[id][k]:SECDEF[k];
+const sec=(id,k,title,body)=>`<div class="sec ${secOpen(id,k)?"open":""}" data-k="${k}"><div class="sh" onclick="togSec('${id}','${k}')"><span>${title}</span><span class="cv"></span></div><div class="sbody">${body}</div></div>`;
+function togSec(id,k){(gsec[id]=gsec[id]||{})[k]=!secOpen(id,k);const el=document.querySelector(`#g${id} .sec[data-k="${k}"]`);el.classList.toggle("open");if(secOpen(id,k)){paintSel();centerStrips(el)}}
+function playersHTML(g){const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   const side=tm=>`<div><div class="th"><img src="${logo(tm.team)}" alt="">${nm(tm.team)} <span>${esc(tm.lineup||"Lineup not posted")}</span></div>${tm.players.map(playerHTML).join("")}</div>`;
   return `<div class="cols">${side(away)}${side(home)}</div>`}
-function setGT(id,t){gtab[id]=t;const el=$("#g"+id);el.querySelector(".gbody").innerHTML=gbodyHTML(gameIdx[id]);el.querySelectorAll(".seg button").forEach((b,i)=>b.classList.toggle("on",(i==0)==(t=="players")));paintSel();centerStrips(el)}
+function formBadges(g,team){const f=((g.insight||{}).form||{})[team]||[];return `<div class="fm">${f.map(x=>`<i class="${x.r}" title="${x.r} ${x.score} vs ${x.opp} (${x.date})">${x.r}</i>`).join("")}</div>`}
+function h2hHTML(g){const ins=g.insight;if(!ins)return'<p class="mute">No history yet.</p>';const m=g.match,teams=Object.keys(ins.form);
+  const col=t=>`<div><div class="sbt">${nm(t)} – last ${ins.form[t].length}</div>${[...ins.form[t]].reverse().map(x=>`<div class="hr"><i class="${x.r}">${x.r}</i><span>vs ${nm(x.opp)}</span><span class="d" style="margin-left:auto">${x.date.slice(5)}</span><span class="sc2">${x.score}</span></div>`).join("")||'<p class="mute">No games yet.</p>'}</div>`;
+  return `<div class="hh">${col(teams[0])}${col(teams[1])}</div><div class="sbt">Last head-to-head</div>`+(ins.h2h.length?ins.h2h.map(x=>`<div class="hr"><span class="d">${x.date}</span><span>${nm(x.away)} ${x.away_pts}</span><span>@</span><span>${nm(x.home)} ${x.home_pts}</span><span class="sc2">${x.home_pts>x.away_pts?nm(x.home):nm(x.away)} won</span></div>`).join(""):'<p class="mute">No recent meetings in the data.</p>')}
+function gbodyHTML(g){const id=g.game_id,m=g.match;let h="";
+  h+=sec(id,"top","Top Markets",topHTML(g));
+  h+=sec(id,"players","Player Props",playersHTML(g));
+  if(m){h+=sec(id,"margin","Margin Markets",marginHTML(g));if((m.team_totals||{}).home)h+=sec(id,"tteam","Team Totals",ttHTML(g))}
+  h+=sec(id,"h2h","Form & Head-to-Head",h2hHTML(g));return h}
 function gameHTML(g){gameIdx[g.game_id]=g;const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   const open=openGames.has(g.game_id),all=[...away.players,...home.players],gt=gtab[g.game_id]||"players";
   return `<div class="game ${open?"open":""}" id="g${g.game_id}"><button class="gh" onclick="tg('${g.game_id}')">
@@ -308,7 +343,7 @@ function gameHTML(g){gameIdx[g.game_id]=g;const t=Object.values(g.teams),away=t.
    <div class="mid"><div class="t">${timeOf(g.start)}</div><div class="s">at</div></div>
    <div class="tm r"><div><b>${nm(home.team)}</b><small>${home.team}</small></div><img src="${logo(home.team)}" alt=""></div>
    <div class="av">${all.map(p=>photo(p.player_id,p.player)).join("")}</div><span class="chev">▾</span></button>
-   <div class="gb"><div class="seg"><button class="${gt=="players"?"on":""}" onclick="setGT('${g.game_id}','players')">Players</button><button class="${gt=="match"?"on":""}" onclick="setGT('${g.game_id}','match')">Match betting</button></div><div class="gbody">${open?gbodyHTML(g):""}</div></div></div>`}
+   <div class="gb"><div class="gbody">${open?gbodyHTML(g):""}</div></div></div>`}
 function centerStrips(root){(root||document).querySelectorAll(".strip").forEach(st=>{if(st.dataset.c||!st.offsetWidth)return;const bs=[...st.querySelectorAll(".od")];if(!bs.length)return;
   let best=bs[0],bd=9;bs.forEach(b=>{const d=Math.abs(parseFloat(b.dataset.p)-.5);if(d<bd){bd=d;best=b}});st.scrollLeft=best.offsetLeft-st.offsetWidth/2+best.offsetWidth/2;st.dataset.c=1})}
 let drag=null;
@@ -343,7 +378,7 @@ async function today(a){await loadSlate();api("best").then(b=>{best=b;const el=$
    <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div>
-   <div class="note"><b>How to read a button:</b> the line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:#c8a6ff">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#ff9a3d">FADE</b> means a teammate returning lowers it. ${oddsNote}</div><div id="glist"></div>`;drawGames();pollStatus()}
+   <div class="note"><b>How to read a button:</b> the line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</div><div id="glist"></div>`;drawGames();pollStatus()}
 
 /* ---------- value bets with evidence ---------- */
 let VAL=null;
@@ -434,8 +469,8 @@ function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="
   const sa=showAll.has(g.game_id);
   return `<div style="display:flex;gap:6px;margin:6px 0"><button class="pill ${fullStats?"on":""}" onclick="fullStats=!fullStats;drawLive()">More stats</button><button class="pill ${sa?"on":""}" onclick="showAll.has('${g.game_id}')?showAll.delete('${g.game_id}'):showAll.add('${g.game_id}');drawLive()">All players</button></div>`+
   b.teams.map(t=>{const rows=(sa?t.players:t.players.slice(0,8));
-    return `<div class="th"><img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}</div><div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th>${fullStats?"<th>STL</th><th>BLK</th><th>3PM</th><th>TO</th><th>+/-</th>":""}</tr>
-    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td>${fullStats?`<td>${r.stl}</td><td>${r.blk}</td><td>${r.fg3m}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
+    return `<div class="th"><img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}</div><div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>STL</th><th>BLK</th>${fullStats?"<th>FG</th><th>TO</th><th>+/-</th>":""}</tr>
+    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td><td>${r.fg3m}</td><td>${r.stl}</td><td>${r.blk}</td>${fullStats?`<td>${esc(r.fg)}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
 function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.score,fin=g.state!="pre";
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
   return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+boxHTML(g):""}</div></div>`}
@@ -472,7 +507,7 @@ async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catc
   const ids=new Set(openLive);[...legs,...myOpen.flatMap(b=>JSON.parse(b.legs))].forEach(l=>ids.add(l.game_id));
   await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
   if(tab=="live")drawLive()}
-async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. Stats from ESPN; ⭐ marks the model's top-3 players.</div><div id="lbody"><p class="mute">Loading…</p></div>`;
+async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. ⭐ marks the model's top-3 players.</div><div id="lbody"><p class="mute">Loading…</p></div>`;
   try{const sc=await api("scorecard");myOpen=sc.bets.filter(b=>b.user==localStorage.user&&b.result=="open")}catch(e){myOpen=[]}
   await refreshLive();liveTimer=setInterval(refreshLive,20000)}
 
@@ -495,9 +530,12 @@ function drawLineups(){const q=luF.q.toLowerCase();
   $("#lubody").innerHTML=gs.map(g=>`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><img src="${logo(g.away.team)}" style="width:30px;height:30px" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" style="width:30px;height:30px" alt=""><span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span></div>
     <div class="lu">${luSide(g.away,luId(g))}${luSide(g.home,luId(g))}</div></div>`).join("")||'<div class="card empty">No lineups match.</div>'}
 async function lineupsTab(a){a.innerHTML=`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
-   <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team. Source: Rotowire, refreshed every 5 minutes.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
+   <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
   LU=await api("lineups");drawLineups()}
 
+/* ---------- theme ---------- */
+function paintTheme(){const t=document.documentElement.dataset.theme;const b=$("#thm");if(b)b.textContent=t=="dark"?"☀":"☾";const m=$("#tc");if(m)m.content=t=="dark"?"#0e2452":"#0a66b3"}
+function toggleTheme(){const t=document.documentElement.dataset.theme=="dark"?"light":"dark";document.documentElement.dataset.theme=t;try{localStorage.theme=t}catch(e){}paintTheme()}
 /* ---------- install as app ---------- */
 let deferred=null;
 addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferred=e;$("#inst").style.display="inline-block"});
@@ -506,7 +544,7 @@ if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(
 const ios=/iphone|ipad/i.test(navigator.userAgent)&&!navigator.standalone;
 if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this as an app, tap the Share button, then “Add to Home Screen”.\n\nShow this tip again?")===false)localStorage.iosHint=1},2500)}
 
-(async()=>{$("#me").textContent=localStorage.user||"";nav();
+(async()=>{paintTheme();$("#me").textContent=localStorage.user||"";nav();
   if(!localStorage.user){showLogin()}
   try{meta=await api("meta");$("#meta").textContent=`Data to ${meta.data_through}`}catch(e){}
   render()})();

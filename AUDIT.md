@@ -17,7 +17,7 @@ Friends use it through a shared access code; picks/bets/comments are stored in S
 5. `parlay.py` — Gaussian-copula multi-leg probability (same-player, teammate, opponent correlations estimated from held-out residuals).
    `combos.py` — pts+reb+ast style markets from the same copula.
 6. `odds.py` — The Odds API client (credit-aware, per-game cooldown), stores all bookmakers; `slate.py` — ESPN schedule/injuries + Rotowire lineups (HTML scrape).
-7. `app.py` (FastAPI) + `static/index.html` (single-file vanilla JS UI, PWA). `live.py` — live scores/box scores from ESPN.
+7. `app.py` (FastAPI) + `static/index.html` (single-file vanilla JS UI, PWA; light "sportsbook" theme by default with a dark toggle; each game is a set of collapsible market sections). `live.py` — live scores/box scores from ESPN.
 
 ## Commands
 ```
