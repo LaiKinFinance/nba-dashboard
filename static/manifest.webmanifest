@@ -1,6 +1,6 @@
 {
-  "name": "NBA Top-3 Dashboard",
-  "short_name": "NBA Top-3",
+  "name": "NBA Dashboard",
+  "short_name": "NBA Dashboard",
   "description": "Top-3 player projections, consistency and parlay odds for every NBA team",
   "start_url": "/",
   "display": "standalone",

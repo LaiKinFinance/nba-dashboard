@@ -1,4 +1,4 @@
-app = "nba-top3-dashboard"
+app = "nba-dashboard"
 primary_region = "syd"
 
 [build]
