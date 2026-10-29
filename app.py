@@ -247,11 +247,26 @@ STRIPS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa")
 COMBO_PARTS = {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}
 EXTRA_MIN = {"fg3m": 0.7, "stl": 0.8, "blk": 0.6}   # only show a market when the player realistically produces it
 
+def guarded_projections():
+    """Projections that may be turned into chances. Games not yet started need the current model (anything else is withheld).
+    Games already under way keep the predictions they were made with, labelled frozen, using their own stored parameters; if those
+    were not stored (made before this safeguard), they are left out rather than recalculated with a different model."""
+    mb, _ = model_status()
+    if mb is None: raise HTTPException(503, "There is no prediction model yet. Please try again in a few minutes.")
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"); cur_ok = mb.get("schema") == FEATURE_SCHEMA; out = []
+    for p in projections():
+        same = cur_ok and p.get("model_id") == mb.get("model_id")
+        if p["start"] >= now:
+            if same and p.get("alphas"): out.append(p)
+        elif p.get("alphas"):
+            out.append(dict(p, frozen=not same))
+    return out
+
 def enriched():
     """Projections + last-10 games, consistency counts per line, and bookmaker prices/edges where available."""
     import odds
     from model import nb_over
-    preds = projections()
+    preds = guarded_projections()
     ids = list({p["player_id"] for p in preds}); rows = {}
     with closing(con()) as c:
         if ids:
@@ -260,9 +275,6 @@ def enriched():
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
         book = odds.load(c); ages = odds.fetch_ages(c)
-    mb, _ = model_status()
-    if mb is None: raise HTTPException(503, "There is no prediction model yet. Please try again in a few minutes.")
-    alphas = mb["alphas"]
     # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
     hist = {}
     if ids:
@@ -275,6 +287,7 @@ def enriched():
             near = [(c >= 3) or (c == 2 and t[2] >= 7) for c, t in zip(cats, top3)]
             hist[pid] = dict(games=len(d), td=int((cats >= 3).sum()), dd=int((cats >= 2).sum()), dd20=int((cats.head(20) >= 2).sum()), near20=int(sum(near[:20])))
     for p in preds:
+        alphas = p["alphas"]            # each projection carries the spread values of the model that made it: models are never mixed
         h = hist.get(p["player_id"], dict(games=0, td=0, dd=0, dd20=0, near20=0)); p["dd_td_hist"] = h
         p["show_td"] = bool(h["td"] >= 1 or h["near20"] >= 2 or p["p_td"] >= 0.03)
         p["show_dd"] = bool(h["dd20"] >= 2 or p["p_dd"] >= 0.15)
@@ -565,7 +578,7 @@ def min_edge(p):
     return MIN_EDGE_UNSURE if unsure else MIN_EDGE
 
 def compute_value():
-    preds = enriched(); out = []
+    preds = [p for p in enriched() if not p.get("frozen")]; out = []
     _, why = model_status(preds)
     if why: return dict(picks=[], odds_connected=bool(__import__("odds").available()), notice=why)
     for p in preds:
@@ -625,7 +638,7 @@ def best(x_code: str = Header("")):
     return res
 
 def compute_best():
-    preds = enriched(); cands = []
+    preds = [p for p in enriched() if not p.get("frozen")]; cands = []
     _, why = model_status(preds)
     if why: return dict(legs=[], combo=dict(legs=[], joint=None, fair_odds=None), notice=why)
     for p in preds:
@@ -786,9 +799,11 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     gps = game_preds(); legs = body["legs"]
     if not 1 <= len(legs) <= 6: raise HTTPException(400, "1-6 legs")
     pl_legs = [l for l in legs if l["stat"] not in TEAM_STATS]; tm_legs = [l for l in legs if l["stat"] in TEAM_STATS]
+    now_s = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     for l in pl_legs:
         if l["stat"] not in PLAYER_STATS: raise HTTPException(400, "Unknown market")
         if (l["game_id"], l["player_id"]) not in preds: raise HTTPException(400, "Unknown player/game")
+        if preds[(l["game_id"], l["player_id"])]["start"] < now_s: raise HTTPException(400, "That game has already started")
     for l in tm_legs:
         if l["game_id"] not in gps: raise HTTPException(400, "Unknown game")
     side_games = [l["game_id"] for l in tm_legs if l["stat"] in SIDE_GROUP]

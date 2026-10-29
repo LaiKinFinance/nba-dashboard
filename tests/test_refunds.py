@@ -5,7 +5,7 @@ import app, parlay, model
 
 ALPHAS = {k: 0.1 for k in parlay.ALL}
 CORR = {"same6": np.eye(6).tolist(), "teammate": {}, "opponent": {}}
-PRED = dict(proj={**{k: 3.0 for k in parlay.ALL}, "pts": 20.0}, team="A", p_dd=.1, p_td=.01)
+PRED = dict(proj={**{k: 3.0 for k in parlay.ALL}, "pts": 20.0}, team="A", p_dd=.1, p_td=.01, start="2999-01-01T00:00Z")
 GP = dict(source="market", home="NY", away="BOS", p_home=.6, p_away=.4, start="2999-01-01T00:00Z", home_pts=112., away_pts=106.,
           margin=5.0, total=218.0, sigma_margin=13., sigma_total=17., handicaps=[], totals=[], team_totals={}, bands=[])
 

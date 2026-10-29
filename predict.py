@@ -267,7 +267,7 @@ def project(days=2):
     pdd = m["dd"].predict_proba(X)[:, 1]; ptd = m["td"].predict_proba(feats)
     for k, (_, f) in enumerate(feats.iterrows()):
         mt = mk[(f.game_id, f.player_id)]; g = mt["game"]
-        rec = dict(model_id=bundle_id(bundle), game_id=f.game_id, start=g["start"], date=g["date"], player_id=f.player_id, player=f.player, team=f.team, opp=f.opp,
+        rec = dict(model_id=bundle_id(bundle), alphas={k: float(v) for k, v in alphas.items()}, game_id=f.game_id, start=g["start"], date=g["date"], player_id=f.player_id, player=f.player, team=f.team, opp=f.opp,
                    home=int(f.home), starting=bool(mt["starting"]), lineup_status=mt["lineup_status"], injury=mt["injury"],
                    min=float(f.min_m10) if pd.notna(f.min_m10) else None, rest=float(f.rest) if pd.notna(f.rest) else None,
                    p_dd=float(pdd[k]), p_td=float(min(ptd[k], pdd[k])), proj={}, ladders={})
