@@ -78,7 +78,18 @@ def refresh_once():
             else: _stage("project", lambda: predict.save(predict.project()))
         _stage("odds", lambda: logging.info("odds refresh: %s", refresh_odds()))
         _stage("grade", grade_picks); _stage("log_picks", log_picks)
+        _stage("served_check", store_served_check)
         _stage("backup", backup_db)
+
+def store_served_check():
+    """Once a day, test the model being served on games played since it was trained and keep the result for the health page."""
+    with closing(con()) as c:
+        c.execute("CREATE TABLE IF NOT EXISTS model_checks(checked_at TEXT, payload TEXT)")
+        last = c.execute("SELECT max(checked_at) FROM model_checks").fetchone()[0]
+        if last and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last)).total_seconds() < 20 * 3600: return
+    res = predict.served_check()
+    with closing(con()) as c:
+        c.execute("INSERT INTO model_checks VALUES(?,?)", (dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(res))); c.commit()
 
 def backup_db(keep=7):
     """Daily consistent copy of the database inside the data volume (SQLite online backup); keeps the newest `keep`."""
@@ -848,8 +859,11 @@ def health():
     current = _safe(lambda: not predict.model_stale(), False)
     if not current: problems.append("prediction model is out of date or missing")
     if made is None: problems.append("no projections stored yet")
+    sc = _safe(lambda: json.loads(con().execute("SELECT payload FROM model_checks ORDER BY checked_at DESC LIMIT 1").fetchone()[0]))
+    if sc and sc.get("status") == "ok" and (sc.get("worst_high_chance_gap") or 0) > 0.06:
+        problems.append(f"model's confident chances are running {sc['worst_high_chance_gap']*100:.0f} points too high on games since training")
     bdir = os.path.join(os.path.dirname(DB), "backups")
-    return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st,
+    return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 models_age_days=round(_models_age() / 86400, 1) if _models_age() != float("inf") else None,
                 backups=sorted(os.listdir(bdir))[-3:] if os.path.isdir(bdir) else [])
 

@@ -18,7 +18,7 @@ def _fake_cycle(monkeypatch, repair_result, ingest_result):
     monkeypatch.setattr(app, "train_quietly", lambda: calls.append("train"))
     monkeypatch.setattr(predict, "model_stale", lambda: False); monkeypatch.setattr(app, "_models_age", lambda: 10 ** 9)
     monkeypatch.setattr(predict, "project", lambda: calls.append("project") or []); monkeypatch.setattr(predict, "save", lambda p: None)
-    for name in ("refresh_odds", "grade_picks", "log_picks", "backup_db"): monkeypatch.setattr(app, name, lambda *a, **k: None)
+    for name in ("refresh_odds", "grade_picks", "log_picks", "backup_db", "store_served_check"): monkeypatch.setattr(app, name, lambda *a, **k: None)
     return calls
 
 def test_incomplete_repair_blocks_training_and_projection(blank, monkeypatch):

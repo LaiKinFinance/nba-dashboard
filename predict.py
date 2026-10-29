@@ -47,10 +47,51 @@ def model_stale():
     except Exception: return True
     return b.get("schema") != FEATURE_SCHEMA
 
-def validate(report):
-    """Gate before a new model replaces the old one: it must not be clearly worse than a plain 10-game average on any core stat."""
-    bad = [t for t in TARGETS if report["stats"][t]["mae_model"] > 1.02 * report["stats"][t]["mae_10game_avg"]]
-    return (not bad), bad
+MIN_TEST_ROWS = 1000
+
+def _finite(x): return isinstance(x, (int, float)) and np.isfinite(x)
+
+def validate(report, alphas=None):
+    """Gate before a new model replaces the old one. Returns (ok, reasons). It must have been tested on enough games, every number must
+    be a real number, and no core stat may be clearly worse than a plain 10-game average. (This checks accuracy only; probability honesty
+    is checked separately by served_check on games played after training.)"""
+    why = []
+    if not report.get("n_test") or report["n_test"] < MIN_TEST_ROWS: why.append("too few test games")
+    for t in TARGETS:
+        st = (report.get("stats") or {}).get(t) or {}
+        m, b = st.get("mae_model"), st.get("mae_10game_avg")
+        if not (_finite(m) and _finite(b) and m > 0 and b > 0): why.append(f"{t}: error is missing, zero or not a number")
+        elif m > 1.02 * b: why.append(f"{t}: worse than a 10-game average")
+    for t in ("dd", "td"):
+        br = ((report.get("stats") or {}).get(t) or {}).get("brier")
+        if not _finite(br): why.append(f"{t}: score is missing or not a number")
+    if alphas is not None and not all(_finite(a) and a > 0 for a in alphas.values()): why.append("spread values are not valid numbers")
+    return (not why), why
+
+def calibration_summary(p, y, high=0.75):
+    """How honest were predicted chances? p: predicted chances, y: 1 if it happened. Returns overall and high-chance gaps (predicted minus actual)."""
+    p, y = np.asarray(p, float), np.asarray(y, float); hi = p >= high
+    return dict(n=int(len(p)), mean_pred=float(p.mean()) if len(p) else None, mean_actual=float(y.mean()) if len(y) else None,
+                gap=float(p.mean() - y.mean()) if len(p) else None, brier=float(np.mean((p - y) ** 2)) if len(p) else None,
+                high_n=int(hi.sum()), high_pred=float(p[hi].mean()) if hi.any() else None, high_actual=float(y[hi].mean()) if hi.any() else None)
+
+def served_check(min_rows=300, offsets=(-3, -2, -1, 0, 1, 2, 3)):
+    """Test the model that is actually being served on games played AFTER it was trained. Honest answer to 'do 80% chances come true 80% of the time?'.
+    Until enough later games exist it says so instead of guessing."""
+    b = load_models(strict=False)
+    n_new = sqlite3.connect(DB).execute("SELECT count(*) FROM player_games WHERE date > ?", (b["trained_through"],)).fetchone()[0]
+    if n_new < min_rows: return dict(status="waiting", later_rows=int(n_new), trained_through=b["trained_through"])    # cheap exit: nothing to test yet
+    df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
+    later = full[full.date > b["trained_through"]]
+    if len(later) < min_rows: return dict(status="waiting", later_rows=int(len(later)), trained_through=b["trained_through"])
+    out = {}
+    for t in ALL:
+        mu = b["models"][t].predict(later[feats_for(t)]); ps, ys = [], []
+        for o in offsets:
+            line = np.maximum(np.floor(mu) + 0.5 + o, 0.5); ps.append(nb_over(mu, b["alphas"][t], line)); ys.append((later[t].values > line).astype(int))
+        out[t] = calibration_summary(np.concatenate(ps), np.concatenate(ys))
+    worst = max(((v["high_pred"] - v["high_actual"]) for v in out.values() if v["high_n"] >= 100), default=None)
+    return dict(status="ok", later_rows=int(len(later)), trained_through=b["trained_through"], by_stat=out, worst_high_chance_gap=worst)
 
 def train(report=True):
     df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
@@ -66,13 +107,13 @@ def train(report=True):
     m = fit(full)
     from model import evaluate
     rep = dict(evaluate(full), team=_team_report(), alpha_window=[str(w0), str(full.date.max())], alpha_train_method="out-of-sample")
-    ok, bad = validate(rep)
+    ok, bad = validate(rep, alphas)
     bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=rep, schema=FEATURE_SCHEMA)
     target = MODELS if ok else MODELS + ".rejected"      # a model that fails validation is kept for inspection but never used
     tmp = target + ".tmp"                                # write beside the live file, then swap: a crash never leaves a half-written model
     with open(tmp, "wb") as f: pickle.dump(bundle, f)
     os.replace(tmp, target)
-    if not ok: raise RuntimeError(f"new model rejected: worse than 10-game average on {bad}")
+    if not ok: raise RuntimeError(f"new model rejected: {'; '.join(bad)}")
     return m, alphas, corr
 
 def load_models(strict=True):
