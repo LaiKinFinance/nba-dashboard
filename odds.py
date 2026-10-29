@@ -37,9 +37,20 @@ def init(con):
     CREATE TABLE IF NOT EXISTS book_lines(game_id TEXT, market TEXT, side TEXT, line REAL, price REAL, book TEXT, fetched_at TEXT,
         PRIMARY KEY(game_id, market, side, line, book));""")
 
+_SECRET = re.compile(r"(?i)\b(api[_-]?key|apikey|key|token)=[^&\s\"']+")
+
+def scrub(text):
+    """Remove API keys / tokens from any text before it is logged, stored or returned to a browser."""
+    return _SECRET.sub(lambda m: m.group(0).split("=")[0] + "=***", str(text))
+
 def _get(path, **params):
-    r = requests.get(f"{BASE}{path}", params={"apiKey": os.environ["ODDS_API_KEY"], **params}, timeout=30)
-    r.raise_for_status()
+    try:
+        r = requests.get(f"{BASE}{path}", params={"apiKey": os.environ["ODDS_API_KEY"], **params}, timeout=30)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        # requests puts the full URL (including ?apiKey=...) in its error text, so never let the original exception escape
+        code = getattr(getattr(e, "response", None), "status_code", None)
+        raise RuntimeError(f"Odds API request failed{f' (HTTP {code})' if code else ''}: {type(e).__name__}") from None
     return r.json(), r.headers.get("x-requests-remaining")
 
 def parse_event(js, name_to_pid):
@@ -69,7 +80,7 @@ def refresh(games, players_by_game):
     try:
         events, remaining = _get("/sports/basketball_nba/events")
     except Exception as e:
-        return dict(ok=False, msg=f"events call failed: {e}")
+        return dict(ok=False, msg=scrub(f"events call failed: {e}"))
     nick = {k: v.lower() for k, v in sl.TEAM_NICK.items()}
     def abbr(full):
         f = full.lower()
@@ -88,7 +99,7 @@ def refresh(games, players_by_game):
         try:
             js, remaining = _get(f"/sports/basketball_nba/events/{ev['id']}/odds", regions="au", markets=MARKETS, oddsFormat="decimal")
         except Exception as e:
-            con.execute("INSERT OR REPLACE INTO odds_status VALUES('error',?)", (str(e)[:200],)); con.commit(); continue
+            con.execute("INSERT OR REPLACE INTO odds_status VALUES('error',?)", (scrub(e)[:200],)); con.commit(); continue
         n2p = {norm_name(nm): pid for pid, nm in players_by_game.get(g["game_id"], [])}
         rows = parse_event(js, n2p)
         con.execute("DELETE FROM book_odds WHERE game_id=?", (g["game_id"],))
@@ -120,7 +131,7 @@ def load(con):
     return out
 
 def status(con):
-    try: return dict(con.execute("SELECT k,v FROM odds_status").fetchall())
+    try: return {k: scrub(v) for k, v in con.execute("SELECT k,v FROM odds_status").fetchall()}   # also cleans anything stored before this fix
     except sqlite3.OperationalError: return {}
 
 
@@ -134,7 +145,7 @@ def refresh_lines(games):
     row = con.execute("SELECT v FROM odds_status WHERE k='lines_at'").fetchone()
     if row and now - dt.datetime.fromisoformat(row[0]) < dt.timedelta(hours=LINES_REFETCH_HOURS): return dict(ok=True, skipped=True)
     try: js, remaining = _get("/sports/basketball_nba/odds", regions="au", markets="h2h,spreads,totals", oddsFormat="decimal")
-    except Exception as e: return dict(ok=False, msg=str(e))
+    except Exception as e: return dict(ok=False, msg=scrub(e))
     nick = {k: v.lower() for k, v in sl.TEAM_NICK.items()}
     abbr = lambda full: next((a for a, n in nick.items() if full.lower().endswith(n)), None)
     by = {(g["home"], g["away"]): g["game_id"] for g in games}; n = 0
