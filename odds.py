@@ -34,6 +34,10 @@ def init(con):
         PRIMARY KEY(game_id, player_id, stat, line, side, book));
     CREATE TABLE IF NOT EXISTS odds_status(k TEXT PRIMARY KEY, v TEXT);
     CREATE TABLE IF NOT EXISTS odds_fetch(game_id TEXT PRIMARY KEY, fetched_at TEXT);
+    CREATE TABLE IF NOT EXISTS odds_archive(fetched_at TEXT, game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, price REAL, book TEXT);
+    CREATE INDEX IF NOT EXISTS odds_archive_k ON odds_archive(game_id, player_id, stat, fetched_at);
+    CREATE TABLE IF NOT EXISTS lines_archive(fetched_at TEXT, game_id TEXT, market TEXT, side TEXT, line REAL, price REAL, book TEXT);
+    CREATE INDEX IF NOT EXISTS lines_archive_k ON lines_archive(game_id, market, fetched_at);
     CREATE TABLE IF NOT EXISTS book_lines(game_id TEXT, market TEXT, side TEXT, line REAL, price REAL, book TEXT, fetched_at TEXT,
         PRIMARY KEY(game_id, market, side, line, book));""")
 
@@ -102,10 +106,13 @@ def refresh(games, players_by_game):
             con.execute("INSERT OR REPLACE INTO odds_status VALUES('error',?)", (scrub(e)[:200],)); con.commit(); continue
         n2p = {norm_name(nm): pid for pid, nm in players_by_game.get(g["game_id"], [])}
         rows = parse_event(js, n2p)
-        con.execute("DELETE FROM book_odds WHERE game_id=?", (g["game_id"],))
         con.execute("INSERT OR REPLACE INTO odds_fetch VALUES(?,?)", (g["game_id"], now.isoformat()))
-        con.executemany("INSERT OR REPLACE INTO book_odds VALUES(?,?,?,?,?,?,?,?)",
-                        [(g["game_id"], pid, st, ln, sd, pr, bk, now.isoformat()) for pid, st, ln, sd, pr, bk in rows])
+        if rows:      # an empty answer must not erase the last good prices
+            data = [(g["game_id"], pid, st, ln, sd, pr, bk, now.isoformat()) for pid, st, ln, sd, pr, bk in rows]
+            con.execute("DELETE FROM book_odds WHERE game_id=?", (g["game_id"],))
+            con.executemany("INSERT OR REPLACE INTO book_odds VALUES(?,?,?,?,?,?,?,?)", data)
+            # append-only history of every price seen before tip-off: the only way to later check closing prices and real edge
+            con.executemany("INSERT INTO odds_archive VALUES(?,?,?,?,?,?,?,?)", [(d[7], d[0], d[1], d[2], d[3], d[4], d[5], d[6]) for d in data])
         fetched += 1
     for k, v in (("remaining", remaining), ("last_run", now.isoformat()), ("error", "")):
         con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
@@ -152,6 +159,7 @@ def refresh_lines(games):
     for ev in js:
         h, a = abbr(ev["home_team"]), abbr(ev["away_team"]); gid = by.get((h, a))
         if not gid: continue
+        if not ev.get("bookmakers"): continue          # keep last good prices if the answer is empty
         con.execute("DELETE FROM book_lines WHERE game_id=?", (gid,))
         for b in ev.get("bookmakers", []):
             for m in b.get("markets", []):
@@ -163,6 +171,7 @@ def refresh_lines(games):
                     elif m["key"] == "totals" and side in ("over", "under") and oc.get("point") is not None: mk, line = "total", float(oc["point"])
                     else: continue
                     con.execute("INSERT OR REPLACE INTO book_lines VALUES(?,?,?,?,?,?,?)", (gid, mk, side, line, float(oc["price"]), b["key"], now.isoformat()))
+                    con.execute("INSERT INTO lines_archive VALUES(?,?,?,?,?,?,?)", (now.isoformat(), gid, mk, side, line, float(oc["price"]), b["key"]))
         n += 1
     for k, v in (("lines_at", now.isoformat()), ("remaining", remaining)): con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
     con.commit(); return dict(ok=True, games=n, remaining=remaining)
@@ -179,3 +188,26 @@ def load_lines(con):
         bk = slot.get(side + "_best")
         if bk is None or price > bk[0]: slot[side + "_best"] = (price, book)
     return out
+
+
+def fetch_ages(con):
+    """{game_id: hours since its player prices were last fetched}, so the app can say how old a price is."""
+    now = dt.datetime.now(dt.timezone.utc)
+    try: rows = con.execute("SELECT game_id, fetched_at FROM odds_fetch").fetchall()
+    except sqlite3.OperationalError: return {}
+    return {g: (now - dt.datetime.fromisoformat(t)).total_seconds() / 3600 for g, t in rows}
+
+def closing_price(con, game_id, player_id, stat, line, side, book, tip_utc):
+    """Last archived price for this exact bet before tip-off: (price, book, minutes_before_tip) or None.
+    With no book given, the best price at the latest snapshot. The 'closing' price is only as late as our last fetch, so the gap is returned."""
+    tip_utc = dt.datetime.fromisoformat(tip_utc.replace("Z", "+00:00")).isoformat()
+    try:
+        q = "SELECT fetched_at FROM odds_archive WHERE game_id=? AND player_id=? AND stat=? AND line=? AND side=? AND fetched_at<=?" + (" AND book=?" if book else "")
+        a = [game_id, player_id, stat, line, side, tip_utc] + ([book] if book else [])
+        t = con.execute(q + " ORDER BY fetched_at DESC LIMIT 1", a).fetchone()
+        if not t: return None
+        r = con.execute(q.replace("SELECT fetched_at", "SELECT price, book") + " AND fetched_at=? ORDER BY price DESC LIMIT 1", a + [t[0]]).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    mins = (dt.datetime.fromisoformat(tip_utc.replace("Z", "+00:00")) - dt.datetime.fromisoformat(t[0])).total_seconds() / 60
+    return r[0], r[1], mins
