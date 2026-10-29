@@ -1,0 +1,23 @@
+app = "nba-top3-dashboard"
+primary_region = "syd"
+
+[build]
+
+[env]
+  DATA_DIR = "/data"
+  AUTO_REFRESH = "1"
+  PORT = "8080"
+
+[mounts]
+  source = "nba_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+[[vm]]
+  memory = "1gb"
+  cpus = 1

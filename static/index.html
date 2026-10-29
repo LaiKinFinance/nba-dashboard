@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBA Top-3 Dashboard</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--mute:#667085;--line:#e3e6eb;--acc:#1d4ed8;--good:#12805c;--bad:#b42318;--warn:#a15c07;--chip:#eef2ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1116;--card:#171b22;--ink:#e7eaf0;--mute:#98a2b3;--line:#2a313c;--acc:#7aa2ff;--good:#3ccf91;--bad:#ff7b72;--warn:#e3b341;--chip:#1f2a44}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+h1{font-size:16px;margin:0 8px 0 0}nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{border:0;background:none;color:var(--mute);padding:6px 10px;border-radius:8px;font:inherit;cursor:pointer}
+nav button.on{background:var(--chip);color:var(--acc);font-weight:600}
+.who{margin-left:auto;font-size:13px;color:var(--mute)}.who button{font:inherit;color:var(--acc);background:none;border:0;cursor:pointer}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1 1 300px}
+h2{font-size:15px;margin:0 0 8px}h3{font-size:14px;margin:12px 0 6px}
+.mute{color:var(--mute);font-size:13px}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}th,td{text-align:right;padding:5px 6px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}th{color:var(--mute);font-weight:500}
+.pl{padding:10px 0;border-bottom:1px solid var(--line)}.pl:last-child{border:0}
+.pl b{cursor:pointer}.chip{display:inline-block;background:var(--chip);color:var(--acc);border-radius:99px;padding:1px 8px;font-size:12px;margin-left:4px}
+.chip.s{background:#e6f6ef;color:var(--good)}.chip.i{background:#fdf0e1;color:var(--warn)}
+@media (prefers-color-scheme:dark){.chip.s{background:#12352b}.chip.i{background:#3a2a10}}
+.proj{display:flex;gap:14px;margin:4px 0;flex-wrap:wrap}.proj div{min-width:56px}.proj span{display:block;font-size:11px;color:var(--mute)}.proj strong{font-size:17px}
+.ladder button,.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:3px 8px;font:inherit;font-size:12.5px;cursor:pointer;margin:2px}
+.btn.p{background:var(--acc);color:#fff;border-color:var(--acc)}.btn:hover,.ladder button:hover{border-color:var(--acc)}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;min-width:60px}.bar i{display:block;height:100%;background:var(--acc)}
+input,select,textarea{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 8px;max-width:100%}
+.big{font-size:26px;font-weight:700}.legs .leg{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+.leg a{color:var(--bad);cursor:pointer}dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)}
+.note{background:var(--chip);border-radius:10px;padding:8px 10px;font-size:13px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>NBA Top-3</h1>
+  <nav id="nav"></nav>
+  <div class="who"><span id="meta"></span> · <span id="me"></span> <button onclick="login(true)">change</button></div>
+</header>
+<main id="app"></main>
+<dialog id="dlg"><form method="dialog"><div id="dlgbody"></div></form></dialog>
+<script>
+const $=s=>document.querySelector(s);
+const TABS=[["today","Today"],["parlay","Parlay builder"],["picks","Friends' picks"],["bets","Bets & scorecard"],["player","Player card"]];
+let tab=localStorage.tab||"today", slate=[], legs=[], playerId=null, meta={};
+const hdr=()=>({"Content-Type":"application/json","X-User":localStorage.user||"","X-Code":localStorage.code||""});
+async function api(path,opt={}){const r=await fetch("/api/"+path,{...opt,headers:{...hdr(),...(opt.headers||{})}});
+  if(r.status==401){login(true,"Wrong access code");throw "auth"}
+  if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||"Error");throw e}
+  return r.json()}
+const post=(p,b)=>api(p,{method:"POST",body:JSON.stringify(b)});
+function login(force,msg){
+  if(!force&&localStorage.user)return;
+  const n=prompt((msg?msg+"\n":"")+"Your name (shown on your picks):",localStorage.user||"");
+  if(n)localStorage.user=n.trim();
+  const c=prompt("Access code (ask the host; leave blank if none):",localStorage.code||"");
+  if(c!==null)localStorage.code=c.trim();
+  $("#me").textContent=localStorage.user||"guest"; if(force)location.reload()}
+const pct=x=>x==null?"–":(x*100).toFixed(x<0.1?1:0)+"%";
+const odds=p=>p>0?(1/p).toFixed(2):"–";
+const fmtT=s=>new Date(s).toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"});
+const statName={pts:"PTS",reb:"REB",ast:"AST",dd:"Double-double",td:"Triple-double"};
+function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
+function go(t,pid){tab=t;localStorage.tab=t;if(pid)playerId=pid;nav();render()}
+async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';
+  try{({today,parlay,picks,bets,player})[tab](a)}catch(e){console.error(e)}}
+
+async function loadSlate(){slate=await api("slate")}
+async function today(a){await loadSlate();
+  if(!slate.length){a.innerHTML='<div class="card">No upcoming games found. Run the refresh job.</div>';return}
+  a.innerHTML=`<div class="note">Projections cover each team's top-3 producers (injured/out players replaced automatically). Probabilities come from the model, not from bookmaker odds. Click a name for the consistency card, a number to add that leg to your parlay.</div>`+
+  slate.map(g=>{const t=Object.values(g.teams);return `<div class="card"><h2>${t.map(x=>x.team).join(" @ ")} <span class="mute">${fmtT(g.start)}</span></h2><div class="row">`+
+    t.map(tm=>`<div><div class="mute">${tm.team} · ${tm.lineup||"lineup not posted"}</div>`+tm.players.map(p=>`<div class="pl">
+      <b onclick="go('player','${p.player_id}')">${p.player}</b>
+      ${p.starting?'<span class="chip s">starting</span>':""}${p.injury&&p.injury.status!="Active"?`<span class="chip i">${p.injury.status}</span>`:""}
+      <div class="proj">${["pts","reb","ast"].map(s=>`<div><span>${s.toUpperCase()}</span><strong>${p.proj[s].toFixed(1)}</strong></div>`).join("")}
+        <div><span>Dbl-dbl</span><strong>${pct(p.p_dd)}</strong></div><div><span>Trpl-dbl</span><strong>${pct(p.p_td)}</strong></div></div>
+      <div class="ladder">${["pts","reb","ast"].map(s=>`<div>${s.toUpperCase()} over: `+p.ladders[s].filter((_,i,arr)=>Math.abs(i-arr.findIndex(x=>x.line>p.proj[s]))<=2).map(l=>`<button onclick="addLeg('${p.game_id}','${p.player_id}','${s}',${l.line},'over')" title="odds ≈ ${odds(l.p_over)}">${l.line} · ${pct(l.p_over)}</button>`).join("")+`</div>`).join("")}
+        <div><button onclick="addLeg('${p.game_id}','${p.player_id}','dd',0,'over')">Double-double · ${pct(p.p_dd)}</button><button onclick="addLeg('${p.game_id}','${p.player_id}','td',0,'over')">Triple-double · ${pct(p.p_td)}</button></div></div></div>`).join("")+`</div>`).join("")+`</div></div>`}).join("")}
+
+const nameOf=(g,pid)=>{for(const x of slate)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid&&x.game_id==g)return p.player;return pid};
+function addLeg(g,p,stat,line,side){if(!slate.length)return;legs.push({game_id:g,player_id:p,stat,line,side});if(legs.length>6)legs.shift();
+  const b=document.createElement("span");b.className="chip";b.textContent="Added ("+legs.length+")";event.target.after(b);setTimeout(()=>b.remove(),900)}
+const legText=l=>`${nameOf(l.game_id,l.player_id)} ${["dd","td"].includes(l.stat)?statName[l.stat]:`${l.side} ${l.line} ${statName[l.stat]}`}`;
+
+async function parlay(a){await loadSlate();
+  a.innerHTML=`<div class="card"><h2>Parlay builder</h2><p class="mute">Add 2–3 legs from the Today tab. Same-game legs are correlated and the model accounts for that, so the joint probability is not just the product of the legs.</p>
+  <div class="legs" id="legs"></div>
+  <p>Bookmaker odds for the whole parlay (decimal, from Sportsbet): <input id="podds" type="number" step="0.01" min="1.01" style="width:100px" placeholder="e.g. 3.60"> <button class="btn p" onclick="calc()">Calculate</button></p><div id="res"></div></div>`;
+  drawLegs()}
+function drawLegs(){$("#legs").innerHTML=legs.length?legs.map((l,i)=>`<div class="leg"><span>${legText(l)}</span><a onclick="legs.splice(${i},1);drawLegs()">remove</a></div>`).join(""):'<p class="mute">No legs yet.</p>'}
+let lastCalc=null;
+async function calc(){if(!legs.length)return;const o=parseFloat($("#podds").value)||null;
+  const r=await post("parlay",{legs,odds:o});lastCalc={r,o};
+  $("#res").innerHTML=`<div class="row"><div><div class="mute">Model joint probability</div><div class="big">${pct(r.joint)}</div><div class="mute">fair odds ${r.fair_odds?r.fair_odds.toFixed(2):"–"} · if independent: ${pct(r.independent)}</div></div>
+   <div>${r.legs.map(l=>`<div class="mute">${legText(l)} → ${pct(l.p)}</div>`).join("")}</div>
+   ${r.value?`<div><div class="mute">Versus bookmaker odds ${lastCalc.o}</div><div class="big ${r.value.edge>0?"good":"bad"}">${r.value.edge>0?"+":""}${(r.value.edge*100).toFixed(1)} pts edge</div>
+   <div class="mute">implied ${pct(r.value.implied)} · EV per $1: ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)}${r.value.edge>0?"":" — bookmaker price is better than the model thinks; skip or look elsewhere"}</div></div>`:""}</div>
+   <p class="mute">The model has modest accuracy edges over a plain average (see Scorecard); treat a positive edge as a prompt to look closer, not a guarantee.</p>
+   <p><input id="note" placeholder="Note for friends (optional)" style="width:min(420px,100%)"> <button class="btn" onclick="share()">Share as pick</button>
+   <input id="stake" type="number" placeholder="stake $" style="width:90px"> <button class="btn" onclick="logBet()">Log bet</button></p>`}
+async function share(){login();await post("picks",{legs:legs.map(l=>({...l,text:legText(l)})),note:$("#note").value,odds:lastCalc.o,model_prob:lastCalc.r.joint});go("picks")}
+async function logBet(){login();const s=parseFloat($("#stake").value);if(!s||!lastCalc.o){alert("Enter parlay odds and stake first");return}
+  await post("bets",{legs:legs.map(l=>({...l,text:legText(l)})),stake:s,odds:lastCalc.o,model_prob:lastCalc.r.joint});go("bets")}
+
+async function picks(a){login();const ps=await api("picks");
+  a.innerHTML=ps.length?ps.map(p=>`<div class="card"><b>${p.user}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span>
+   <div class="legs">${p.legs.map(l=>`<div class="leg"><span>${l.text}</span></div>`).join("")}</div>
+   <div class="mute">${p.odds?`odds ${p.odds} · `:""}${p.model_prob!=null?`model ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${p.note.replace(/</g,"&lt;")}</p>`:""}
+   <button class="btn" onclick="vote(${p.id},1)">👍</button><button class="btn" onclick="vote(${p.id},-1)">👎</button> <b>${p.score}</b> <span class="mute">(${p.voters} votes)</span>
+   ${p.comments.map(c=>`<div class="mute"><b>${c.user}:</b> ${c.body.replace(/</g,"&lt;")}</div>`).join("")}
+   <input id="c${p.id}" placeholder="Comment" style="width:min(320px,100%)"> <button class="btn" onclick="cmt(${p.id})">Post</button></div>`).join(""):'<div class="card">No picks shared yet. Build a parlay and press “Share as pick”.</div>'}
+async function vote(id,v){await post(`picks/${id}/vote`,{v});render()}
+async function cmt(id){const b=$("#c"+id).value.trim();if(b){await post(`picks/${id}/comment`,{body:b});render()}}
+
+async function bets(a){login();const s=await api("scorecard");const m=s.model.stats;
+  a.innerHTML=`<div class="card"><h2>Bets</h2><table><tr><th>Who</th><th>Settled</th><th>Hit rate</th><th>Model expected</th><th>ROI</th></tr>`+
+   (s.users.map(u=>`<tr><td>${u.user}</td><td>${u.settled}/${u.bets}</td><td>${pct(u.hit_rate)}</td><td>${pct(u.expected_hit_rate)}</td><td class="${u.roi>0?"good":"bad"}">${u.roi==null?"–":(u.roi*100).toFixed(0)+"%"}</td></tr>`).join("")||'<tr><td colspan=5 class="mute">No bets logged.</td></tr>')+`</table>
+   <h3>Recent</h3><table>`+s.bets.map(b=>{const l=JSON.parse(b.legs);return `<tr><td>${b.user}: ${l.map(x=>x.text).join(" + ")}</td><td>$${b.stake} @ ${b.odds}</td><td>${b.result}</td><td>${b.user==localStorage.user?`<button class="btn" onclick="res(${b.id},'won')">won</button><button class="btn" onclick="res(${b.id},'lost')">lost</button><button class="btn" onclick="res(${b.id},'void')">void</button>`:""}</td></tr>`}).join("")+`</table></div>
+   <div class="card"><h2>Model scorecard</h2><p class="mute">Backtest: trained on games before ${s.model.cut}, scored on ${s.model.n_test.toLocaleString()} later player-games. Lower error and Brier = better.</p>
+   <table><tr><th>Stat</th><th>Model MAE</th><th>10-game avg MAE</th></tr>${["pts","reb","ast"].map(k=>`<tr><td>${k.toUpperCase()}</td><td>${m[k].mae_model.toFixed(2)}</td><td>${m[k].mae_10game_avg.toFixed(2)}</td></tr>`).join("")}</table>
+   ${["dd","td"].map(k=>`<h3>${statName[k]} calibration <span class="mute">(${m[k].events} events · Brier ${m[k].brier.toFixed(4)} vs constant ${m[k].brier_constant.toFixed(4)})</span></h3>
+   <table><tr><th>Predicted range</th><th>Games</th><th>Avg predicted</th><th>Actual</th></tr>${m[k].calibration.map(c=>`<tr><td>${c.bin}</td><td>${c.n}</td><td>${pct(c.pred)}</td><td>${pct(c.actual)}</td></tr>`).join("")}</table>`).join("")}
+   <p class="mute">Takeaway: gradient-boosted projections beat a plain recent average only slightly — single games are very noisy. The useful edge is comparing the model's probability with the bookmaker's price, and tracking whether that holds over many bets.</p></div>`}
+async function res(id,r){await post(`bets/${id}/result`,{result:r});render()}
+
+async function player(a){
+  if(!playerId){await loadSlate();const p=slate[0]&&Object.values(slate[0].teams)[0].players[0];if(!p){a.innerHTML="Pick a player from Today.";return}playerId=p.player_id}
+  const d=await api("player/"+playerId);
+  a.innerHTML=`<div class="card"><h2>${d.player} <span class="mute">${d.team} · ${d.games} games in database</span></h2>
+   <div class="proj"><div><span>Triple-doubles L10/L20/L40</span><strong>${d.td.l10} / ${d.td.l20} / ${d.td.l40}</strong></div><div><span>Double-doubles L10/L20/L40</span><strong>${d.dd.l10} / ${d.dd.l20} / ${d.dd.l40}</strong></div></div></div>
+   <div class="row">`+["pts","reb","ast"].map(s=>`<div class="card"><h2>${s.toUpperCase()} <span class="mute">avg ${d.hit[s].mean20.toFixed(1)} · sd ${d.hit[s].sd20.toFixed(1)} (L20)</span></h2>
+    <table><tr><th>Over</th><th>L5</th><th>L10</th><th>L20</th><th>L40</th></tr>${d.hit[s].rows.map(r=>`<tr><td>${r.line}</td>${[5,10,20,40].map(w=>`<td class="${r["l"+w]>=.8?"good":r["l"+w]<=.3?"bad":""}">${pct(r["l"+w])}</td>`).join("")}</tr>`).join("")}</table></div>`).join("")+`</div>
+   <div class="card"><h2>Last 10 games</h2><table><tr><th>Date</th><th>Opp</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>TD</th></tr>${d.last.map(g=>`<tr><td>${g.date}</td><td>${g.home?"vs":"@"} ${g.opp}</td><td>${g.min}</td><td>${g.pts}</td><td>${g.reb}</td><td>${g.ast}</td><td>${g.td?"✔":""}</td></tr>`).join("")}</table></div>`}
+
+(async()=>{login();$("#me").textContent=localStorage.user||"guest";nav();
+  try{meta=await api("meta");$("#meta").textContent=`data through ${meta.data_through}`}catch(e){}
+  render()})();
+</script>
+</body>
+</html>
