@@ -113,7 +113,12 @@ def save(preds):
     con = sqlite3.connect(DB)
     con.execute("CREATE TABLE IF NOT EXISTS projections(game_id TEXT, player_id TEXT, payload TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id))")
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-    con.execute("DELETE FROM projections")  # projections are only for upcoming games; drop stale rows
+    # replace rows for re-projected games; keep rows for games that started in the last 12h (the Live tab marks our picks);
+    # drop anything older
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%MZ")
+    for gid, payload in con.execute("SELECT game_id, payload FROM projections").fetchall():
+        if json.loads(payload)["start"] < cutoff: con.execute("DELETE FROM projections WHERE game_id=?", (gid,))
+    con.executemany("DELETE FROM projections WHERE game_id=?", [(g,) for g in {x["game_id"] for x in preds}])
     for p in preds:
         con.execute("INSERT OR REPLACE INTO projections VALUES(?,?,?,?)", (p["game_id"], p["player_id"], json.dumps(p), now))
     con.commit()

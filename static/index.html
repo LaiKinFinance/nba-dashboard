@@ -94,6 +94,19 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .modal{position:fixed;inset:0;background:rgba(5,9,16,.85);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}.modal .card{max-width:380px;width:100%}
 .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1 1 280px}
 .foot{font-size:12px;color:var(--mute);margin-top:6px}
+.lv{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.lh{display:flex;align-items:center;gap:8px;padding:12px;width:100%;background:none;border:0;text-align:left;cursor:pointer}.lh:hover{background:var(--card2)}
+.lt{flex:1 1 0;display:flex;align-items:center;gap:10px;min-width:0}.lt.r{justify-content:flex-end;text-align:right}.lt img{width:38px;height:38px;object-fit:contain;flex:none}
+.lt .sc{font-size:28px;font-weight:800;line-height:1}.lt .sc.w{color:#fff}.lt .sc.l{color:var(--mute);font-weight:600}.lt small{display:block;color:var(--mute);font-size:11.5px}
+.ls{text-align:center;flex:none;min-width:84px}.ls .st{font-size:12.5px;font-weight:700}.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:5px;animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.3}}.ls .ft{color:var(--mute)}.ab{display:none}
+@media(max-width:640px){.nm{display:none}.ab{display:inline}.lt{gap:6px}.lt img{width:30px;height:30px}.lt .sc{font-size:23px}.ls{min-width:78px}.lh{padding:10px 8px;gap:4px}}
+.lb2{display:none;border-top:1px solid var(--line);padding:6px 12px 12px;background:var(--bg2)}.lv.open .lb2{display:block}
+table.bx{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}table.bx th,table.bx td{padding:5px 4px;text-align:right;border-bottom:1px solid var(--line)}table.bx th{color:var(--mute);font-weight:500;font-size:11px}
+table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}
+.ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--gold)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:#4a2c10;color:var(--gold)}
+.prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
+
 </style>
 </head>
 <body>
@@ -107,7 +120,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["today","Games"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
+const TABS=[["today","Games"],["live","Live"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
 let tab=localStorage.tab&&TABS.some(t=>t[0]==localStorage.tab)?localStorage.tab:"today";
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,oddsManual=false,snaps={},alerts=[],live={};
@@ -137,7 +150,7 @@ const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
 function go(t,pid){tab=t;localStorage.tab=t;if(pid)playerId=pid;nav();render();scrollTo(0,0)}
 async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",tab!="today");
-  try{await({today,picks,bets,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
+  clearInterval(liveTimer);try{await({today,live:liveTab,picks,bets,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -306,6 +319,49 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
    <div class="${verdict}" style="font-size:16px"><b>${hits} of ${vals.length}</b> games over ${line} ${label} <span class="mute">(${vals.length?Math.round(hits/vals.length*100):0}%)</span></div></div></div>
    <div class="card"><h2>Double-doubles and triple-doubles</h2><div class="tiles" style="margin:0"><div class="tile"><div class="v">${d.last20.dd}</div><div class="k">double-doubles in last 20</div></div><div class="tile"><div class="v">${d.last20.td}</div><div class="k">triple-doubles in last 20</div></div><div class="tile"><div class="v">${s.td}</div><div class="k">triple-doubles this season</div></div></div></div>
    <details class="card"><summary>Show full game log</summary><table class="t" style="margin-top:8px"><tr><th>Date</th><th>Opp</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th></tr>${d.games.map(g=>`<tr><td>${g.date}</td><td>${g.home?"vs":"@"} ${g.opp}</td><td>${Math.round(g.min)}</td><td>${g.pts}</td><td>${g.reb}</td><td>${g.ast}</td></tr>`).join("")}</table></details>`}
+
+
+/* ---------- live scores ---------- */
+let LG=[],boxes={},openLive=new Set(),fullStats=false,myOpen=[],liveTimer=null,showAll=new Set();
+const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g.state=="post"?g.detail:timeOf(g.start);
+function catCount(r){return(r.pts>=10)+(r.reb>=10)+(r.ast>=10)}
+function tag(r){const c=catCount(r);if(c>=3)return'<span class="ch2 td">TD</span>';
+  if(c==2&&[r.pts,r.reb,r.ast].some(v=>v>=7&&v<10))return'<span class="ch2 w">TD WATCH</span>';if(c==2)return'<span class="ch2 dd">DD</span>';return""}
+function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="mute">Game has not started. Stats appear at tip-off.</p>';
+  if(!b)return'<p class="mute">Loading stats…</p>';
+  const sa=showAll.has(g.game_id);
+  return `<div style="display:flex;gap:6px;margin:6px 0"><button class="pill ${fullStats?"on":""}" onclick="fullStats=!fullStats;drawLive()">More stats</button><button class="pill ${sa?"on":""}" onclick="showAll.has('${g.game_id}')?showAll.delete('${g.game_id}'):showAll.add('${g.game_id}');drawLive()">All players</button></div>`+
+  b.teams.map(t=>{const rows=(sa?t.players:t.players.slice(0,8));
+    return `<div class="th"><img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}</div><div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th>${fullStats?"<th>STL</th><th>BLK</th><th>3PM</th><th>TO</th><th>+/-</th>":""}</tr>
+    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td>${fullStats?`<td>${r.stl}</td><td>${r.blk}</td><td>${r.fg3m}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
+function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.score,fin=g.state!="pre";
+  const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
+  return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?boxHTML(g):""}</div></div>`}
+function legNow(l){const b=boxes[l.game_id];if(!b)return null;for(const t of b.teams){const r=t.players.find(p=>p.player_id==l.player_id);if(r)return r}return null}
+function legProg(l){const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
+  if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
+  if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
+  if(!r)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
+  let cur,tgt,hit,txt;
+  if(l.stat=="dd"||l.stat=="td"){tgt=l.stat=="dd"?2:3;cur=catCount(r);hit=cur>=tgt;txt=`${cur} of ${tgt} categories at 10+ (PTS ${r.pts}, REB ${r.reb}, AST ${r.ast})`}
+  else{cur=r[l.stat];tgt=l.line+0.5;hit=cur>l.line;txt=hit?`${cur} ${statName[l.stat]} – cleared`:`${cur} ${statName[l.stat]} – needs ${Math.ceil(tgt-cur)} more`}
+  const done=g.state=="post",verdict=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${Math.min(100,cur/tgt*100)}%"></i></div></div>`}
+function myHTML(){const blocks=[];
+  if(legs.length)blocks.push(`<div class="card"><h2>Your bet slip</h2>${legs.map(legProg).join("")}</div>`);
+  myOpen.forEach(b=>{const l=JSON.parse(b.legs);blocks.push(`<div class="card"><h2>Your bet · $${b.stake} at ${b.odds}</h2>${l.map(legProg).join("")}</div>`)});
+  return blocks.length?`<h3 style="margin-top:0">Your bets in play</h3>${blocks.join("")}`:""}
+function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
+function drawLive(){const el=$("#lbody");if(!el)return;
+  const liveN=LG.filter(g=>g.state=="in").length;
+  el.innerHTML=myHTML()+(LG.length?`<h3 ${myHTML()?"":'style="margin-top:0"'}>${liveN?`${liveN} game${liveN>1?"s":""} live now`:"Games"}</h3>`+LG.map(liveHTML).join(""):'<div class="card empty">No games on the scoreboard right now.</div>')}
+async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catch(e){return}
+  const ids=new Set(openLive);[...legs,...myOpen.flatMap(b=>JSON.parse(b.legs))].forEach(l=>ids.add(l.game_id));
+  await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
+  if(tab=="live")drawLive()}
+async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. Stats from ESPN; ⭐ marks the model's top-3 players.</div><div id="lbody"><p class="mute">Loading…</p></div>`;
+  try{const sc=await api("scorecard");myOpen=sc.bets.filter(b=>b.user==localStorage.user&&b.result=="open")}catch(e){myOpen=[]}
+  await refreshLive();liveTimer=setInterval(refreshLive,20000)}
 
 /* ---------- install as app ---------- */
 let deferred=null;

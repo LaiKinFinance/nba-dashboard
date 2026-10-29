@@ -174,6 +174,23 @@ def live_status(x_code: str = Header("")):
                                    lineup=t.get("status", ""))
     return out
 
+@app.get("/api/live")
+def live_scores(x_code: str = Header("")):
+    check(x_code)
+    import live
+    try: return live.scoreboard()
+    except Exception: logging.exception("scoreboard failed"); raise HTTPException(502, "Live scores are temporarily unavailable")
+
+@app.get("/api/live/{game_id}")
+def live_box(game_id: str, x_code: str = Header("")):
+    """Live box score plus which players are our tracked top-3 for this game, with their pre-game projections."""
+    check(x_code)
+    import live
+    try: box = live.boxscore(game_id)
+    except Exception: logging.exception("boxscore failed"); raise HTTPException(502, "Live stats are temporarily unavailable")
+    box["tracked"] = {p["player_id"]: p["proj"] for p in projections_all() if p["game_id"] == game_id}
+    return box
+
 @app.get("/api/players")
 def players(q: str = "", x_code: str = Header("")):
     check(x_code)
