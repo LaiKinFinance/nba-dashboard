@@ -61,13 +61,14 @@ def lineups():
     return res
 
 def norm(n):
-    return re.sub(r"[^a-z ]", "", n.lower().replace(".", " ")).split()
+    from odds import norm_name
+    return norm_name(n).split()
 
 def name_match(full, abbreviated):
     """'Desmond Bane' vs 'D. Bane' / 'Desmond Bane' (last name must match, first initial must match)."""
     f, a = norm(full), norm(abbreviated)
     if not f or not a: return False
-    return f[-1] == a[-1] and f[0][0] == a[0][0]
+    return f[-1] == a[-1] and (f[0] == a[0] or (min(len(f[0]), len(a[0])) == 1 and f[0][0] == a[0][0]))
 
 if __name__ == "__main__":
     for g in upcoming(): print(g["date"], g["away"], "@", g["home"], g["status"])
