@@ -21,28 +21,84 @@ def refresh_odds():
     gl = list(games.values())
     return dict(props=odds.refresh(gl, pbg), lines=odds.refresh_lines(gl))
 
-def _refresh_loop():
-    """Background refresh every 4h: new box scores, re-project upcoming games, fetch bookmaker odds. Retrains weekly."""
+REFRESH_LOCK = threading.Lock()   # one refresh at a time (background loop and /api/refresh share it)
+TRAIN_EVERY = 7 * 86400
+
+def _status_set(key, ok, err=None):
+    """Remember when each refresh stage last worked / failed so /api/health can show it without reading logs."""
+    import odds
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    with closing(con()) as c:
+        c.execute("CREATE TABLE IF NOT EXISTS refresh_status(stage TEXT PRIMARY KEY, ok_at TEXT, fail_at TEXT, error TEXT)")
+        if ok: c.execute("INSERT INTO refresh_status(stage,ok_at) VALUES(?,?) ON CONFLICT(stage) DO UPDATE SET ok_at=excluded.ok_at, error=NULL", (key, now))
+        else: c.execute("INSERT INTO refresh_status(stage,fail_at,error) VALUES(?,?,?) ON CONFLICT(stage) DO UPDATE SET fail_at=excluded.fail_at, error=excluded.error", (key, now, odds.scrub(f"{type(err).__name__}: {err}")[:300]))
+        c.commit()
+
+def _stage(key, fn):
+    """Run one refresh stage; a failure is recorded and does not stop the later stages."""
+    try:
+        r = fn(); _status_set(key, True); return r
+    except Exception as e:
+        import odds, traceback
+        logging.error("refresh stage %s failed: %s", key, odds.scrub(traceback.format_exc())); _status_set(key, False, e)
+
+def _models_age():
+    try: return time.time() - os.path.getmtime(predict.MODELS)
+    except OSError: return float("inf")
+
+def refresh_once():
+    """One full cycle. Training is by saved-model age (not process start), so a deploy no longer retrains by itself."""
     import ingest
-    last_train = 0
+    with REFRESH_LOCK:
+        t = dt.date.today()
+        _stage("ingest", lambda: ingest.run(t - dt.timedelta(days=4), t))
+        if _models_age() > TRAIN_EVERY: _stage("train", predict.train)
+        _stage("project", lambda: predict.save(predict.project()))
+        _stage("odds", lambda: logging.info("odds refresh: %s", refresh_odds()))
+        _stage("grade", grade_picks); _stage("log_picks", log_picks)
+        _stage("backup", backup_db)
+
+def backup_db(keep=7):
+    """Daily consistent copy of the database inside the data volume (SQLite online backup); keeps the newest `keep`."""
+    d = os.path.join(os.path.dirname(DB), "backups"); os.makedirs(d, exist_ok=True)
+    dest = os.path.join(d, f"nba-{dt.date.today():%Y%m%d}.db")
+    if os.path.exists(dest): return dest
+    with closing(sqlite3.connect(DB)) as src, closing(sqlite3.connect(dest + ".tmp")) as dst: src.backup(dst)
+    os.replace(dest + ".tmp", dest)
+    for old in sorted(f for f in os.listdir(d) if f.endswith(".db"))[:-keep]: os.remove(os.path.join(d, old))
+    return dest
+
+def _refresh_loop():
+    """Background refresh every 4h: new box scores, re-project upcoming games, fetch bookmaker odds."""
     while True:
-        try:
-            t = dt.date.today(); ingest.run(t - dt.timedelta(days=4), t)
-            if time.time() - last_train > 7 * 86400: predict.train(); last_train = time.time()
-            predict.save(predict.project())
-            logging.info("odds refresh: %s", refresh_odds())
-            try: grade_picks(); log_picks()
-            except Exception: logging.exception("pick log/grade failed")
-        except Exception:
-            logging.exception("refresh failed")
-        time.sleep(4 * 3600)
+        refresh_once(); time.sleep(4 * 3600)
 
 app = FastAPI(title="NBA Top-3 Dashboard")
+
+from collections import defaultdict, deque
+from fastapi import Request
+from fastapi.responses import JSONResponse
+_hits = defaultdict(deque)
+RATE = (120, 60)           # requests per window seconds, per client
+MAX_BODY = 20_000          # bytes; bets, picks and parlays are tiny
+
+@app.middleware("http")
+async def limits(request: Request, call_next):
+    """Basic abuse protection: per-client request rate and request-body size on the API."""
+    if request.url.path.startswith("/api/"):
+        ip = (request.headers.get("fly-client-ip") or (request.client.host if request.client else "?"))
+        q, now = _hits[ip], time.time()
+        while q and now - q[0] > RATE[1]: q.popleft()
+        if len(q) >= RATE[0]: return JSONResponse({"detail": "Too many requests, slow down"}, status_code=429)
+        q.append(now)
+        if int(request.headers.get("content-length") or 0) > MAX_BODY: return JSONResponse({"detail": "Request too large"}, status_code=413)
+    return await call_next(request)
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_refresh_loop, daemon=True).start()
 
 def con():
-    c = sqlite3.connect(DB); c.row_factory = sqlite3.Row; return c
+    c = sqlite3.connect(DB, timeout=30); c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=30000"); c.execute("PRAGMA journal_mode=WAL"); return c
 
 def init():
     with closing(con()) as c:
@@ -63,11 +119,12 @@ def init():
 init()
 
 def who(x_user, x_code):
-    if ACCESS_CODE and x_code != ACCESS_CODE: raise HTTPException(401, "Wrong access code")
+    check(x_code)
     if not x_user or len(x_user.strip()) < 2: raise HTTPException(400, "Enter your name first")
     return x_user.strip()[:30]
 
 def check(x_code):
+    if not ACCESS_CODE and os.environ.get("FLY_APP_NAME"): raise HTTPException(503, "Server has no access code configured")   # never run open on the internet
     if ACCESS_CODE and x_code != ACCESS_CODE: raise HTTPException(401, "Wrong access code")
 
 def projections_all():
@@ -701,12 +758,25 @@ def vote(pid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str
         c.execute("INSERT OR REPLACE INTO votes VALUES(?,?,?)", (pid, user, v)); c.commit()
     return {"ok": True}
 
+_last_manual = [0.0]
+
 @app.post("/api/refresh")
 def refresh(x_code: str = Header("")):
     check(x_code)
-    import ingest
-    ingest.run(dt.date.today() - dt.timedelta(days=4), dt.date.today())
-    preds = predict.project(); predict.save(preds)
-    return dict(projections=len(preds))
+    if time.time() - _last_manual[0] < 600: raise HTTPException(429, "Refreshed less than 10 minutes ago")
+    if REFRESH_LOCK.locked(): raise HTTPException(409, "A refresh is already running")
+    _last_manual[0] = time.time(); refresh_once()
+    return dict(ok=True)
+
+@app.get("/api/health")
+def health():
+    """Public, secret-free status: is data fresh and did each refresh stage last succeed? (errors are scrubbed of keys)"""
+    import odds
+    with closing(con()) as c:
+        last = c.execute("SELECT max(date) d FROM games").fetchone()["d"]
+        made = c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"]
+        try: st = {r["stage"]: dict(ok_at=r["ok_at"], fail_at=r["fail_at"], error=odds.scrub(r["error"] or "") or None) for r in c.execute("SELECT * FROM refresh_status")}
+        except sqlite3.OperationalError: st = {}
+    return dict(data_through=last, projections_made=made, stages=st, models_age_days=round(_models_age() / 86400, 1), backups=sorted(os.listdir(os.path.join(os.path.dirname(DB), "backups")))[-3:] if os.path.isdir(os.path.join(os.path.dirname(DB), "backups")) else [])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
