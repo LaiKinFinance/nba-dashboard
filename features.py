@@ -3,6 +3,9 @@ import numpy as np, pandas as pd
 from top3 import load
 import absence, sqlite3, os
 
+# Bump whenever feature definitions or the data they read change. A saved model trained under another version is refused,
+# so old models can never be run against new feature logic.
+FEATURE_SCHEMA = "2026-10-p1:et-dates+5cat-dd+wave-placeholders"
 STATS = ["min", "pts", "reb", "ast"]
 
 def build(df=None):

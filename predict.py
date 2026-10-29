@@ -2,7 +2,7 @@
 import json, pickle, sqlite3, datetime as dt, os
 import numpy as np, pandas as pd
 from scipy import stats
-from features import build, FEATURES
+from features import build, FEATURES, FEATURE_SCHEMA
 from model import rotation, fit, dispersion, nb_over, TARGETS, ALL, feats_for
 import combos
 from top3 import top3
@@ -37,19 +37,49 @@ def _team_report():
     except Exception as e:
         print("team report failed:", e); return None
 
+class StaleModel(Exception):
+    """The saved model was trained under different feature definitions (or has no version) and must be retrained first."""
+
+ALPHA_DAYS = 42      # newest weeks held out to measure dispersion on games the model has not seen
+
+def model_stale():
+    try: b = pickle.load(open(MODELS, "rb"))
+    except Exception: return True
+    return b.get("schema") != FEATURE_SCHEMA
+
+def validate(report):
+    """Gate before a new model replaces the old one: it must not be clearly worse than a plain 10-game average on any core stat."""
+    bad = [t for t in TARGETS if report["stats"][t]["mae_model"] > 1.02 * report["stats"][t]["mae_10game_avg"]]
+    return (not bad), bad
+
 def train(report=True):
     df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
     cut = "2026-02-01"; tr = full[full.date < cut]
-    m_eval = fit(tr); alphas = {t: dispersion(m_eval[t], tr[feats_for(t)], tr[t]) for t in ALL}
-    corr = residual_corr(full, m_eval, alphas)
-    m = fit(full); alphas = {t: dispersion(m[t], full[feats_for(t)], full[t]) for t in ALL}
+    m_eval = fit(tr); alphas_eval = {t: dispersion(m_eval[t], tr[feats_for(t)], tr[t]) for t in ALL}
+    corr = residual_corr(full, m_eval, alphas_eval)
+    # dispersion measured out of sample: fit on everything except the newest ALPHA_DAYS, measure the spread of what happened after
+    end = pd.Timestamp(full.date.max()); w0 = str((end - pd.Timedelta(days=ALPHA_DAYS)).date())
+    A, W = full[full.date < w0], full[full.date >= w0]
+    if len(W) < 1500:                                    # off-season or very short window: widen to the last 1500 rows
+        w0 = full.date.sort_values().iloc[-1500]; A, W = full[full.date < w0], full[full.date >= w0]
+    mA = fit(A); alphas = {t: dispersion(mA[t], W[feats_for(t)], W[t]) for t in ALL}
+    m = fit(full)
     from model import evaluate
-    pickle.dump(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report())), open(MODELS, "wb"))
+    rep = dict(evaluate(full), team=_team_report(), alpha_window=[str(w0), str(full.date.max())], alpha_train_method="out-of-sample")
+    ok, bad = validate(rep)
+    bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=rep, schema=FEATURE_SCHEMA)
+    target = MODELS if ok else MODELS + ".rejected"      # a model that fails validation is kept for inspection but never used
+    tmp = target + ".tmp"                                # write beside the live file, then swap: a crash never leaves a half-written model
+    with open(tmp, "wb") as f: pickle.dump(bundle, f)
+    os.replace(tmp, target)
+    if not ok: raise RuntimeError(f"new model rejected: worse than 10-game average on {bad}")
     return m, alphas, corr
 
-def load_models():
+def load_models(strict=True):
     if not os.path.exists(MODELS): train()
-    return pickle.load(open(MODELS, "rb"))
+    b = pickle.load(open(MODELS, "rb"))
+    if strict and b.get("schema") != FEATURE_SCHEMA: raise StaleModel("saved model predates the current feature definitions; retrain first")
+    return b
 
 def pick_top3(raw, team, out_names, lineup_names):
     """Top-3 by recent production, skipping anyone ruled out (injury report or Rotowire may-not-play)."""

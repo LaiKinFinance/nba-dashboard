@@ -82,7 +82,7 @@ def odds_status():
 @app.get("/api/meta")
 def meta(x_code: str = Header("")):
     check(x_code)
-    b = predict.load_models()
+    b = predict.load_models(strict=False)
     with closing(con()) as c:
         last = c.execute("SELECT max(date) d FROM games").fetchone()["d"]
         made = c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"]
@@ -110,7 +110,7 @@ def enriched():
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
         book = odds.load(c)
-    alphas = predict.load_models()["alphas"]
+    alphas = predict.load_models(strict=False)["alphas"]
     # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
     hist = {}
     if ids:
@@ -451,7 +451,7 @@ def compute_best():
     cands.sort(key=lambda x: -x["score"])
     combo, used, games = [], set(), set()
     pmap = {(p["game_id"], p["player_id"]): p for p in preds}
-    alph = predict.load_models(); res = None
+    alph = predict.load_models(strict=False); res = None
     for c in cands:
         if c["player_id"] in used or c["game_id"] in games: continue  # spread across players and games to limit correlation
         combo.append(c); used.add(c["player_id"]); games.add(c["game_id"])
@@ -588,7 +588,7 @@ def parlay_calc(body: dict = Body(...), x_code: str = Header("")):
     if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner, handicap or margin leg per game")
     tot_games = [l["game_id"] for l in tm_legs if l["stat"] in TOTAL_GROUP]
     if len(tot_games) != len(set(tot_games)): raise HTTPException(400, "Pick only one game total or team total per game")
-    b = predict.load_models()
+    b = predict.load_models(strict=False)
     rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
     tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
     pi, ti = iter(rp["leg_probs"]), iter(tp)
@@ -606,7 +606,7 @@ def parlay_calc(body: dict = Body(...), x_code: str = Header("")):
 @app.get("/api/scorecard")
 def scorecard(x_code: str = Header("")):
     check(x_code)
-    rep = predict.load_models()["report"]
+    rep = predict.load_models(strict=False)["report"]
     with closing(con()) as c:
         bets = [dict(r) for r in c.execute("SELECT * FROM bets ORDER BY id DESC")]
     users = {}
