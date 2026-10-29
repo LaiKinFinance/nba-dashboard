@@ -270,7 +270,7 @@ setInterval(pollStatus,180000);
 async function loadSlate(){slate=await api("slate")}
 function hitTxt(h,n){if(!n)return"";const c=h/n>=.8?"hg":h/n<=.3?"hb":"";return `<span class="${c}">${h}/${n}</span>`}
 function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
-  const val=o.price&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
+  const val=o.price&&!o.stale&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
   return `<button class="od ${val?"val":""} ${bst?"bst":""} ${fad?"fad":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}${bst?'<span class="bt">BOOST</span>':fad?'<span class="ft">FADE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}
    <div class="l">O ${o.line}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
 function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return"";
@@ -289,7 +289,7 @@ function moreHTML(p){const defs=[["pra","PRA"],["pr","P+R"],["pa","P+A"],["fg3m"
 function playerHTML(p){
   const mk=["pts","reb","ast"].map(st=>statRow(p,st,st.toUpperCase())).join("");
   const dd=p.book&&p.book.dd,td=p.book&&p.book.td;
-  const sp=(s,prob,b,h)=>{const val=b&&b.edge>=0.04;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:0,side:"over"}),hist=p.dd_td_hist||{};
+  const sp=(s,prob,b,h)=>{const val=b&&!b.stale&&b.edge>=0.04;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:0,side:"over"}),hist=p.dd_td_hist||{};
     const note=s=="td"?`${hist.td||0} in ${hist.games||0} games`:`${hist.dd20||0} in last 20`;
     return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',0,${b?b.price:0},'${b?b.book:""}',${prob},${h.k},${h.n})">${val?'<span class="vt">VALUE</span>':""}<span class="l" style="text-align:left">${statName[s]}</span><span><span class="o">${b?b.price.toFixed(2):dec(prob)}</span><span class="p">${pct(prob)} · ${note}</span></span></button>`};
   const l10=p.last10||[],l5=l10.slice(0,5),av=k=>l5.length?(l5.reduce((a,x)=>a+x[k],0)/l5.length).toFixed(1):"–";
@@ -301,7 +301,7 @@ function playerHTML(p){
    <div class="l5"><table><tr><th></th><th>PTS</th><th>REB</th><th>AST</th><th>MIN</th></tr>${l5.map(g=>`<tr><td>${g.home?"vs":"@"} ${g.opp}</td><td class="${g.pts>p.proj.pts+3?"hi":g.pts<p.proj.pts-5?"lo":""}">${g.pts}</td><td class="${g.reb>p.proj.reb+2?"hi":g.reb<p.proj.reb-2?"lo":""}">${g.reb}</td><td class="${g.ast>p.proj.ast+2?"hi":g.ast<p.proj.ast-2?"lo":""}">${g.ast}</td><td>${Math.round(g.min)}</td></tr>`).join("")}</table><div class="mute" style="font-size:11px">Green = well above today's projection, red = well below.</div></div>`:""}</div>`}
 const gtab={};let gameIdx={};
 const nm=t=>NAMES[t]||t;
-function tbtn(g,stat,side,line,o){const val=o.price&&o.edge>=0.04,k=key({game_id:g,stat,line,side,team:o.team,lo:o.lo});
+function tbtn(g,stat,side,line,o){const val=o.price&&!((gameIdx[g]||{}).match||{}).stale_prices&&o.edge>=0.04,k=key({game_id:g,stat,line,side,team:o.team,lo:o.lo});
   return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pickTeam('${g}','${stat}','${side}',${line},${o.price||0},'${o.book||""}',${o.prob},'${esc(o.text)}','${o.team||""}',${o.lo||0},${o.hi==null?"null":o.hi})">${val?'<span class="vt">VALUE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}${o.nolabel?"":`<div class="l">${esc(o.label)}${o.price?" · "+bk(o.book):""}</div>`}<div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)}${o.nolabel&&o.price?" · "+bk(o.book):""}</div></button>`}
 const stripH=h=>`<div class="stw"><div class="strip">${h}</div></div>`;
 const mb={},MBD={hand:"home",tot:"over",ttT:"home",ttO:"over"};
@@ -340,7 +340,9 @@ function formBadges(g,team){const f=((g.insight||{}).form||{})[team]||[];return 
 function h2hHTML(g){const ins=g.insight;if(!ins)return'<p class="mute">No history yet.</p>';const m=g.match,teams=Object.keys(ins.form);
   const col=t=>`<div><div class="sbt">${nm(t)} – last ${ins.form[t].length}</div>${[...ins.form[t]].reverse().map(x=>`<div class="hr"><i class="${x.r}">${x.r}</i><span>vs ${nm(x.opp)}</span><span class="d" style="margin-left:auto">${x.date.slice(5)}</span><span class="sc2">${x.score}</span></div>`).join("")||'<p class="mute">No games yet.</p>'}</div>`;
   return `<div class="hh">${col(teams[0])}${col(teams[1])}</div><div class="sbt">Last head-to-head</div>`+(ins.h2h.length?ins.h2h.map(x=>`<div class="hr"><span class="d">${x.date}</span><span>${nm(x.away)} ${x.away_pts}</span><span>@</span><span>${nm(x.home)} ${x.home_pts}</span><span class="sc2">${x.home_pts>x.away_pts?nm(x.home):nm(x.away)} won</span></div>`).join(""):'<p class="mute">No recent meetings in the data.</p>')}
-function gbodyHTML(g){const id=g.game_id,m=g.match;let h="";
+function oldPriceNote(g){const ages=[g.match&&g.match.price_age_h,...Object.values(g.teams||{}).flatMap(t=>t.players.map(p=>p.odds_age_h))].filter(x=>x!=null);
+  const worst=ages.length?Math.max(...ages):null;return worst!=null&&worst>8?`<div class="note" style="margin:0 0 8px">Some bookmaker prices for this game are about ${Math.round(worst)} hours old. VALUE labels are switched off until they are refreshed. Check the price on Sportsbet before betting.</div>`:""}
+function gbodyHTML(g){const id=g.game_id,m=g.match;let h=oldPriceNote(g);
   h+=sec(id,"top","Top Markets",topHTML(g));
   h+=sec(id,"players","Player Props",playersHTML(g));
   if(m){h+=sec(id,"margin","Margin Markets",marginHTML(g));if((m.team_totals||{}).home)h+=sec(id,"tteam","Team Totals",ttHTML(g))}

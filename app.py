@@ -229,6 +229,12 @@ def require_current_model(preds=None):
 def _dd(r): return int(_cats(r) >= 2)
 def _td(r): return int(_cats(r) >= 3)
 
+MIN_EDGE, MIN_EDGE_UNSURE = 0.06, 0.09
+STALE_H = 8.0     # a bookmaker price older than this (hours) gets no VALUE label anywhere
+
+def is_stale(age_h):
+    return age_h is not None and age_h > STALE_H
+
 STRIPS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa")
 COMBO_PARTS = {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}
 EXTRA_MIN = {"fg3m": 0.7, "stl": 0.8, "blk": 0.6}   # only show a market when the player realistically produces it
@@ -315,6 +321,11 @@ def enriched():
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
+        if is_stale(p.get("odds_age_h")):                 # old prices stay visible (with their age) but can never look like value
+            for s, rows_ in list(p["strip"].items()):
+                for l in rows_: l["stale"] = True; l["edge"] = None
+            for s, v in p["book"].items():
+                for l in (v if isinstance(v, list) else [v]): l["stale"] = True; l["edge"] = None
     return preds
 
 def _results_table():
@@ -342,11 +353,12 @@ def _alt(sides, side):
     cur, best = sides.get(side), sides.get(side + "_best")
     return [best[0], best[1]] if cur and best and best[1] != cur[1] and best[0] >= cur[0] * 1.03 else None
 
-def match_payload(gp, bl):
+def match_payload(gp, bl, age_h=None):
     """Market-based prices for winner/handicap/total/team totals/margin bands, with bookmaker prices merged in where the Odds API supplied them."""
     if not gp: return None
     m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals", "team_totals", "bands") if k in gp}
     m["source"] = gp.get("source", "model")
+    m["price_age_h"] = age_h; m["stale_prices"] = is_stale(age_h)      # winner/handicap/total prices: shown with their age, never as VALUE once old
     bl = bl or {}
     h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(h2[s]) for s in ("home", "away") if s in h2}
     m["alt_h2h"] = {s: _alt(h2, s) for s in ("home", "away") if _alt(h2, s)}
@@ -375,9 +387,9 @@ def get_slate(x_code: str = Header("")):
     check(x_code)
     import odds
     games = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
-    with with_c as c: bl = odds.load_lines(c)
+    with with_c as c: bl = odds.load_lines(c); lage = odds.line_ages(c)
     for p in enriched():
-        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"])),
+        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"])),
                                                 insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"])))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
@@ -531,12 +543,10 @@ def value_picks(x_code: str = Header("")):
     except Exception: logging.exception("pick logging failed")
     return res
 
-MIN_EDGE, MIN_EDGE_UNSURE, STALE_H, MAX_AGE_H = 0.06, 0.09, 6.0, 14.0
 
 def min_edge(p):
-    """Smallest model-vs-price gap worth flagging. Higher when the price is old or the player's status is not settled; None-age (manual) counts as fresh."""
-    age = p.get("odds_age_h")
-    unsure = (age is not None and age > STALE_H) or (p.get("injury") or {}).get("status") in ("Questionable", "Day-To-Day", "Doubtful", "Game Time Decision")
+    """Smallest model-vs-price gap worth flagging: higher when the player's status is not settled. (Old prices never get here: see is_stale.)"""
+    unsure = (p.get("injury") or {}).get("status") in ("Questionable", "Day-To-Day", "Doubtful", "Game Time Decision")
     return MIN_EDGE_UNSURE if unsure else MIN_EDGE
 
 def compute_value():
@@ -545,7 +555,7 @@ def compute_value():
     if why: return dict(picks=[], odds_connected=bool(__import__("odds").available()), notice=why)
     for p in preds:
         if (p.get("injury") or {}).get("status") in ("Out",): continue
-        if (p.get("odds_age_h") or 0) > MAX_AGE_H: continue      # prices this old are too stale to call "value"
+        if is_stale(p.get("odds_age_h")): continue      # an old price is not a reliable "value"
         for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
             for l in p["strip"].get(s, []):
                 if not l["price"]: continue
@@ -574,9 +584,10 @@ def compute_value():
     ranked = sorted(best.values(), key=lambda o: -o["adj_edge"])[:12]
     # team markets from bookmaker prices
     gp = game_preds(); import odds as _o
-    with closing(con()) as c: bl = _o.load_lines(c)
+    with closing(con()) as c: bl = _o.load_lines(c); lage = _o.line_ages(c)
     for gid, g in gp.items():
         b = bl.get(gid) or {}
+        if is_stale(lage.get(gid)): continue          # old team prices are not value
         if g.get("source") != "market": continue   # without a market line our own team model has no proven edge, so no team value claims
         for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
             pr = (b.get("h2h") or {}).get(side)

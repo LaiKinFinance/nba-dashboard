@@ -16,8 +16,7 @@ def test_closing_price_uses_last_snapshot_before_tip(tmp_path, monkeypatch):
     c = odds.closing_price(con, "g1", "p1", "pts", 24.5, "over", None, _t(0)); assert c[0] == 1.95 and c[1] == "tab"
     assert odds.closing_price(con, "g1", "p1", "pts", 24.5, "over", "sportsbet", _t(-6)) is None
 
-def test_min_edge_is_stricter_when_price_old_or_status_unsure():
+def test_min_edge_is_stricter_when_status_unsure():
     import app
-    assert app.min_edge({"odds_age_h": 1.0}) == app.MIN_EDGE
-    assert app.min_edge({"odds_age_h": 8.0}) == app.MIN_EDGE_UNSURE
-    assert app.min_edge({"odds_age_h": 1.0, "injury": {"status": "Questionable"}}) == app.MIN_EDGE_UNSURE
+    assert app.min_edge({}) == app.MIN_EDGE
+    assert app.min_edge({"injury": {"status": "Questionable"}}) == app.MIN_EDGE_UNSURE

@@ -201,6 +201,13 @@ def fetch_ages(con):
     except sqlite3.OperationalError: return {}
     return {g: (now - dt.datetime.fromisoformat(t)).total_seconds() / 3600 for g, t in rows if t}
 
+def line_ages(con):
+    """{game_id: hours since a real winner/handicap/total price was last stored for it} (same idea as fetch_ages, for team bets)."""
+    now = dt.datetime.now(dt.timezone.utc)
+    try: rows = con.execute("SELECT game_id, max(fetched_at) FROM book_lines GROUP BY game_id").fetchall()
+    except sqlite3.OperationalError: return {}
+    return {g: (now - dt.datetime.fromisoformat(t)).total_seconds() / 3600 for g, t in rows if t}
+
 def closing_price(con, game_id, player_id, stat, line, side, book, tip_utc):
     """Last archived price for this exact bet before tip-off: (price, book, minutes_before_tip) or None.
     With no book given, the best price at the latest snapshot. The 'closing' price is only as late as our last fetch, so the gap is returned."""
