@@ -180,3 +180,13 @@ def test_one_time_clean_start_clears_saved_picks_once_and_keeps_a_copy(db):
     assert os.path.exists(kept)
     _bet(db, [L("pts", 24.5)]); app.one_time_reset()
     assert db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 1
+
+
+def test_a_fresh_start_on_the_bundled_database_sets_itself_up():
+    import subprocess, sys, shutil, tempfile, os
+    d = tempfile.mkdtemp(); shutil.copy(os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "nba.db"), d)
+    code = ("import app; from fastapi.testclient import TestClient; r = TestClient(app.app).get('/api/scorecard'); "
+            "assert r.status_code == 200, r.text; print('ok')")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={**os.environ, "DATA_DIR": d, "AUTO_REFRESH": "0"},
+                         cwd=os.path.dirname(os.path.dirname(__file__)))
+    assert "ok" in out.stdout, out.stderr[-600:]

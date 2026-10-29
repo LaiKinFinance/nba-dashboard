@@ -252,6 +252,8 @@ def one_time_reset():
             for t in ("comments", "votes", "picks", "bets"): c.execute(f"DELETE FROM {t}")
         c.execute("INSERT INTO one_time_jobs VALUES(?,?)", (RESET_ID, dt.datetime.now(dt.timezone.utc).isoformat())); c.commit()
 
+init()
+
 def who(x_user, x_code):
     check(x_code)
     if not x_user or len(x_user.strip()) < 2: raise HTTPException(400, "Enter your name first")
