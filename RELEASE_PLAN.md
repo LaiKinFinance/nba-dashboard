@@ -5,6 +5,8 @@ Written in plain words. The detailed evidence is in `REVIEW_REPORT.md`.
 ## What would go live
 The whole set on `review/27-final-candidate` (the 17 earlier steps plus the second round of fixes: stale results, no points advice, started games, per-version checks, refund prices, "under" wording, points study, missing games, backups). Today's website is the version on `main` (`1df220a`).
 
+The refund calculations from the earlier step were removed again (Mark's decision to simplify): see `REVIEW_REPORT.md` section 14.
+
 Not included: any fix that makes points chances accurate. Points VALUE labels, "safe" labels and all profit/stake advice on slips with points stay switched off.
 
 ## The order (each stage waits for Mark's "yes")
@@ -32,7 +34,8 @@ Not included: any fix that makes points chances accurate. Points VALUE labels, "
 - Best picks is the first page. Pages load faster.
 - Fewer VALUE labels (prices older than 8 hours get none; no VALUE for points).
 - No profit/stake advice on any slip that includes points; the points warning stays.
-- My bets mark themselves won / lost / refunded when games finish.
+- My bets mark themselves won / lost when games finish. If part of a bet finished exactly level or was cancelled, the app does NOT guess: it asks you to type the money Sportsbet actually returned.
+- Whole-number lines (such as over 20 or handicap -4) get no chances or advice, only a short explanation. Half-point lines and "20 or more" bets work as before.
 - Notes such as "prices are N hours old", "Frozen", "predictions are being updated".
 
 ## Going back (rehearsed on copies)

@@ -1,8 +1,10 @@
 """Automatic win / lose marking for logged bets, from the final scores and box scores.
 
-A leg ends as: 'won', 'lost', 'push' (tie on a whole-number line: stake on that leg is refunded), 'void' (player did not play: leg is cancelled)
-or None (the game is not finished, or its box score is not in yet). A bet is lost as soon as any leg is lost; it is won when every leg is
-finished and none lost (push and void legs simply drop out); it is a full refund when every leg dropped out."""
+A leg ends as: 'won', 'lost', 'push' (finished exactly level on a whole-number line), 'void' (player did not play) or None (game not finished,
+or its box score is not in yet). A bet is lost as soon as any leg is lost; it is won when every leg is finished and all won. If any leg finished
+level or was cancelled, the app does NOT work out the payment: it asks the person to enter the money Sportsbet actually returned."""
+
+from levels import as_over_line
 
 COMBO = {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}
 CATS = ("pts", "reb", "ast", "stl", "blk")
@@ -28,6 +30,7 @@ def leg_result(leg, game, player):
         if stat == "tt": return _cmp(h if leg.get("team") == "home" else a, float(leg["line"]), side)
         m = margin if leg.get("team") == "home" else -margin                   # band: win by lo..hi
         return "won" if m >= leg["lo"] and (leg.get("hi") is None or m <= leg["hi"]) else "lost"
+    leg = as_over_line(leg); stat, side = leg["stat"], leg.get("side", "over")      # "20 or more" is judged as over 19.5
     if player is None: return None
     if player == "missing": return "void"
     if stat in ("dd", "td"):
@@ -37,18 +40,10 @@ def leg_result(leg, game, player):
     return _cmp(val, float(leg["line"]), side)
 
 def settle_bet(legs, results):
-    """results: one leg result per leg. Returns 'open' | 'won' | 'lost' | 'void'."""
+    """results: one leg result per leg. Returns 'open' | 'won' | 'lost' | 'review'.
+    'review' = the games are finished, nothing lost, but at least one leg finished level or was cancelled: what Sportsbet actually paid back
+    can only be known from Sportsbet, so the person enters it (the app never works it out or guesses it)."""
     if "lost" in results: return "lost"
     if any(r is None for r in results): return "open"
-    live = [r for r in results if r == "won"]
-    return "won" if live else "void"
-
-def reduced_odds(legs, results, full_odds):
-    """Payout odds when some legs dropped out. Needs every leg's own price; otherwise returns (full_odds, False) = 'cannot reduce'."""
-    dropped = [l for l, r in zip(legs, results) if r in ("push", "void")]
-    if not dropped: return full_odds, True
-    prices = [l.get("price") for l in legs if l not in dropped]
-    if any(p is None for p in prices): return full_odds, False
-    out = 1.0
-    for p in prices: out *= p
-    return out, True
+    if any(r in ("push", "void") for r in results): return "review"
+    return "won"

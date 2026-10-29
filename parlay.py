@@ -43,7 +43,9 @@ def leg_prob_single(pred, alphas, leg):
         p = float(over_prob(s, pred["proj"][s], alphas, leg["line"]))
     return p if leg.get("side", "over") == "over" else 1 - p
 
-def parlay(legs, preds, alphas, corr, n=60000, seed=7, prices=None, team_extra=None):
+def parlay(legs, preds, alphas, corr, n=60000, seed=7):
+    from levels import as_over_line
+    legs = [as_over_line(l) for l in legs]        # "20 or more" is calculated as over 19.5
     # variables: one latent per (game, player, component)
     var = {}
     def add(pid, game, comp):
@@ -73,41 +75,20 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7, prices=None, team_extra=N
         if comp in ("dd", "td"):
             p = pred["p_dd"] if comp == "dd" else pred["p_td"]; vals[(game, pid, comp)] = (u[:, v["i"]] > 1 - p).astype(float)
         else: vals[(game, pid, comp)] = samples(comp, u[:, v["i"]], pred["proj"][comp], alphas)
-    wins, pushes, probs = [], [], []
+    wins, probs = [], []
     for l in legs:
         game, pid, s = l["game_id"], l["player_id"], l["stat"]
-        zero = np.zeros(len(u), dtype=bool)
         if s in ("dd", "td"):
             w = vals[(game, pid, s)] > 0.5
             if l.get("side", "over") == "under": w = ~w
-            pu = zero
         else:
             x = sum(vals[(game, pid, c)] for c in (COMBO[s] if s in COMBO else (s,)))
             w = x > l["line"] if l.get("side", "over") == "over" else x < l["line"]
-            pu = (x == l["line"]) if float(l["line"]).is_integer() else zero      # a tie on a whole-number line refunds the stake
-        wins.append(w); pushes.append(pu)
+        wins.append(w)
         exact = leg_prob_single(preds[(l["game_id"], pid)], alphas, l)
         probs.append(float(exact) if exact is not None else float(w.mean()))
     joint = float(np.logical_and.reduce(wins).mean()) if wins else 1.0
-    out = dict(leg_probs=probs, push_probs=[float(p.mean()) for p in pushes], independent=float(np.prod(probs)) if probs else 1.0, joint=joint,
-               fair_odds=float(1 / joint) if joint > 0 else None)
-    if prices is not None:
-        out["ev"] = refund_ev(wins, pushes, prices, team_extra or [], rng_seed=seed + 1)
-    return out
-
-def refund_ev(wins, pushes, prices, team_extra, rng_seed=8):
-    """Expected profit per 1 staked when a tie refunds that leg (the bet pays on the remaining legs' prices).
-    wins/pushes: simulated yes/no per player leg; prices: decimal price for each player leg; team_extra: [(win_prob, push_prob, price)]
-    for team legs (treated as independent of everything else). Returns None if any needed price is missing."""
-    if any(p is None for p in prices) or any(t[2] is None for t in team_extra): return None
-    n = len(wins[0]) if wins else 20000
-    rng = np.random.default_rng(rng_seed); lost = np.zeros(n, dtype=bool); mult = np.ones(n)
-    for w, pu, pr in zip(wins, pushes, prices):
-        lost |= ~(w | pu); mult *= np.where(w, pr, 1.0)
-    for pw, pp, pr in team_extra:
-        r = rng.random(n); w = r < pw; pu = (r >= pw) & (r < pw + pp)
-        lost |= ~(w | pu); mult *= np.where(w, pr, 1.0)
-    return float(np.where(lost, -1.0, mult - 1.0).mean())
+    return dict(leg_probs=probs, independent=float(np.prod(probs)) if probs else 1.0, joint=joint, fair_odds=float(1 / joint) if joint > 0 else None)
 
 def value(joint, decimal_odds):
     """Edge and expected value per 1 staked; kelly fraction (full) for reference."""

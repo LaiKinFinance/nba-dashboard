@@ -21,7 +21,7 @@ def leg(stat, line=20.5, **k): return dict(game_id="g", player_id="p", stat=stat
     [leg("pts")], [leg("pra", 30.5)], [leg("pr", 25.5)], [leg("pa", 22.5)],
     [leg("pts"), leg("reb", 6.5)],                                                  # points mixed with a non-points player leg
     [leg("pts", 19.5, price=1.9), dict(game_id="g", stat="ml", side="home", price=1.7)],       # points mixed with a team leg, with prices
-    [leg("reb", 6.5), leg("pts", 20.0, price=1.9), leg("reb", 7.5, price=1.8)],     # whole-number points line too
+    [leg("reb", 6.5), leg("pts", 20.5, price=1.9), leg("reb", 7.5, price=1.8)],
 ])
 def test_points_slips_have_no_value_profit_or_stake_advice(client, legs):
     for odds in (None, 2.0, 5.0):

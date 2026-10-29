@@ -51,10 +51,18 @@ test('under wording says the bet can still be lost, and shows when it already ha
   assert.match(calc({stat:'pra',line:30.5,side:'under'},box).txt,/must stay under/);
   assert.match(calc({stat:'pra',line:20.5,side:'under'},box).txt,/already over the line, this under has lost/);
 });
-test('exactly on a whole-number line is a refund, not a win or a loss', () => {
+test('exactly on a whole-number line is level, not a win or a loss, and the app says Sportsbet decides', () => {
   for (const side of ['over','under']) {
     const r=calc({stat:'pra',line:24,side},box);
-    assert.equal(r.refund,true); assert.equal(r.hit,false); assert.match(r.txt,/refunded/);
+    assert.equal(r.level,true); assert.equal(r.hit,false); assert.match(r.txt,/level/); assert.doesNotMatch(r.txt,/refund/i);
   }
-  assert.equal(calc({stat:'pra',line:23,side:'over'},box).refund,false);
+  assert.equal(calc({stat:'pra',line:23,side:'over'},box).level,false);
+});
+
+test('"20 or more" wins on exactly 20 and is not the same as over 20', () => {
+  const b20={pts:20,reb:0,ast:0};
+  const more=calc({stat:'pts',line:20,side:'over',kind:'atleast'},b20); assert.equal(more.hit,true); assert.equal(more.level,false);
+  const over=calc({stat:'pts',line:20,side:'over'},b20); assert.equal(over.hit,false); assert.equal(over.level,true);
+  assert.equal(calc({stat:'pts',line:20,side:'over',kind:'atleast'},{pts:19,reb:0,ast:0}).hit,false);
+  assert.match(calc({stat:'pts',line:20,side:'over',kind:'atleast'},{pts:17,reb:0,ast:0}).txt,/needs 3 more/);
 });

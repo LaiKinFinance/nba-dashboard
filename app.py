@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Header, Body
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-import predict, parlay as pl, slate as sl
+import predict, parlay as pl, slate as sl, levels
 from features import FEATURE_SCHEMA
 from inputs import BetInput, PickInput, ParlayInput
 
@@ -227,7 +227,7 @@ def init():
         CREATE TABLE IF NOT EXISTS manual_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, odds REAL, PRIMARY KEY(game_id, player_id, stat, line, side));
         """)
         bhave = {r[1] for r in c.execute("PRAGMA table_info(bets)")}
-        for col, typ in (("manual", "INTEGER DEFAULT 0"), ("settled_at", "TEXT"), ("leg_results", "TEXT"), ("settle_note", "TEXT"), ("payout_odds", "REAL")):
+        for col, typ in (("manual", "INTEGER DEFAULT 0"), ("settled_at", "TEXT"), ("leg_results", "TEXT"), ("settle_note", "TEXT"), ("payout_odds", "REAL"), ("returned_amount", "REAL"), ("needs_amount", "INTEGER DEFAULT 0")):
             if col not in bhave: c.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
         have = {r[1] for r in c.execute("PRAGMA table_info(pick_log)")}
         for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL"), ("model_id", "TEXT")):
@@ -387,11 +387,12 @@ def _enriched_build():
             bl = {}
             for line, sides in sorted(b.get(s, {}).items()):
                 if "over" not in sides: continue
+                if _whole(line): p.setdefault("level_lines", {}).setdefault(s, []).append(float(line)); continue       # could finish level: no chances or advice
                 po = pmodel(line)
                 if po is None: continue
                 price, bk = sides["over"]; best = sides.get("over_best"); alt = None
                 if best and best[1] != bk and best[0] >= price * 1.03: alt = [best[0], best[1]]
-                bl[line] = dict(line=line, price=price, book=bk, p_over=po, edge=(None if _whole(line) else po - 1 / price), refund=_whole(line), hit=sum(1 for r in l10 if val(r) > line), n=n,
+                bl[line] = dict(line=line, price=price, book=bk, p_over=po, edge=po - 1 / price, hit=sum(1 for r in l10 if val(r) > line), n=n,
                                 under=(sides.get("under") or [None])[0], alt=alt)
             if bl: p["book"][s] = list(bl.values())
             lines = {}
@@ -416,8 +417,7 @@ def _enriched_build():
                                   boost=float(bst_arr[i]), fade=float(fad_arr[i]),
                                   price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
                                   alt=(bl[L]["alt"] if L in bl else None),
-                                  refund=(L in bl and bl[L].get("refund", False)),
-                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl and not _whole(L) else None)) for i, L in enumerate(ordered)]
+                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl else None)) for i, L in enumerate(ordered)]
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
@@ -466,26 +466,24 @@ def match_payload(gp, bl, age_h=None, prices_at=None):
     bl = bl or {}
     h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(h2[s]) for s in ("home", "away") if s in h2}
     m["alt_h2h"] = {s: _alt(h2, s) for s in ("home", "away") if _alt(h2, s)}
+    level = []        # whole-number lines could finish level: no chances or advice for them, only a note
     hand = {l["line"]: dict(l) for l in m["handicaps"]}
     for line, sides in (bl.get("spread") or {}).items():
+        if _whole(line): level.append(dict(market="Handicap", line=line)); continue
         e = hand.setdefault(line, dict(line=line, p_home=float(stats_norm_cdf((gp["margin"] + line) / gp["sigma_margin"]))))
         e["p_away"] = 1 - e["p_home"]
-        if _whole(line):                      # a tie refunds: split the chance honestly and make no VALUE claim
-            w, pu = team_leg_outcome(dict(stat="spread", line=line, side="home"), gp)[0], team_leg_outcome(dict(stat="spread", line=line, side="home"), gp)[1]
-            e["p_home"], e["p_away"], e["push"], e["refund"] = w, 1 - w - pu, pu, True
-        for s in ("home", "away"):
-            if s in sides: e[f"price_{s}"] = sides[s][0]; e[f"book_{s}"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
-    m["handicaps"] = [hand[k] for k in sorted(hand)]
+        for s_ in ("home", "away"):
+            if s_ in sides: e[f"price_{s_}"] = sides[s_][0]; e[f"book_{s_}"] = sides[s_][1]; e[f"alt_{s_}"] = _alt(sides, s_)
+    m["handicaps"] = [hand[k] for k in sorted(hand) if not _whole(k)]
     tot = {l["line"]: dict(l) for l in m["totals"]}
     for line, sides in (bl.get("total") or {}).items():
+        if _whole(line): level.append(dict(market="Total", line=line)); continue
         e = tot.setdefault(line, dict(line=line, p_over=float(stats_norm_cdf((gp["total"] - line) / gp["sigma_total"]))))
         e["p_under"] = 1 - e["p_over"]
-        if _whole(line):
-            w, pu = team_leg_outcome(dict(stat="total", line=line, side="over"), gp)
-            e["p_over"], e["p_under"], e["push"], e["refund"] = w, 1 - w - pu, pu, True
-        for s in ("over", "under"):
-            if s in sides: e[f"price_{s}"] = sides[s][0]; e[f"book_{s}"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
-    m["totals"] = [tot[k] for k in sorted(tot)]
+        for s_ in ("over", "under"):
+            if s_ in sides: e[f"price_{s_}"] = sides[s_][0]; e[f"book_{s_}"] = sides[s_][1]; e[f"alt_{s_}"] = _alt(sides, s_)
+    m["level_lines"] = sorted(level, key=lambda x: (x["market"], x["line"]))
+    m["totals"] = [tot[k] for k in sorted(tot) if not _whole(k)]
     return m
 
 def stats_norm_cdf(x):
@@ -609,12 +607,13 @@ def grade_picks():
         c.commit()
 
 def grade_bets():
-    """Mark open bets won / lost / refunded from real results, by the same rules for everyone. Bets a person marked by hand are left alone.
+    """Mark open bets won / lost from real results, by the same rules for everyone. A bet with a level or cancelled leg is flagged "needs your amount"
+    (the app never works out or guesses a refund). Bets a person marked by hand are left alone.
     Returns {'graded': n, 'problem': None}. Safe to run any number of times."""
     import settle
     n = 0
     with closing(con()) as c:
-        for b in c.execute("SELECT * FROM bets WHERE result='open' AND COALESCE(manual,0)=0").fetchall():
+        for b in c.execute("SELECT * FROM bets WHERE result='open' AND COALESCE(manual,0)=0 AND COALESCE(needs_amount,0)=0").fetchall():
             legs = json.loads(b["legs"]); results = []
             for l in legs:
                 g = c.execute("SELECT home_pts, away_pts FROM games WHERE game_id=? AND home_pts IS NOT NULL", (l["game_id"],)).fetchone()
@@ -627,12 +626,11 @@ def grade_bets():
                 results.append(settle.leg_result(l, dict(g) if g else None, pl))
             res = settle.settle_bet(legs, results)
             if res == "open" and "lost" not in results: continue
-            odds, exact = settle.reduced_odds(legs, results, b["odds"]) if res == "won" else (b["odds"], True)
-            note = None
-            if res == "won" and any(r in ("push", "void") for r in results):
-                note = "Some legs were refunded or cancelled, so the real payout is lower than the full odds." + ("" if exact else " Check the exact amount on Sportsbet.")
-            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=?, payout_odds=? WHERE id=?",
-                      (res, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(results), note, odds if res == "won" else None, b["id"])); n += 1
+            if res == "review":      # finished level or cancelled leg: wait for the person to enter what Sportsbet returned
+                note = "A part of this bet finished exactly level or was cancelled. Enter the amount Sportsbet actually returned."
+                c.execute("UPDATE bets SET leg_results=?, settle_note=?, needs_amount=1 WHERE id=?", (json.dumps(results), note, b["id"])); n += 1; continue
+            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=NULL, needs_amount=0 WHERE id=?",
+                      (res, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(results), b["id"])); n += 1
         c.commit()
     return dict(graded=n, problem=None)
 
@@ -705,7 +703,7 @@ def compute_value():
         for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
             if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue
             for l in p["strip"].get(s, []):
-                if not l["price"] or l.get("refund"): continue       # whole-number lines can refund: no value claim without the refund rules
+                if not l["price"]: continue
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
                 if edge < min_edge(p) or l["n"] < 5: continue
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
@@ -886,31 +884,20 @@ SIDE_GROUP, TOTAL_GROUP = ("ml", "spread", "band"), ("total", "tt")
 def _whole(x):
     return float(x).is_integer()
 
-def team_leg_outcome(l, gp):
-    """(chance to win, chance of a tie that refunds the stake) for a team bet. Scores are whole numbers, so a whole-number line can tie;
-    the smooth bell curve is adjusted by half a point on each side to price that properly."""
-    k = l["stat"]; Phi = stats_norm_cdf
-    if k == "ml": return (gp["p_home"] if l["side"] == "home" else gp["p_away"]), 0.0
+def team_leg_prob(l, gp):
+    """Chance a team bet wins. Only bets that cannot finish level reach here (whole-number handicaps and totals are refused earlier)."""
+    k = l["stat"]
+    if k == "ml": return gp["p_home"] if l["side"] == "home" else gp["p_away"]
     if k == "spread":
-        mu, sg, L = gp["margin"], gp["sigma_margin"], l["line"]          # home covers when margin + L > 0
-        if _whole(L):
-            win_home = float(Phi((mu + L - 0.5) / sg)); push = float(Phi((mu + L + 0.5) / sg) - Phi((mu + L - 0.5) / sg))
-            return (win_home if l["side"] == "home" else 1 - win_home - push), push
-        q = float(Phi((mu + L) / sg)); return (q if l["side"] == "home" else 1 - q), 0.0
-    if k in ("total", "tt"):
-        if k == "total": mu, sg = gp["total"], gp["sigma_total"]
-        else: mu = gp["home_pts"] if l["team"] == "home" else gp["away_pts"]; sg = float(np.sqrt((gp["sigma_total"] ** 2 + gp["sigma_margin"] ** 2) / 4))
-        L = l["line"]
-        if _whole(L):
-            over = float(1 - Phi((L + 0.5 - mu) / sg)); push = float(Phi((L + 0.5 - mu) / sg) - Phi((L - 0.5 - mu) / sg))
-            return (over if l["side"] == "over" else 1 - over - push), push
-        q = float(1 - Phi((L - mu) / sg)); return (q if l["side"] == "over" else 1 - q), 0.0
+        q = float(stats_norm_cdf((gp["margin"] + l["line"]) / gp["sigma_margin"])); return q if l["side"] == "home" else 1 - q
+    if k == "total":
+        q = float(stats_norm_cdf((gp["total"] - l["line"]) / gp["sigma_total"])); return q if l["side"] == "over" else 1 - q
+    if k == "tt":
+        mu = gp["home_pts"] if l["team"] == "home" else gp["away_pts"]; sg = float(np.sqrt((gp["sigma_total"] ** 2 + gp["sigma_margin"] ** 2) / 4))
+        q = float(1 - stats_norm_cdf((l["line"] - mu) / sg)); return q if l["side"] == "over" else 1 - q
     b = next((x for x in gp["bands"] if x["team"] == l["team"] and x["lo"] == l["lo"] and x["hi"] == l.get("hi")), None)
     if not b: raise HTTPException(400, "Unknown margin band")
-    return float(b["p"]), 0.0
-
-def team_leg_prob(l, gp):
-    return team_leg_outcome(l, gp)[0]
+    return float(b["p"])
 
 @app.post("/api/parlay")
 def parlay_calc(body: ParlayInput, x_code: str = Header("")):
@@ -932,43 +919,25 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner, handicap or margin leg per game")
     tot_games = [l["game_id"] for l in tm_legs if l["stat"] in TOTAL_GROUP]
     if len(tot_games) != len(set(tot_games)): raise HTTPException(400, "Pick only one game total or team total per game")
+    lvl = levels.level_legs(legs)
+    if lvl:     # a whole-number line could finish level: no chances, fair price, value or stake advice, just the reason
+        return dict(unsupported=True, no_advice=True, value=None, explanation=levels.EXPLANATION,
+                    level_legs=[dict(game_id=l["game_id"], stat=l["stat"], line=l.get("line"), side=l.get("side"), text=l.get("text", "")) for l in lvl], legs=legs)
     b = require_current_model(list(preds.values()))
-    tout = [team_leg_outcome(l, gps[l["game_id"]]) for l in tm_legs]
-    tp = [o[0] for o in tout]
-    pl_prices = [l.get("price") for l in pl_legs]
-    rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], prices=pl_prices, team_extra=[(o[0], o[1], l.get("price")) for o, l in zip(tout, tm_legs)]) \
-        if pl_legs else dict(leg_probs=[], push_probs=[], independent=1.0, joint=1.0)
+    tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
+    rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
     pi, ti = iter(rp["leg_probs"]), iter(tp)
-    pui, tui = iter(rp.get("push_probs", [])), iter(o[1] for o in tout)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
-    pushes = [next(tui) if l["stat"] in TEAM_STATS else next(pui) for l in legs]
     joint = rp["joint"] * float(np.prod(tp) if tp else 1.0); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
-    r = dict(leg_probs=probs, push_probs=pushes, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None))
+    r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None))
     mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
     r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
                     "so this combined chance is approximate.") if mixed else None
-    odds = body.get("odds"); can_refund = any(p > 1e-9 for p in pushes)
-    has_points = any(l["stat"] in POINTS_BASED for l in legs)
-    if has_points and not POINTS_CLAIMS_ENABLED:
+    odds = body.get("odds")
+    if any(l["stat"] in POINTS_BASED for l in legs) and not POINTS_CLAIMS_ENABLED:
         # points chances have run too confident, so a slip with any points leg (including combined bets) gets no profit, value or stake advice
         r["value"] = None; r["no_advice"] = True
         r["points_warning"] = "Points chances have been running too confident in testing. Treat this chance as rough: there is no value, profit or stake advice for bets that include points."
-        r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
-        return r
-    if can_refund:
-        r["fair_odds"] = None
-        r["refund_note"] = "A tie on a whole-number line refunds that part of the bet, so the chances shown are chances of winning outright and a single fair price does not apply."
-        leg_prices = [l.get("price") for l in legs]
-        product = float(np.prod(leg_prices)) if all(p is not None for p in leg_prices) else None
-        ev = rp.get("ev") if pl_legs else pl.refund_ev([], [], [], [(o[0], o[1], l.get("price")) for o, l in zip(tout, tm_legs)])
-        if product is None or ev is None:
-            r["value"] = None; r["value_note"] = "Value is not shown: this bet can be refunded on a tie, and the price of every leg is needed to work out what a refund would pay."
-        elif odds and abs(float(odds) / product - 1) > 0.02:
-            r["value"] = None; r["value_note"] = (f"Value is not shown: the price you entered ({float(odds):.2f}) is not the leg prices multiplied together ({product:.2f}), "
-                                                  "so the app cannot tell how a refunded leg would change the payout. Check with Sportsbet.")
-        else:
-            r["value"] = dict(ev=ev, edge=ev, implied=None, kelly=0.0, price_used=product,
-                              assumption=f"Uses the price {product:.2f} (each leg's own price multiplied) and pays a refunded leg at 1.00, the usual rule for a standard multi.")
     elif odds: r["value"] = pl.value(r["joint"], float(odds))
     r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
     return r
@@ -984,11 +953,15 @@ def scorecard(x_code: str = Header("")):
         bets = [dict(r) for r in c.execute("SELECT * FROM bets ORDER BY id DESC")]
     users = {}
     for b in bets:
-        u = users.setdefault(b["user"], dict(user=b["user"], bets=0, settled=0, staked=0.0, returned=0.0, wins=0, model_prob_sum=0.0, all_prob_sum=0.0, open=0))
+        u = users.setdefault(b["user"], dict(user=b["user"], bets=0, settled=0, staked=0.0, returned=0.0, wins=0, model_prob_sum=0.0, all_prob_sum=0.0, open=0, awaiting_amount=0))
         u["bets"] += 1; u["all_prob_sum"] += b["model_prob"] or 0; u["open"] += b["result"] == "open"
-        if b["result"] in ("won", "lost"):
+        u["awaiting_amount"] += b["result"] == "open" and bool(b.get("needs_amount"))
+        got = b.get("returned_amount")
+        if got is not None:              # the amount the person typed in from Sportsbet: confirmed money
+            u["settled"] += 1; u["staked"] += b["stake"]; u["returned"] += got; u["wins"] += got > b["stake"]; u["model_prob_sum"] += b["model_prob"] or 0
+        elif b["result"] in ("won", "lost"):
             u["settled"] += 1; u["staked"] += b["stake"]; u["wins"] += b["result"] == "won"
-            u["returned"] += b["stake"] * (b.get("payout_odds") or b["odds"]) if b["result"] == "won" else 0; u["model_prob_sum"] += b["model_prob"] or 0
+            u["returned"] += b["stake"] * b["odds"] if b["result"] == "won" else 0; u["model_prob_sum"] += b["model_prob"] or 0
     for u in users.values():
         u["profit"] = u["returned"] - u["staked"]; u["avg_model_prob"] = u["all_prob_sum"] / u["bets"]
         u["roi"] = (u["returned"] - u["staked"]) / u["staked"] if u["staked"] else None
@@ -1006,13 +979,27 @@ def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
         c.commit()
     return {"ok": True}
 
+@app.post("/api/bets/{bid}/returned")
+def bet_returned(bid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
+    """The person enters the money Sportsbet actually returned for a bet (0 if nothing). Only this number is used for that bet's profit: nothing is guessed."""
+    user = who(x_user, x_code)
+    try: amount = float(body["amount"])
+    except (KeyError, TypeError, ValueError): raise HTTPException(400, "Enter the amount as a number")
+    if not (amount == amount and 0 <= amount <= 10_000_000): raise HTTPException(400, "Enter an amount of 0 or more")
+    with closing(con()) as c:
+        b = c.execute("SELECT stake FROM bets WHERE id=? AND user=?", (bid, user)).fetchone()
+        if not b: raise HTTPException(404, "Not your bet")
+        result = "won" if amount > b["stake"] else ("void" if amount == b["stake"] else "lost")
+        c.execute("UPDATE bets SET returned_amount=?, result=?, manual=1, needs_amount=0, settled_at=? WHERE id=?", (amount, result, dt.datetime.now(dt.timezone.utc).isoformat(), bid)); c.commit()
+    return {"ok": True, "result": result}
+
 @app.post("/api/bets/{bid}/result")
 def bet_result(bid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
     if body["result"] not in ("won", "lost", "void", "open"): raise HTTPException(400)
     with closing(con()) as c:
         # a hand-made mark is respected (manual=1); "undo" (open) hands the bet back to automatic marking
-        r = c.execute("UPDATE bets SET result=?, manual=?, settled_at=NULL, leg_results=NULL, settle_note=NULL, payout_odds=NULL WHERE id=? AND user=?",
+        r = c.execute("UPDATE bets SET result=?, manual=?, settled_at=NULL, leg_results=NULL, settle_note=NULL, payout_odds=NULL, returned_amount=NULL, needs_amount=0 WHERE id=? AND user=?",
                       (body["result"], 0 if body["result"] == "open" else 1, bid, user)); c.commit()
         if r.rowcount == 0: raise HTTPException(404, "Not your bet")
     return {"ok": True}

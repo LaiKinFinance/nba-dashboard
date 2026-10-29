@@ -14,7 +14,8 @@ class Leg(BaseModel):
     lo: int | None = Field(default=None, ge=1, le=1000)
     hi: int | None = Field(default=None, ge=1, le=1000)
     text: str = Field(default='', max_length=200)
-    price: FiniteFloat | None = Field(default=None, gt=1, le=1000)    # this leg's own decimal price, needed to value bets that can be refunded
+    kind: Literal['atleast'] | None = None      # 'atleast' = "20 or more" (wins on 20, loses on 19); different from 'over 20'
+    price: FiniteFloat | None = Field(default=None, gt=1, le=1000)    # the price shown when the leg was added (kept with saved records; not used to work out any payment)
 
     @model_validator(mode='after')
     def market_fields(self):
@@ -28,6 +29,9 @@ class Leg(BaseModel):
             raise ValueError('This market requires a team')
         if self.stat == 'band' and (self.lo is None or (self.hi is not None and self.hi < self.lo)):
             raise ValueError('Margin band requires valid bounds')
+        if self.kind == 'atleast':
+            if not player or self.stat in ('dd', 'td') or self.side != 'over' or not float(self.line).is_integer() or self.line < 1:
+                raise ValueError('"At least" bets need a player stat, side over and a whole number of 1 or more')
         if self.stat != 'spread' and self.line < 0:
             raise ValueError('Line must be nonnegative')
         return self
