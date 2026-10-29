@@ -52,6 +52,55 @@ def nb_over(mu, alpha, line):
     n = 1.0 / alpha; p = n / (n + mu)
     return stats.nbinom.sf(np.floor(line), n, p)
 
+PTS_FIX_VERSION = "pts-mix-1"
+
+def _fix(alphas, stat):
+    return alphas.get("pts_fix") if stat == "pts" else None
+
+def over_prob(stat, mu, alphas, line):
+    """P(X > line) for one stat. Points use the corrected distribution (scale, spread and a small 'bad night' share) when the saved model has
+    one; everything else is the plain negative-binomial. EVERY place that turns a points projection into a chance must go through here."""
+    fx = _fix(alphas, stat)
+    if not fx: return nb_over(mu, alphas[stat], line)
+    m = np.maximum(np.asarray(mu, float) * np.exp(fx["b"]), 0.05); r = 1.0 / fx["alpha"]; k = np.floor(line)
+    return (1 - fx["q"]) * stats.nbinom.sf(k, r, r / (r + m)) + fx["q"] * stats.nbinom.sf(k, r, r / (r + fx["kappa"] * m))
+
+def samples(stat, u, mu, alphas):
+    """Turn uniform random numbers into counts of one stat, with the SAME distribution as over_prob (used by combined bets and parlays)."""
+    fx = _fix(alphas, stat)
+    if not fx:
+        mu = max(float(mu), 0.05); nb = 1.0 / alphas[stat]; p = nb / (nb + mu); kmax = int(mu + 10 * np.sqrt(mu + alphas[stat] * mu * mu)) + 6
+        return np.searchsorted(stats.nbinom.cdf(np.arange(kmax + 1), nb, p), u, side="left").astype(float)
+    m = max(float(mu) * np.exp(fx["b"]), 0.05); r = 1.0 / fx["alpha"]; kmax = int(m + 10 * np.sqrt(m + fx["alpha"] * m * m)) + 8; ks = np.arange(kmax + 1)
+    cdf = (1 - fx["q"]) * stats.nbinom.cdf(ks, r, r / (r + m)) + fx["q"] * stats.nbinom.cdf(ks, r, r / (r + fx["kappa"] * m))
+    return np.searchsorted(cdf, u, side="left").astype(float)
+
+def _pts_nll(params, mu, y, mixture):
+    from scipy.special import expit
+    b, la = params[0], params[1]; r = 1.0 / np.exp(la); m = np.maximum(mu * np.exp(b), 0.05); pm = stats.nbinom.pmf(y, r, r / (r + m))
+    if mixture:
+        q, kappa = expit(params[2]), expit(params[3]); pm = (1 - q) * pm + q * stats.nbinom.pmf(y, r, r / (r + kappa * m))
+    return -np.log(np.maximum(pm, 1e-300)).sum()
+
+def _fit_pts(mu, y, mixture):
+    from scipy.optimize import minimize
+    x0 = [0.03, np.log(0.12)] + ([-2.0, 0.0] if mixture else [])
+    return minimize(_pts_nll, x0, args=(mu, y, mixture), method="Nelder-Mead", options=dict(maxiter=3000, xatol=1e-4, fatol=1e-4)).x
+
+def choose_points_fix(mu, y, margin=3.0):
+    """Fit the points correction on `mu, y` (rows in date order: earlier 60% to fit, later 40% to check). Keep it only if it beats the plain
+    distribution on the later 40%; then refit on everything given. Returns the correction (with its version and evidence) or None."""
+    from scipy.special import expit
+    mu, y = np.asarray(mu, float), np.asarray(y, float); k = int(len(mu) * 0.6)
+    if len(mu) < 800: return None
+    plain, mix = _fit_pts(mu[:k], y[:k], False), _fit_pts(mu[:k], y[:k], True)
+    ll_plain = -_pts_nll(plain, mu[k:], y[k:], False); ll_mix = -_pts_nll(mix, mu[k:], y[k:], True)
+    ok = bool(np.isfinite(ll_plain) and np.isfinite(ll_mix) and ll_mix - ll_plain >= margin)
+    ev = dict(holdout_rows=int(len(mu) - k), plain_loglik=float(ll_plain), mixture_loglik=float(ll_mix), accepted=ok)
+    if not ok: return None
+    f = _fit_pts(mu, y, True)
+    return dict(version=PTS_FIX_VERSION, b=float(f[0]), alpha=float(np.exp(f[1])), q=float(expit(f[2])), kappa=float(expit(f[3])), fitted_rows=int(len(mu)), evidence=ev)
+
 def evaluate(df, cut="2026-02-01"):
     """Backtest metrics for the scorecard page (trained before `cut`, scored after)."""
     tr, te = df[df.date < cut], df[df.date >= cut]; m = fit(tr); rep = dict(cut=cut, n_train=len(tr), n_test=len(te), stats={})

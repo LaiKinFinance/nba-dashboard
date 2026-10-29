@@ -14,6 +14,8 @@ def _psd(c):
     w, v = np.linalg.eigh(c); w = np.clip(w, 1e-6, None); c = v @ np.diag(w) @ v.T
     d = np.sqrt(np.diag(c)); return c / np.outer(d, d)
 
+from model import samples
+
 def nb_samples(u, mu, alpha):
     """Map uniforms to negative-binomial counts with a lookup table (much faster than ppf)."""
     mu = max(float(mu), 0.05); nb = 1.0 / alpha; p = nb / (nb + mu)
@@ -34,11 +36,11 @@ def leg_prob_single(pred, alphas, leg):
     elif s == "td": p = pred["p_td"]
     elif s in COMBO: return None
     else:
-        from model import nb_over
+        from model import over_prob
         if leg.get("side", "over") == "under":
             # At integer lines, equality is a push, not an under win.
-            return float(1 - nb_over(pred["proj"][s], alphas[s], np.ceil(leg["line"]) - 1))
-        p = float(nb_over(pred["proj"][s], alphas[s], leg["line"]))
+            return float(1 - over_prob(s, pred["proj"][s], alphas, np.ceil(leg["line"]) - 1))
+        p = float(over_prob(s, pred["proj"][s], alphas, leg["line"]))
     return p if leg.get("side", "over") == "over" else 1 - p
 
 def parlay(legs, preds, alphas, corr, n=60000, seed=7, prices=None, team_extra=None):
@@ -70,7 +72,7 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7, prices=None, team_extra=N
         pred = preds[(v["game"], pid)]
         if comp in ("dd", "td"):
             p = pred["p_dd"] if comp == "dd" else pred["p_td"]; vals[(game, pid, comp)] = (u[:, v["i"]] > 1 - p).astype(float)
-        else: vals[(game, pid, comp)] = nb_samples(u[:, v["i"]], pred["proj"][comp], alphas[comp])
+        else: vals[(game, pid, comp)] = samples(comp, u[:, v["i"]], pred["proj"][comp], alphas)
     wins, pushes, probs = [], [], []
     for l in legs:
         game, pid, s = l["game_id"], l["player_id"], l["stat"]

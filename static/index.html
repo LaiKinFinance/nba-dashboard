@@ -272,7 +272,7 @@ setInterval(pollStatus,180000);
 async function loadSlate(){slate=await api("slate")}
 function hitTxt(h,n){if(!n)return"";const c=h/n>=.8?"hg":h/n<=.3?"hb":"";return `<span class="${c}">${h}/${n}</span>`}
 function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
-  const val=o.price&&!o.stale&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
+  const val=o.price&&!o.stale&&!o.no_claim&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
   return `<button class="od ${val?"val":""} ${bst?"bst":""} ${fad?"fad":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}${bst?'<span class="bt">BOOST</span>':fad?'<span class="ft">FADE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}
    <div class="l">O ${o.line}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
 function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return"";
@@ -335,7 +335,9 @@ const gsec={},SECDEF={top:true,players:true,margin:false,tteam:false,h2h:false};
 const secOpen=(id,k)=>(gsec[id]&&gsec[id][k]!==undefined)?gsec[id][k]:SECDEF[k];
 const sec=(id,k,title,body)=>`<div class="sec ${secOpen(id,k)?"open":""}" data-k="${k}"><div class="sh" onclick="togSec('${id}','${k}')"><span>${title}</span><span class="cv"></span></div><div class="sbody">${body}</div></div>`;
 function togSec(id,k){(gsec[id]=gsec[id]||{})[k]=!secOpen(id,k);const el=document.querySelector(`#g${id} .sec[data-k="${k}"]`);el.classList.toggle("open");if(secOpen(id,k)){paintSel();centerStrips(el)}}
-function playersHTML(g){const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
+const ptsNote='<div class="note" style="margin:0 0 8px">Points chances (points, points+rebounds, points+assists, PRA) have been running too confident in testing, so no VALUE or "safe" labels are shown for them. Treat the percentages as rough.</div>';
+function playersHTML(g){return ptsNote+playersHTML0(g)}
+function playersHTML0(g){const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   const side=tm=>`<div><div class="th"><img src="${logo(tm.team)}" alt="">${nm(tm.team)} <span>${esc(tm.lineup||"Lineup not posted")}</span></div>${tm.players.map(playerHTML).join("")}</div>`;
   return `<div class="cols">${side(away)}${side(home)}</div>`}
 function formBadges(g,team){const f=((g.insight||{}).form||{})[team]||[];return `<div class="fm">${f.map(x=>`<i class="${x.r}" title="${x.r} ${x.score} vs ${x.opp} (${x.date})">${x.r}</i>`).join("")}</div>`}

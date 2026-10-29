@@ -14,9 +14,9 @@ def _psd(c):
 
 def simulate(mu, alphas, same, n=40000, seed=11):
     """mu: {pts,reb,ast}; returns {stat: samples}. Latents are positively oriented: high latent = high stat."""
-    from parlay import nb_samples
+    from model import samples
     z = np.random.default_rng(seed).multivariate_normal(np.zeros(3), _psd(same), size=n); u = stats.norm.cdf(z)
-    return {s: nb_samples(u[:, i], mu[s], alphas[s]) for i, s in enumerate(CORE)}
+    return {s: samples(s, u[:, i], mu[s], alphas) for i, s in enumerate(CORE)}
 
 def combo_lines(mu, alphas, same, lo=0.04, hi=0.97, cap=60):
     sim = simulate(mu, alphas, same); res = {}

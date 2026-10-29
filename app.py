@@ -265,6 +265,11 @@ STALE_H = 8.0     # a bookmaker price older than this (hours) gets no VALUE labe
 def is_stale(age_h):
     return age_h is not None and age_h > STALE_H
 
+# Points-based chances ran about 5 points too confident when checked on later games (about 11 in the first weeks of a new season),
+# and the correction has not yet been independently checked. Until it has, no VALUE or 'safe' claim is made for these markets.
+POINTS_CLAIMS_ENABLED = False
+POINTS_BASED = ("pts", "pra", "pr", "pa")
+
 STRIPS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa")
 COMBO_PARTS = {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}
 EXTRA_MIN = {"fg3m": 0.7, "stl": 0.8, "blk": 0.6}   # only show a market when the player realistically produces it
@@ -287,7 +292,7 @@ def guarded_projections():
 def enriched():
     """Projections + last-10 games, consistency counts per line, and bookmaker prices/edges where available."""
     import odds
-    from model import nb_over
+    from model import over_prob
     preds = guarded_projections()
     ids = list({p["player_id"] for p in preds}); rows = {}
     with closing(con()) as c:
@@ -326,7 +331,7 @@ def enriched():
             cm = {x["line"]: x["p_over"] for x in (p.get("combo") or {}).get(s, [])} if combo else {}
             if not combo and (mu is None or mu < EXTRA_MIN.get(s, 0)): p["strip"][s] = []; continue
             if combo and not cm: p["strip"][s] = []; continue
-            pmodel = (lambda L, s=s, mu=mu: float(nb_over(mu, alphas[s], L))) if not combo else (lambda L, cm=cm: cm.get(L))
+            pmodel = (lambda L, s=s, mu=mu: float(over_prob(s, mu, alphas, L))) if not combo else (lambda L, cm=cm: cm.get(L))
             val = (lambda r, s=s: sum(r[c] for c in COMBO_PARTS[s])) if combo else (lambda r, s=s: r[s])
             bl = {}
             for line, sides in sorted(b.get(s, {}).items()):
@@ -356,8 +361,8 @@ def enriched():
             core = s in ("pts", "reb", "ast")
             pf, pb = (p.get("proj_full", {}).get(s), p.get("proj_base", {}).get(s)) if core else (None, None)
             p["strip"][s] = [dict(line=L, p_over=lines[L], hit=sum(1 for r in l10 if val(r) > L), n=n,
-                                  boost=(lines[L] - float(nb_over(pf, alphas[s], L))) if pf is not None and p.get("absent") else 0.0,
-                                  fade=(lines[L] - float(nb_over(pb, alphas[s], L))) if pb is not None else 0.0,
+                                  boost=(lines[L] - float(over_prob(s, pf, alphas, L))) if pf is not None and p.get("absent") else 0.0,
+                                  fade=(lines[L] - float(over_prob(s, pb, alphas, L))) if pb is not None else 0.0,
                                   price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
                                   alt=(bl[L]["alt"] if L in bl else None),
                                   refund=(L in bl and bl[L].get("refund", False)),
@@ -365,6 +370,10 @@ def enriched():
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
+        if not POINTS_CLAIMS_ENABLED:                     # points chances are shown, but never as value
+            for st in POINTS_BASED:
+                for l in p["strip"].get(st, []): l["no_claim"] = True; l["edge"] = None
+                for l in p["book"].get(st, []) if isinstance(p["book"].get(st), list) else []: l["no_claim"] = True; l["edge"] = None
         if is_stale(p.get("odds_age_h")):                 # old prices stay visible (with their age) but can never look like value
             for s, rows_ in list(p["strip"].items()):
                 for l in rows_: l["stale"] = True; l["edge"] = None
@@ -607,6 +616,7 @@ def compute_value():
         if (p.get("injury") or {}).get("status") in ("Out",): continue
         if is_stale(p.get("odds_age_h")): continue      # an old price is not a reliable "value"
         for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
+            if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue
             for l in p["strip"].get(s, []):
                 if not l["price"] or l.get("refund"): continue       # whole-number lines can refund: no value claim without the refund rules
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
@@ -666,6 +676,7 @@ def compute_best():
     for p in preds:
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
         for s in ("pts", "reb", "ast"):
+            if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue        # no "safe leg" claims for points until checked
             opts = [dict(line=b["line"], p=b["p_over"], hit=b["hit"], n=b["n"], price=b["price"]) for b in p["book"].get(s, [])] or \
                    [dict(line=l["line"], p=l["p_over"], hit=l["hit"], n=l["n"], price=None) for l in p["ladders"][s]]
             ok = [o for o in opts if o["p"] >= 0.62 and o["n"] >= 5 and o["hit"] / o["n"] >= 0.7]

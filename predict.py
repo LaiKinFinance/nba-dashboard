@@ -3,7 +3,7 @@ import json, pickle, sqlite3, datetime as dt, os
 import numpy as np, pandas as pd
 from scipy import stats
 from features import build, FEATURES, FEATURE_SCHEMA
-from model import rotation, fit, dispersion, nb_over, TARGETS, ALL, feats_for
+from model import rotation, fit, dispersion, nb_over, over_prob, choose_points_fix, PTS_FIX_VERSION, TARGETS, ALL, feats_for
 import combos
 from top3 import top3
 import slate as sl
@@ -109,6 +109,8 @@ def validate(report, alphas):
     missing = [t for t in ALL if t not in alphas]
     if missing: why.append("spread values missing for " + ", ".join(missing))
     bad = [t for t in ALL if t in alphas and not (_finite(alphas[t]) and 0 < alphas[t] <= 5)]
+    fx = alphas.get("pts_fix")
+    if fx is not None and not all(_finite(fx.get(k)) for k in ("b", "alpha", "q", "kappa")): bad.append("pts_fix")
     if bad: why.append("spread values are not valid numbers for " + ", ".join(bad))
     return (not why), why
 
@@ -134,7 +136,7 @@ def served_check(min_rows=300, offsets=(-3, -2, -1, 0, 1, 2, 3)):
     for t in ALL:
         mu = b["models"][t].predict(later[feats_for(t)]); ps, ys = [], []
         for o in offsets:
-            line = np.maximum(np.floor(mu) + 0.5 + o, 0.5); ps.append(nb_over(mu, b["alphas"][t], line)); ys.append((later[t].values > line).astype(int))
+            line = np.maximum(np.floor(mu) + 0.5 + o, 0.5); ps.append(over_prob(t, mu, b["alphas"], line)); ys.append((later[t].values > line).astype(int))
         out[t] = calibration_summary(np.concatenate(ps), np.concatenate(ys))
     worst = max(((v["high_pred"] - v["high_actual"]) for v in out.values() if v["high_n"] >= 100), default=None)
     return dict(status="ok", kind="rebuilt_history", model_id=mid, later_rows=int(len(later)), trained_through=b["trained_through"], by_stat=out, worst_high_chance_gap=worst,
@@ -151,6 +153,9 @@ def train(report=True):
     if len(W) < 1500:                                    # off-season or very short window: widen to the last 1500 rows
         w0 = full.date.sort_values().iloc[-1500]; A, W = full[full.date < w0], full[full.date >= w0]
     mA = fit(A); alphas = {t: dispersion(mA[t], W[feats_for(t)], W[t]) for t in ALL}
+    Wd = W.sort_values("date")                           # points correction: chosen on these unseen games only, kept only if it wins on the later part of them
+    fix = choose_points_fix(mA["pts"].predict(Wd[feats_for("pts")]), Wd["pts"].values)
+    if fix: alphas["pts_fix"] = fix
     m = fit(full)
     from model import evaluate
     rep = dict(evaluate(full), team=_team_report(), alpha_window=[str(w0), str(full.date.max())], alpha_train_method="out-of-sample")
@@ -311,7 +316,7 @@ def project(days=2):
     pdd = m["dd"].predict_proba(X)[:, 1]; ptd = m["td"].predict_proba(feats)
     for k, (_, f) in enumerate(feats.iterrows()):
         mt = mk[(f.game_id, f.player_id)]; g = mt["game"]
-        rec = dict(model_id=bundle_id(bundle), alphas={k: float(v) for k, v in alphas.items()}, game_id=f.game_id, start=g["start"], date=g["date"], player_id=f.player_id, player=f.player, team=f.team, opp=f.opp,
+        rec = dict(model_id=bundle_id(bundle), alphas=json.loads(json.dumps(alphas, default=float)), game_id=f.game_id, start=g["start"], date=g["date"], player_id=f.player_id, player=f.player, team=f.team, opp=f.opp,
                    home=int(f.home), starting=bool(mt["starting"]), lineup_status=mt["lineup_status"], injury=mt["injury"],
                    min=float(f.min_m10) if pd.notna(f.min_m10) else None, rest=float(f.rest) if pd.notna(f.rest) else None,
                    p_dd=float(pdd[k]), p_td=float(min(ptd[k], pdd[k])), proj={}, ladders={})
@@ -332,7 +337,7 @@ def project(days=2):
         for t in TARGETS:
             mu = float(mus[t][k]); rec["proj"][t] = mu
             lines = sorted({max(0.5, np.floor(mu) + d + 0.5) for d in range(-6 if t == "pts" else -4, 7 if t == "pts" else 5)})
-            rec["ladders"][t] = [dict(line=float(l), p_over=float(nb_over(mu, alphas[t], l))) for l in lines]
+            rec["ladders"][t] = [dict(line=float(l), p_over=float(over_prob(t, mu, alphas, l))) for l in lines]
         out.append(rec)
     return out
 
