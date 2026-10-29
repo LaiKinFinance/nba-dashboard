@@ -982,7 +982,12 @@ def scorecard(x_code: str = Header("")):
     for u in users.values():
         u["settled"] = u["wins"] + u["losses"]
         u["hit_rate"] = u["wins"] / u["settled"] if u["settled"] else None
-    return dict(users=sorted(users.values(), key=lambda u: u["user"].casefold()), bets=bets[:100])
+    shown = bets[:100]; pids = {l.get("player_id") for b in shown for l in _safe(lambda: json.loads(b["legs"])) or [] if l.get("player_id")}
+    teams = {}
+    with closing(con()) as c:
+        try: teams = {r[0]: r[1] for r in c.execute("SELECT player_id, team FROM rosters WHERE team IS NOT NULL") if r[0] in pids} if pids else {}
+        except sqlite3.OperationalError: pass            # no roster table yet: pages then show the player without a team badge
+    return dict(users=sorted(users.values(), key=lambda u: u["user"].casefold()), bets=shown, teams=teams)
 
 @app.post("/api/bets")
 def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):

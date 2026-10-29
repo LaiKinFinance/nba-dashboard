@@ -440,7 +440,7 @@ async function cmt(id){if(!needName())return;const b=$("#c"+id).value.trim();if(
 
 /* ---------- personal pick results ---------- */
 const legLine=l=>`${esc(l.text||"")} – ${legDesc(l)}`;
-async function bets(a){const s=await api("scorecard"),me=localStorage.user;
+async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.teams||{};
   const mine=s.bets.filter(b=>b.user==me),open=mine.filter(b=>b.result=="open"),done=mine.filter(b=>b.result!="open");
   const u=s.users.find(x=>x.user==me)||{bets:0,settled:0,wins:0,losses:0};
   const card=b=>{const ls=JSON.parse(b.legs),label=b.result=="won"?"Won":b.result=="lost"?"Lost":b.result=="open"?"Waiting for the games":"Not counted";
@@ -491,7 +491,7 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
 
 
 /* ---------- live scores ---------- */
-let LG=[],boxes={},openLive=new Set(),fullStats=false,liveTimer=null,showAll=new Set();
+let PT={},LG=[],boxes={},openLive=new Set(),fullStats=false,liveTimer=null,showAll=new Set();
 const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g.state=="post"?g.detail:timeOf(g.start);
 function catCount(r){return["pts","reb","ast","stl","blk"].reduce((n,k)=>n+((r[k]||0)>=10?1:0),0)}   // official rule: any five categories
 function tag(r){const c=catCount(r);if(c>=3)return'<span class="ch2 td">TD</span>';
@@ -545,14 +545,16 @@ function playerLegProgress(l,r){
   return{cur,tgt,hit,level,txt,percent:Math.max(0,Math.min(100,progress*100))};
 }
 // END playerLegProgress
-function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
-  if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
-  if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
-  if(!r)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
-  const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog"><b>${name}</b> <span class="mute">Stats are temporarily unavailable</span></div>`;
+const legWho=l=>{const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(PT[l.player_id]||"")).toUpperCase();
+  return `${l.player_id?photo(l.player_id,l.text||""):""}${t?`<img src="${logo(t)}" alt="${esc(t)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}`};
+function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||""),who=legWho(l);
+  if(!g)return `<div class="prog">${who}<b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
+  if(g.state=="pre")return `<div class="prog">${who}<b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
+  if(!r)return `<div class="prog">${who}<b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
+  const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog">${who}<b>${name}</b> <span class="mute">Stats are temporarily unavailable</span></div>`;
   const {hit,txt,percent,level}=progress;
   const done=g.state=="post",verdict=done?(level?' <b>Level</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
-  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
   const liveN=LG.filter(g=>g.state=="in").length;
