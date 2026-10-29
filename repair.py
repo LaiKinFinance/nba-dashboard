@@ -13,6 +13,7 @@ import ingest
 
 ET = ZoneInfo("America/New_York")
 TEAMS = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
+MIN_ROSTER = 8     # every real team lists at least this many players; fewer means the answer was incomplete
 
 def et_date(tip_utc):
     return dt.datetime.fromisoformat(tip_utc.replace("Z", "+00:00")).astimezone(ET).date().isoformat()
@@ -68,7 +69,9 @@ def refresh_rosters(con):
         return t["team"]["abbreviation"], [(a["id"], a["displayName"]) for a in js.get("athletes", [])]
     with ThreadPoolExecutor(6) as ex: res = list(ex.map(one, teams))
     cur = {pid: (ab, nm) for ab, ps in res if ab in ingest.REAL_TEAMS for pid, nm in ps}
-    if len(cur) < 300: return 0                    # a partial answer must never wipe the table
+    small = [ab for ab, ps in res if ab in ingest.REAL_TEAMS and len(ps) < MIN_ROSTER]
+    if len(cur) < 300 or len({ab for ab, _ in res if ab in ingest.REAL_TEAMS}) < 30 or small:
+        return 0                                   # a partial answer (even one empty team) must never change the table
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     old = {r[0]: r[1] for r in con.execute("SELECT player_id, team FROM rosters")}
     for pid, (ab, nm) in cur.items():
@@ -97,7 +100,24 @@ def run_all(full_reconcile=False):
         if miss:
             ingest.run(dt.date.fromisoformat(con.execute('SELECT min(date_utc) FROM games').fetchone()[0]), dt.date.today())
             out["missing_after"] = len(missing_games(con))
+    problems = []
+    if out["tips_missing"]: problems.append(f"{out['tips_missing']} games have no tip-off time")
+    if not out["roster_players"]: problems.append("current rosters could not be refreshed (the last good list is kept)")
+    if out.get("missing_after"): problems.append(f"{out['missing_after']} finished games are still missing")
+    out["problem"] = "; ".join(problems) or None
+    return out
+
+def dry_run():
+    """Look only: report what run_all would change. Opens the database read-only and writes nothing."""
+    con = sqlite3.connect(f"file:{ingest.DB}?mode=ro", uri=True)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
+    out = dict(games=con.execute("SELECT count(*) FROM games").fetchone()[0])
+    if "tip_utc" in cols:
+        out["games_without_tip_time"] = con.execute("SELECT count(*) FROM games WHERE tip_utc IS NULL").fetchone()[0]
+        out["games_with_utc_date_not_eastern"] = sum(1 for g, t, d in con.execute("SELECT game_id, tip_utc, date FROM games WHERE tip_utc IS NOT NULL") if et_date(t) != d)
+    else:
+        out["games_without_tip_time"] = out["games"]; out["note"] = "database has not been through the repair yet"
     return out
 
 if __name__ == "__main__":
-    print(run_all(full_reconcile="--full" in sys.argv))
+    print(dry_run() if "--dry" in sys.argv else run_all(full_reconcile="--full" in sys.argv))

@@ -117,12 +117,12 @@ def run(start, end):
         except Exception as ex:
             print("fail", g["game_id"], ex, flush=True)
             return g, str(ex)[:200]
-    done = 0
+    done = failed = 0
     with ThreadPoolExecutor(6) as ex:
         for g, res in ex.map(work, todo):
             if isinstance(res, str):                          # failed fetch: remember it so it is visible, not silent
                 con.execute("CREATE TABLE IF NOT EXISTS ingest_issues(game_id TEXT PRIMARY KEY, error TEXT, at TEXT)")
-                con.execute("INSERT OR REPLACE INTO ingest_issues VALUES(?,?,?)", (g["game_id"], res, dt.datetime.now(dt.timezone.utc).isoformat())); continue
+                con.execute("INSERT OR REPLACE INTO ingest_issues VALUES(?,?,?)", (g["game_id"], res, dt.datetime.now(dt.timezone.utc).isoformat())); failed += 1; continue
             rows, lines = res
             # name the columns: the table has grown (market lines, referee/foul totals), and an upsert keeps those extra columns intact
             con.execute("""INSERT INTO games(game_id,date,date_utc,tip_utc,season,season_type,home_id,home,away_id,away,home_pts,away_pts)
@@ -136,6 +136,7 @@ def run(start, end):
             done += 1
             if done % 100 == 0: con.commit(); print(done, flush=True)
     con.commit()
+    return dict(new=done, failed=failed, problem=(f"{failed} game(s) could not be downloaded" if failed else None))
 
 if __name__ == "__main__":
     s = dt.date.fromisoformat(sys.argv[1]); e = dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else dt.date.today()

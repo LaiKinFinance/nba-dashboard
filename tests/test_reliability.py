@@ -17,7 +17,7 @@ def test_one_failing_stage_does_not_stop_the_next(client):
     calls = []
     app._stage("a", lambda: 1 / 0); app._stage("b", lambda: calls.append(1))
     h = client.get("/api/health").json()
-    assert "ZeroDivisionError" in h["stages"]["a"]["error"] and h["stages"]["b"]["ok_at"] and calls == [1]
+    assert "ZeroDivisionError" in h["stages"]["a"]["note"] and h["stages"]["a"]["state"] == "failed" and h["stages"]["b"]["state"] == "ok" and calls == [1]
 
 def test_key_text_never_shown(client):
     app._stage("k", lambda: (_ for _ in ()).throw(RuntimeError("https://x/y?apiKey=abcdef123456&z=1")))
