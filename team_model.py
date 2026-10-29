@@ -49,31 +49,57 @@ def fit(d):
 def evaluate(d, cut="2026-02-01"):
     tr, te = d[d.date < cut], d[d.date >= cut]; sig = fit(tr)["sigma"]
     win = (te.margin > 0).astype(int); p = stats.norm.cdf(te.margin_pred / sig["margin"]); brier = lambda y, q: float(np.mean((y - q) ** 2))
-    return dict(cut=cut, n_train=len(tr), n_test=len(te),
+    mk = None
+    try:
+        gg = pd.read_sql("SELECT game_id, ou, spread_home, ml_home, ml_away FROM games", sqlite3.connect(DB)).set_index("game_id")
+        x = te.join(gg).dropna(subset=["ou", "spread_home"]); w = (x.margin > 0).astype(int)
+        pm = np.array([_nv(a, b) if _nv(a, b) is not None else 0.5 for a, b in zip(x.ml_home, x.ml_away)])
+        mk = dict(n=int(len(x)), margin_mae=float(np.mean(np.abs(x.margin + x.spread_home))), margin_mae_elo=float(np.mean(np.abs(x.margin - x.margin_pred))),
+                  total_mae=float(np.mean(np.abs(x.total - x.ou))), total_mae_form=float(np.mean(np.abs(x.total - x.total_pred))),
+                  win_brier=float(np.mean((w - pm) ** 2)), win_brier_elo=float(np.mean((w - stats.norm.cdf(x.margin_pred / sig["margin"])) ** 2)))
+    except Exception: pass
+    return dict(cut=cut, n_train=len(tr), n_test=len(te), market=mk,
                 margin_mae=float(np.mean(np.abs(te.margin - te.margin_pred))), margin_mae_constant=float(np.mean(np.abs(te.margin - tr.margin.mean()))),
                 total_mae=float(np.mean(np.abs(te.total - te.total_pred))), total_mae_constant=float(np.mean(np.abs(te.total - tr.total.mean()))),
                 win_acc=float(np.mean((te.margin_pred > 0) == (te.margin > 0))), home_win_rate=float(win.mean()),
                 win_brier=brier(win, p), win_brier_constant=brier(win, np.full(len(win), win.mean())), sigma=sig)
 
+def _nv(ml_h, ml_a):
+    """No-vig win probability for the home team from American moneylines."""
+    imp = lambda x: (-x / (-x + 100)) if x < 0 else (100 / (x + 100))
+    try: ph, pa = imp(float(ml_h)), imp(float(ml_a)); return ph / (ph + pa)
+    except (TypeError, ValueError, ZeroDivisionError): return None
+
 def predict(upcoming):
-    """upcoming: [{game_id, date, home, away}] -> {game_id: {margin, total, sigma_margin, sigma_total}} from the full history."""
+    """upcoming: [{game_id, date, home, away, ou, spread_home, ml_home, ml_away}] ->
+    {game_id: {margin, total, sigma_margin, sigma_total, source, p_home_ml}}.
+    In backtests the betting market's margin/total/moneyline beat our own Elo/form model, so the market is the central estimate when a
+    line exists; our own model is only the fallback."""
     con = sqlite3.connect(DB); g = pd.read_sql("SELECT * FROM games", con)
     d = build(g); sig = fit(d)["sigma"]; R = elo(g)[1]
+    if "spread_home" in g and g.spread_home.notna().any():
+        lg = g.dropna(subset=["ou", "spread_home"]); sig_mk = dict(margin=float(np.std((lg.home_pts - lg.away_pts) + lg.spread_home)), total=float(np.std(lg.home_pts + lg.away_pts - lg.ou)))
+    else: sig_mk = None
     L = _long(g); ew = {}
     for team, x in L.groupby("team"):
         ew[team] = dict(off=x.pf.ewm(halflife=HALF, min_periods=3).mean().iloc[-1], dfn=x.pa.ewm(halflife=HALF, min_periods=3).mean().iloc[-1])
     out = {}
     for u in upcoming:
+        mkt = u.get("ou") is not None and u.get("spread_home") is not None and sig_mk is not None
+        if mkt:
+            out[u["game_id"]] = dict(margin=-float(u["spread_home"]), total=float(u["ou"]), sigma_margin=sig_mk["margin"], sigma_total=sig_mk["total"],
+                                     source="market", p_home_ml=_nv(u.get("ml_home"), u.get("ml_away")))
+            continue
         h, a = ew.get(u["home"]), ew.get(u["away"])
         if not h or not a or u["home"] not in R or u["away"] not in R: continue
         out[u["game_id"]] = dict(margin=R[u["home"]] - R[u["away"]] + HCA, total=(h["off"] + a["dfn"] + a["off"] + h["dfn"]) / 2,
-                                 sigma_margin=sig["margin"], sigma_total=sig["total"])
+                                 sigma_margin=sig["margin"], sigma_total=sig["total"], source="model", p_home_ml=None)
     return out
 
 def price(p):
     """Winner chances plus handicap and total ladders (half-point lines kept to a realistic 15%-85% range)."""
     sm, st, m, t = p["sigma_margin"], p["sigma_total"], p["margin"], p["total"]
-    ph = float(stats.norm.cdf(m / sm))
+    ph = float(p.get("p_home_ml") if p.get("p_home_ml") is not None else stats.norm.cdf(m / sm))
     hand = []
     for k in np.arange(-30.5, 30.6, 1.0):  # home handicap k: home wins the bet if margin + k > 0
         q = float(stats.norm.cdf((m + k) / sm))
@@ -83,7 +109,7 @@ def price(p):
         q = float(stats.norm.cdf((t - L) / st))
         if 0.2 <= q <= 0.8: tot.append(dict(line=float(L), p_over=q, p_under=1 - q))
     return dict(margin=m, total=t, home_pts=(t + m) / 2, away_pts=(t - m) / 2, p_home=ph, p_away=1 - ph, handicaps=hand, totals=tot,
-                sigma_margin=sm, sigma_total=st)
+                sigma_margin=sm, sigma_total=st, source=p.get("source", "model"))
 
 if __name__ == "__main__":
     con = sqlite3.connect(DB); g = pd.read_sql("SELECT * FROM games", con); d = build(g)

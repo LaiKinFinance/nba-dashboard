@@ -163,7 +163,7 @@ def game_preds():
 def match_payload(gp, bl):
     """Model prices for winner/handicap/total, with bookmaker prices merged in where the Odds API supplied them."""
     if not gp: return None
-    m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals")}
+    m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals")}; m["source"] = gp.get("source", "model")
     bl = bl or {}
     h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(v) for s, v in h2.items()}
     hand = {l["line"]: dict(l) for l in m["handicaps"]}
@@ -194,6 +194,9 @@ def get_slate(x_code: str = Header("")):
         g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]))))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
+
+def bkName_(b):
+    return "Sportsbet" if b == "sportsbet" else (b or "the bookmaker")
 
 def _conf(p, s, line, hit, n, edge, with_evidence):
     """Simple, transparent confidence points (each one is shown to the user as evidence)."""
@@ -262,12 +265,15 @@ def value_picks(x_code: str = Header("")):
     with closing(con()) as c: bl = _o.load_lines(c)
     for gid, g in gp.items():
         b = bl.get(gid) or {}
+        if g.get("source") != "market": continue   # without a market line our own team model has no proven edge, so no team value claims
         for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
             pr = (b.get("h2h") or {}).get(side)
-            if pr and g[pk] - 1 / pr[0] >= 0.06:
+            if pr and g[pk] - 1 / pr[0] >= 0.04:
                 ranked.append(dict(kind="team", game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
-                                   adj_edge=0.7 * g[pk] + 0.3 / pr[0] - 1 / pr[0], confidence="Medium" if g[pk] - 1 / pr[0] >= 0.1 else "Speculative",
-                                   evidence=[f"Model chance {g[pk]*100:.0f}% vs price implies {100/pr[0]:.0f}%", f"Model score {g['away']} {g['away_pts']:.0f} – {g['home']} {g['home_pts']:.0f}", "Team model backtest: picks winners ~73% of the time; margin error ≈ 12 pts"]))
+                                   adj_edge=g[pk] - 1 / pr[0], confidence="Medium" if g[pk] - 1 / pr[0] >= 0.06 else "Speculative",
+                                   evidence=[f"Betting-market consensus (DraftKings) puts {nmx} at {g[pk]*100:.0f}% to win; {bkName_(pr[1])}'s price implies only {100/pr[0]:.0f}%",
+                                             f"Expected score {g['away']} {g['away_pts']:.0f} – {g['home']} {g['home_pts']:.0f} (market spread and total)",
+                                             "In testing, market lines predicted winners better than our own team model, so this is a price comparison, not a model opinion"]))
     ranked.sort(key=lambda o: -o["adj_edge"])
     return dict(picks=ranked[:10], odds_connected=bool(_o.available()))
 

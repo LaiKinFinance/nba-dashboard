@@ -31,6 +31,12 @@ def residual_corr(df, m, alphas, cut="2026-02-01"):
     cross = lambda d: {t: float(np.corrcoef(np.array(v).T)[0, 1]) for t, v in d.items() if len(v) > 30}
     return dict(same=same.tolist(), teammate=cross(tm), opponent=cross(op))
 
+def _team_report():
+    try:
+        g = pd.read_sql("SELECT * FROM games", sqlite3.connect(DB)); return team_model.evaluate(team_model.build(g))
+    except Exception as e:
+        print("team report failed:", e); return None
+
 def train(report=True):
     df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
     cut = "2026-02-01"; tr = full[full.date < cut]
@@ -38,7 +44,7 @@ def train(report=True):
     corr = residual_corr(full, m_eval, alphas)
     m = fit(full); alphas = {t: dispersion(m[t], full[FEATURES], full[t]) for t in TARGETS}
     from model import evaluate
-    pickle.dump(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=evaluate(full)), open(MODELS, "wb"))
+    pickle.dump(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report())), open(MODELS, "wb"))
     return m, alphas, corr
 
 def load_models():
@@ -120,7 +126,7 @@ def project(days=2):
                                  lineup_status=lu.get(team, {}).get("status", "No lineup posted yet"),
                                  injury=next((v for n, v in inj.items() if sl.name_match(r.player, n) and v["team"] == team), None)))
     try:
-        gp = team_model.predict([dict(game_id=g["game_id"], date=g["date"], home=g["home"], away=g["away"]) for g in games])
+        gp = team_model.predict([dict(game_id=g["game_id"], date=g["date"], home=g["home"], away=g["away"], ou=g.get("ou"), spread_home=g.get("spread_home"), ml_home=g.get("ml_home"), ml_away=g.get("ml_away")) for g in games])
         project.game_preds = {gid: dict(team_model.price(v), game_id=gid, start=next(x["start"] for x in games if x["game_id"] == gid),
                                         home=next(x["home"] for x in games if x["game_id"] == gid), away=next(x["away"] for x in games if x["game_id"] == gid))
                               for gid, v in gp.items()}

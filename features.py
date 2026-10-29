@@ -63,4 +63,4 @@ MARKET = ["game_total", "team_margin", "team_implied"]
 START = ["starter_today"]
 FEATURES = [f"{c}_{s}" for c in ["min", "pts", "reb", "ast", "pra", "dd", "td", "starter"] for s in ("m5", "m10", "m20", "exp")] \
     + ["pts_sd10", "reb_sd10", "ast_sd10", "min_sd10", "td_m40", "home", "rest", "b2b", "prior_games",
-       "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"] + absence.ABS
+       "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"] + absence.ABS + START
