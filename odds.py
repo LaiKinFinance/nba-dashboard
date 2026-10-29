@@ -29,7 +29,8 @@ def init(con):
     con.executescript("""
     CREATE TABLE IF NOT EXISTS book_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, price REAL, book TEXT, fetched_at TEXT,
         PRIMARY KEY(game_id, player_id, stat, line, side, book));
-    CREATE TABLE IF NOT EXISTS odds_status(k TEXT PRIMARY KEY, v TEXT);""")
+    CREATE TABLE IF NOT EXISTS odds_status(k TEXT PRIMARY KEY, v TEXT);
+    CREATE TABLE IF NOT EXISTS odds_fetch(game_id TEXT PRIMARY KEY, fetched_at TEXT);""")
 
 def _get(path, **params):
     r = requests.get(f"{BASE}{path}", params={"apiKey": os.environ["ODDS_API_KEY"], **params}, timeout=30)
@@ -74,7 +75,7 @@ def refresh(games, players_by_game):
     for g in sorted(games, key=lambda x: x["start"]):
         start = dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00"))
         if start - now > dt.timedelta(hours=30) or start < now: continue
-        last = con.execute("SELECT max(fetched_at) FROM book_odds WHERE game_id=?", (g["game_id"],)).fetchone()[0]
+        row = con.execute("SELECT fetched_at FROM odds_fetch WHERE game_id=?", (g["game_id"],)).fetchone(); last = row[0] if row else None  # remembered even when a fetch returned no prices
         if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=REFETCH_HOURS): continue
         ev = ev_by.get((g["home"], g["away"]))
         if not ev or fetched >= GAMES_PER_RUN: continue
@@ -86,6 +87,7 @@ def refresh(games, players_by_game):
         n2p = {norm_name(nm): pid for pid, nm in players_by_game.get(g["game_id"], [])}
         rows = parse_event(js, n2p)
         con.execute("DELETE FROM book_odds WHERE game_id=?", (g["game_id"],))
+        con.execute("INSERT OR REPLACE INTO odds_fetch VALUES(?,?)", (g["game_id"], now.isoformat()))
         con.executemany("INSERT OR REPLACE INTO book_odds VALUES(?,?,?,?,?,?,?,?)",
                         [(g["game_id"], pid, st, ln, sd, pr, bk, now.isoformat()) for pid, st, ln, sd, pr, bk in rows])
         fetched += 1
