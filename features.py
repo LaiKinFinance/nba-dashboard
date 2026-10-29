@@ -4,6 +4,9 @@ from top3 import load
 import absence, sqlite3, os
 
 STATS = ["min", "pts", "reb", "ast"]
+# Increment whenever feature meaning/history changes, even if column names stay the same.
+# v2: chronological absence state and completed-history-only per-event placeholders.
+FEATURE_SCHEMA_VERSION = 2
 
 def build(df=None):
     df = (load() if df is None else df).sort_values(["date", "game_id"]).reset_index(drop=True)

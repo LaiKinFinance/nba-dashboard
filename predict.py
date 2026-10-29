@@ -2,8 +2,9 @@
 import json, pickle, sqlite3, datetime as dt, os
 import numpy as np, pandas as pd
 from scipy import stats
-from features import build, FEATURES
-from model import rotation, fit, dispersion, nb_over, TARGETS, ALL, feats_for
+from features import build, FEATURES, FEATURE_SCHEMA_VERSION
+from model import rotation, fit, dispersion, nb_over, TARGETS, ALL, feats_for, TD_FEATS
+from model_schema import ModelSchemaError, validate_model_bundle
 import combos
 from top3 import top3
 import slate as sl
@@ -44,12 +45,28 @@ def train(report=True):
     corr = residual_corr(full, m_eval, alphas)
     m = fit(full); alphas = {t: dispersion(m[t], full[feats_for(t)], full[t]) for t in ALL}
     from model import evaluate
-    pickle.dump(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report())), open(MODELS, "wb"))
+    save_models(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report())))
     return m, alphas, corr
 
+def feature_columns():
+    return {**{t: feats_for(t) for t in ALL}, 'dd': list(FEATURES), 'td': list(TD_FEATS)}
+
+
+def save_models(bundle):
+    """Called by explicit training; never use this to relabel an old artifact."""
+    bundle = dict(bundle, feature_schema_version=FEATURE_SCHEMA_VERSION, feature_columns=feature_columns())
+    with open(MODELS, 'wb') as stream:
+        pickle.dump(bundle, stream)
+
+
 def load_models():
-    if not os.path.exists(MODELS): train()
-    return pickle.load(open(MODELS, "rb"))
+    try:
+        with open(MODELS, 'rb') as stream:
+            bundle = pickle.load(stream)
+    except FileNotFoundError:
+        raise ModelSchemaError('No saved model is available. Complete Phase 1 data repair, explicit offline retraining and validation first.') from None
+    validate_model_bundle(bundle, feature_columns())
+    return bundle
 
 def pick_top3(raw, team, out_names, lineup_names):
     """Top-3 by recent production, skipping anyone ruled out (injury report or Rotowire may-not-play)."""
