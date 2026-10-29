@@ -128,3 +128,40 @@ def mixture_study():
     return dict(b=float(b), alpha=alpha, q=float(q), kappa=float(kappa))
 
 if __name__ == "__main__" and "--mixture" in sys.argv: mixture_study()
+
+# ======================================================================================================================
+# FAIR COMPARISON (replaces the earlier tables, whose "high-chance" group differed from one version to the next)
+#   * every version is scored on the SAME bets: the bets the ORIGINAL model called 75%+ (fixed before looking at any other version),
+#     plus a second fixed group: lines 1-4 below the projection;
+#   * periods are separated by whole games (checked: no game appears in two periods);
+#   * uncertainty comes from resampling whole games.
+# ======================================================================================================================
+def fair_comparison(boots=400, seed=5):
+    df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"]).sort_values(["date", "game_id"])
+    tr, cal, te = full[full.date < T1], full[(full.date >= T1) & (full.date < T2)], full[full.date >= T2]
+    assert not (set(tr.game_id) & set(cal.game_id)) and not (set(cal.game_id) & set(te.game_id)) and not (set(tr.game_id) & set(te.game_id)), "a game appears in two periods"
+    m = fit(tr)["pts"]; mu_tr, mu_c, mu_t = (m.predict(d[feats_for("pts")]) for d in (tr, cal, te))
+    a_train = float(max(np.sum((tr.pts.values - mu_tr) ** 2 - mu_tr) / np.sum(mu_tr ** 2), 0.001)); a_cal = float(max(np.sum((cal.pts.values - mu_c) ** 2 - mu_c) / np.sum(mu_c ** 2), 0.001))
+    b2, la2 = minimize(nb_loglik, [0.0, np.log(0.1)], args=(mu_c, cal.pts.values), method="Nelder-Mead").x; a2 = float(np.exp(la2))
+    fr = minimize(mix_nll, [0.03, np.log(0.12), -2.0, 0.0], args=(mu_c, cal.pts.values), method="Nelder-Mead", options=dict(maxiter=3000, xatol=1e-4, fatol=1e-4)).x
+    b, alpha, q, kappa = float(fr[0]), float(np.exp(fr[1])), float(1 / (1 + np.exp(-fr[2]))), float(1 / (1 + np.exp(-fr[3])))
+    variants = {"0 original": lambda mu, L: nb_over(mu, a_train, L), "1 spread from calibration games": lambda mu, L: nb_over(mu, a_cal, L),
+                "2 scale + spread": lambda mu, L: nb_over(mu * np.exp(b2), a2, L), "3 scale + spread + bad nights (kept)": lambda mu, L: mix_over(mu, alpha, b, q, kappa, L)}
+    offsets = np.arange(-4, 5); rows = []
+    for o in offsets:
+        line = np.maximum(np.floor(mu_t) + 0.5 + o, 0.5)
+        rows.append(pd.DataFrame(dict(game=te.game_id.values, off=o, y=(te.pts.values > line).astype(int), **{k: f(mu_t, line) for k, f in variants.items()})))
+    bets = pd.concat(rows, ignore_index=True)
+    groups = {"A: bets the ORIGINAL model called 75%+": bets["0 original"] >= 0.75, "B: lines 1-4 below the projection": bets.off.between(-4, -1)}
+    rng = np.random.default_rng(seed); games = bets.game.unique(); idx = {g: np.where(bets.game.values == g)[0] for g in games}
+    print(f"test period: {len(te)} player-games in {te.game_id.nunique()} games; every column below is scored on exactly the same bets in each group")
+    for gname, mask in groups.items():
+        sub = bets[mask]; print(f"\n{gname}   (n={len(sub)} bets from {sub.game.nunique()} games; actual rate {sub.y.mean():.3f})")
+        for k in variants:
+            gap = float(sub[k].mean() - sub.y.mean()); brier = float(np.mean((sub[k] - sub.y) ** 2))
+            per = sub.assign(d=sub[k] - sub.y).groupby("game").d.agg(["sum", "size"]).to_numpy(float); gs = []
+            for _ in range(boots):
+                r = per[rng.integers(0, len(per), len(per))]; gs.append(r[:, 0].sum() / r[:, 1].sum())
+            print(f"  {k:40s} predicted {sub[k].mean():.3f}  gap {gap:+.3f}  (95% range {np.percentile(gs, 2.5):+.3f} to {np.percentile(gs, 97.5):+.3f})  Brier {brier:.4f}")
+
+if __name__ == "__main__" and "--fair" in sys.argv: fair_comparison()

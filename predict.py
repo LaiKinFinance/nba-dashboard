@@ -166,8 +166,8 @@ def train(report=True):
     if len(W) < 1500:                                    # off-season or very short window: widen to the last 1500 rows
         w0 = full.date.sort_values().iloc[-1500]; A, W = full[full.date < w0], full[full.date >= w0]
     mA = fit(A); alphas = {t: dispersion(mA[t], W[feats_for(t)], W[t]) for t in ALL}
-    Wd = W.sort_values("date")                           # points correction: chosen on these unseen games only, kept only if it wins on the later part of them
-    fix = choose_points_fix(mA["pts"].predict(Wd[feats_for("pts")]), Wd["pts"].values)
+    Wd = W.sort_values(["date", "game_id"])              # points correction: chosen on these unseen games only, kept only if it wins on the later games of them
+    fix = choose_points_fix(mA["pts"].predict(Wd[feats_for("pts")]), Wd["pts"].values, groups=Wd["game_id"].values)
     if fix: alphas["pts_fix"] = fix
     m = fit(full)
     from model import evaluate

@@ -61,3 +61,14 @@ def test_no_points_value_or_safe_claims(monkeypatch):
     monkeypatch.setattr(app, "enriched", lambda: [p]); monkeypatch.setattr(app, "game_preds", lambda: {})
     monkeypatch.setattr(app, "model_status", lambda preds=None: (object(), None)); monkeypatch.setattr(app, "require_current_model", lambda preds=None: dict(alphas=PLAIN, corr={}))
     assert app.compute_value()["picks"] == [] and app.compute_best()["legs"] == []
+
+def test_split_between_fitting_and_checking_never_cuts_a_game():
+    groups = np.repeat(np.arange(400), 10)                       # 400 games, 10 players each, in date order
+    for frac in (0.5, 0.6, 0.63, 0.7):
+        k = model.game_cut(groups, frac)
+        assert k % 10 == 0 and groups[k - 1] != groups[k]        # the cut falls between games
+
+def test_correction_choice_uses_whole_games():
+    mu, y = _data(6000, True); groups = np.repeat(np.arange(600), 10)
+    fix = model.choose_points_fix(mu, y, groups=groups)
+    assert fix and fix["evidence"]["holdout_rows"] % 10 == 0     # the checking part holds whole games only

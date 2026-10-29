@@ -87,12 +87,20 @@ def _fit_pts(mu, y, mixture):
     x0 = [0.03, np.log(0.12)] + ([-2.0, 0.0] if mixture else [])
     return minimize(_pts_nll, x0, args=(mu, y, mixture), method="Nelder-Mead", options=dict(maxiter=3000, xatol=1e-4, fatol=1e-4)).x
 
-def choose_points_fix(mu, y, margin=3.0):
-    """Fit the points correction on `mu, y` (rows in date order: earlier 60% to fit, later 40% to check). Keep it only if it beats the plain
-    distribution on the later 40%; then refit on everything given. Returns the correction (with its version and evidence) or None."""
+def game_cut(groups, frac=0.6):
+    """Index that splits rows (already in date order) at a GAME boundary near `frac`: no game has players on both sides of the cut."""
+    g = np.asarray(groups); k = int(len(g) * frac)
+    while 0 < k < len(g) and g[k] == g[k - 1]: k += 1
+    return k
+
+def choose_points_fix(mu, y, groups=None, margin=3.0):
+    """Fit the points correction on `mu, y` (rows in date order; `groups` = the game of each row). The earlier ~60% of GAMES are used to fit, the later
+    ~40% to check; whole games are never split between the two. Keep the correction only if it beats the plain distribution on the later part;
+    then refit on everything given. Returns the correction (with its version and evidence) or None."""
     from scipy.special import expit
-    mu, y = np.asarray(mu, float), np.asarray(y, float); k = int(len(mu) * 0.6)
+    mu, y = np.asarray(mu, float), np.asarray(y, float)
     if len(mu) < 800: return None
+    k = game_cut(groups if groups is not None else np.arange(len(mu)), 0.6)
     plain, mix = _fit_pts(mu[:k], y[:k], False), _fit_pts(mu[:k], y[:k], True)
     ll_plain = -_pts_nll(plain, mu[k:], y[k:], False); ll_mix = -_pts_nll(mix, mu[k:], y[k:], True)
     ok = bool(np.isfinite(ll_plain) and np.isfinite(ll_mix) and ll_mix - ll_plain >= margin)
