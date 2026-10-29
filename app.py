@@ -46,6 +46,14 @@ def _models_age():
     try: return time.time() - os.path.getmtime(predict.MODELS)
     except OSError: return float("inf")
 
+def train_quietly():
+    """Retrain in a separate low-priority process using one core, so the website stays responsive on the small server."""
+    import subprocess, sys
+    env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
+    r = subprocess.run([sys.executable, "-c", "import predict; predict.train()"], env=env, cwd=os.path.dirname(os.path.abspath(__file__)),
+                       capture_output=True, text=True, preexec_fn=lambda: os.nice(15), timeout=3600)
+    if r.returncode: raise RuntimeError(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"training exited {r.returncode}")
+
 def refresh_once():
     """One full cycle. Data repairs run first; training happens by saved-model age or when the model predates the feature
     definitions (never just because the process restarted); a model that fails validation is not used, and projections are skipped
@@ -55,7 +63,7 @@ def refresh_once():
         t = dt.date.today()
         _stage("repair", repair.run_all)
         _stage("ingest", lambda: ingest.run(t - dt.timedelta(days=10), t))
-        if _models_age() > TRAIN_EVERY or predict.model_stale(): _stage("train", predict.train)
+        if _models_age() > TRAIN_EVERY or predict.model_stale(): _stage("train", train_quietly)
         if not predict.model_stale(): _stage("project", lambda: predict.save(predict.project()))
         _stage("odds", lambda: logging.info("odds refresh: %s", refresh_odds()))
         _stage("grade", grade_picks); _stage("log_picks", log_picks)
