@@ -73,6 +73,15 @@ def get_slate(x_code: str = Header("")):
     for p in preds:
         g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
+    ids = list({p["player_id"] for p in preds})
+    last5 = {}
+    if ids:
+        with closing(con()) as c:
+            q = ",".join("?" * len(ids))
+            for r in c.execute(f"SELECT player_id,date,opp,home,min,pts,reb,ast FROM player_games WHERE player_id IN ({q}) ORDER BY date DESC", ids):
+                last5.setdefault(r["player_id"], [])
+                if len(last5[r["player_id"]]) < 5: last5[r["player_id"]].append(dict(r))
+    for p in preds: p["last5"] = last5.get(p["player_id"], [])
     return sorted(games.values(), key=lambda g: g["start"])
 
 @app.get("/api/player/{pid}")
