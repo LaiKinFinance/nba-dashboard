@@ -39,10 +39,10 @@ def leg_prob_single(pred, alphas, leg):
     return p if leg.get("side", "over") == "over" else 1 - p
 
 def parlay(legs, preds, alphas, corr, n=60000, seed=7):
-    # variables: one latent per (player, component)
+    # variables: one latent per (game, player, component)
     var = {}
     def add(pid, game, comp):
-        if (pid, comp) not in var: var[(pid, comp)] = dict(i=len(var), game=game)
+        if (game, pid, comp) not in var: var[(game, pid, comp)] = dict(i=len(var), game=game)
     for l in legs:
         pid, g, s = l["player_id"], l["game_id"], l["stat"]
         for c in (COMBO[s] if s in COMBO else (s,)): add(pid, g, c)
@@ -51,8 +51,8 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7):
     keys = sorted(var, key=lambda k: var[k]["i"]); k = len(keys); C = np.eye(k)
     for a in range(k):
         for b in range(a + 1, k):
-            (pa, ca), (pb, cb) = keys[a], keys[b]; ga, gb = var[keys[a]]["game"], var[keys[b]]["game"]; r = 0.0
-            if pa == pb:
+            (ga, pa, ca), (gb, pb, cb) = keys[a], keys[b]; r = 0.0
+            if pa == pb and ga == gb:
                 if ca in ALL and cb in ALL: r = _same(corr, ca, cb)
                 elif ca in DD_TD_CORR and cb in CORE: r = DD_TD_CORR[ca]
                 elif cb in DD_TD_CORR and ca in CORE: r = DD_TD_CORR[cb]
@@ -63,17 +63,17 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7):
             C[a, b] = C[b, a] = r
     z = np.random.default_rng(seed).multivariate_normal(np.zeros(k), _psd(C), size=n); u = stats.norm.cdf(z)
     vals = {}
-    for (pid, comp), v in var.items():
+    for (game, pid, comp), v in var.items():
         pred = preds[(v["game"], pid)]
         if comp in ("dd", "td"):
-            p = pred["p_dd"] if comp == "dd" else pred["p_td"]; vals[(pid, comp)] = (u[:, v["i"]] > 1 - p).astype(float)
-        else: vals[(pid, comp)] = nb_samples(u[:, v["i"]], pred["proj"][comp], alphas[comp])
+            p = pred["p_dd"] if comp == "dd" else pred["p_td"]; vals[(game, pid, comp)] = (u[:, v["i"]] > 1 - p).astype(float)
+        else: vals[(game, pid, comp)] = nb_samples(u[:, v["i"]], pred["proj"][comp], alphas[comp])
     wins, probs = [], []
     for l in legs:
-        pid, s = l["player_id"], l["stat"]
-        if s in ("dd", "td"): w = vals[(pid, s)] > 0.5
+        game, pid, s = l["game_id"], l["player_id"], l["stat"]
+        if s in ("dd", "td"): w = vals[(game, pid, s)] > 0.5
         else:
-            x = sum(vals[(pid, c)] for c in (COMBO[s] if s in COMBO else (s,)))
+            x = sum(vals[(game, pid, c)] for c in (COMBO[s] if s in COMBO else (s,)))
             w = x > l["line"] if l.get("side", "over") == "over" else x < l["line"]
         wins.append(w)
         exact = leg_prob_single(preds[(l["game_id"], pid)], alphas, l)
