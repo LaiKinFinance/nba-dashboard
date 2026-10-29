@@ -25,9 +25,11 @@ jobs:
         env:
           APP_ACCESS_CODE: ${{ secrets.APP_ACCESS_CODE }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          BACKUP_CODE: ${{ secrets.BACKUP_CODE }}
         run: |
           [ -n "$APP_ACCESS_CODE" ] && flyctl secrets set APP_ACCESS_CODE="$APP_ACCESS_CODE" -a "$APP" --stage
           [ -n "$ODDS_API_KEY" ] && flyctl secrets set ODDS_API_KEY="$ODDS_API_KEY" -a "$APP" --stage
+          [ -n "$BACKUP_CODE" ] && flyctl secrets set BACKUP_CODE="$BACKUP_CODE" -a "$APP" --stage
           true
       - name: Deploy
         run: flyctl deploy --remote-only -a "$APP"
