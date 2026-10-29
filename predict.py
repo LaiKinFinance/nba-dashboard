@@ -98,13 +98,23 @@ def with_without(real, team, pid, apid):
     def agg(x): return dict(n=int(len(x)), pts=float(x.pts.mean()), reb=float(x.reb.mean()), ast=float(x.ast.mean()), min=float(x["min"].mean())) if len(x) else None
     return agg(mine[has]), agg(mine[without])
 
+def current_teams():
+    """player_id -> team from the stored ESPN rosters (repair.refresh_rosters); None if the table is missing or looks incomplete."""
+    try:
+        r = pd.read_sql("SELECT player_id, team AS cur_team FROM rosters WHERE team IS NOT NULL", sqlite3.connect(DB))
+    except Exception:
+        return None
+    return r if len(r) >= 300 else None
+
 def project(days=2):
     bundle = load_models(); m, alphas = bundle["models"], bundle["alphas"]
     games = [g for g in sl.upcoming(days) if g["status"] == "STATUS_SCHEDULED"]
     inj = sl.injuries(); lu = sl.lineups()
     raw = pd.read_sql("SELECT * FROM player_games", sqlite3.connect(DB))
-    latest_team = raw.sort_values("date").groupby("player_id").tail(1)[["player_id", "team"]]
-    raw = raw.merge(latest_team.rename(columns={"team": "cur_team"}), on="player_id")
+    cur = current_teams()
+    if cur is None:                                       # no roster feed yet: fall back to the team he last played for
+        cur = raw.sort_values("date").groupby("player_id").tail(1)[["player_id", "team"]].rename(columns={"team": "cur_team"})
+    raw = raw.merge(cur, on="player_id")                  # players on no current roster drop out (waived, retired, overseas)
     real = raw.drop(columns=["cur_team"])
     af, state = absence.track(real)
     recent = {t: af.xs(t, level="team").tail(10).mean() for t in set(af.index.get_level_values("team"))}
@@ -135,8 +145,18 @@ def project(days=2):
     if not rows: return []
     ph = pd.DataFrame(rows)
     base = raw.drop(columns=["cur_team"]).assign(_upcoming=0)
-    feats = build(pd.concat([base, ph], ignore_index=True))  # placeholder rows only read earlier games
-    feats = feats[feats._upcoming == 1] if "_upcoming" in feats else feats
+    # A player with two games in the window must not read his first (still empty) placeholder as history for the second,
+    # so each "wave" holds at most one upcoming game per player and is built separately against real games only.
+    ph["wave"] = ph.sort_values(["date", "game_id"]).groupby("player_id").cumcount()
+    parts = []
+    for w in sorted(ph.wave.unique()):
+        f = build(pd.concat([base, ph[ph.wave == w].drop(columns="wave")], ignore_index=True))
+        parts.append(f[f._upcoming == 1])
+    feats = pd.concat(parts, ignore_index=True)
+    feats = feats.sort_values(["player_id", "date", "game_id"]).reset_index(drop=True)
+    prev = feats.groupby("player_id").date.shift(1); later = prev.notna()     # rest before his 2nd game counts from his 1st upcoming game
+    feats.loc[later, "rest"] = (pd.to_datetime(feats.date[later]) - pd.to_datetime(prev[later])).dt.days.clip(upper=10)
+    feats["b2b"] = (feats.rest == 1).astype(int)
     out = []
     for (_, f), mt in zip(feats.sort_values(["game_id", "team"]).iterrows(), sorted(meta, key=lambda x: (x["game"]["game_id"], 0)), ) if False else []:
         pass

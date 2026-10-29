@@ -1,5 +1,7 @@
 """Upcoming games (ESPN), starting lineups + may-not-play lists (Rotowire), injuries (ESPN)."""
 import datetime as dt, re
+from zoneinfo import ZoneInfo
+ET = ZoneInfo("America/New_York")
 import requests
 from bs4 import BeautifulSoup
 
@@ -12,7 +14,7 @@ ALIAS = {"NYK": "NY", "SAS": "SA", "GSW": "GS", "NOP": "NO", "WAS": "WSH", "UTA"
 
 def upcoming(days=2):
     """Scheduled (not started) games for the next `days` calendar days (US Eastern dates, as ESPN keys them)."""
-    out, today = [], dt.datetime.now(dt.timezone(dt.timedelta(hours=-5))).date()
+    out, today = [], dt.datetime.now(ET).date()
     for i in range(days):
         d = today + dt.timedelta(days=i)
         js = requests.get(SB, params={"dates": d.strftime("%Y%m%d")}, headers=H, timeout=30).json()
@@ -20,7 +22,7 @@ def upcoming(days=2):
             c = e["competitions"][0]["competitors"]
             h = next(x for x in c if x["homeAway"] == "home"); a = next(x for x in c if x["homeAway"] == "away")
             od = (e["competitions"][0].get("odds") or [{}])[0]
-            out.append(dict(game_id=e["id"], start=e["date"], status=e["status"]["type"]["name"], date=e["date"][:10],
+            out.append(dict(game_id=e["id"], start=e["date"], status=e["status"]["type"]["name"], date=dt.datetime.fromisoformat(e["date"].replace("Z", "+00:00")).astimezone(ET).date().isoformat(),
                             ou=od.get("overUnder"), spread_home=od.get("spread"),
                             ml_home=(od.get("homeTeamOdds") or {}).get("moneyLine"), ml_away=(od.get("awayTeamOdds") or {}).get("moneyLine"),
                             home=h["team"]["abbreviation"], away=a["team"]["abbreviation"],
