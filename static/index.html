@@ -166,9 +166,9 @@ table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk 
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["today","Games"],["best","Best picks"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
+const TABS=[["best","Best picks"],["today","Games"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
-let tab=localStorage.tab&&TABS.some(t=>t[0]==localStorage.tab)?localStorage.tab:"today";
+let tab="best";   // the app always opens on Best picks (the home tab)
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,oddsManual=false,snaps={},alerts=[],live={};
 const hdr=()=>({"Content-Type":"application/json","X-User":localStorage.user||"","X-Code":localStorage.code||""});
 async function api(p,o={}){const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});
@@ -411,15 +411,15 @@ function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o
   else pick(o.game_id,o.player_id,o.stat,o.line,o.price,o.book,o.p,o.hit,o.n)}
 
 /* ---------- best picks tab: today's picks + track record ---------- */
-let bestView=(()=>{try{return localStorage.bestView||"today"}catch(e){return"today"}})();
+let bestView="today";      // always open on today's picks
 const pc0=x=>x==null?"–":Math.round(x*100)+"%";
 const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
-async function bestTab(a){await loadSlate();
+async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
   a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today's picks</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Track record</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
-  if(bestView=="today"){const [b,v]=await Promise.all([api("best"),api("value")]);best=b;VAL=v;
+  if(bestView=="today"){const [b,v]=await Promise.all([api("best"),api("value"),slateP]);best=b;VAL=v;
     $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML()}
-  else{const t=await api("track"),L=t.legs,C=t.combos,V=t.value;
+  else{const t=await api("track"),L=t.legs,C=t.combos,V=t.value;await slateP;
     const gap=L.n>=20?L.won/L.n-L.avg_p:null;
     const verdict=L.n<20?`Too early to judge: about ${20-L.n} more graded picks are needed before the hit rate means much.`:gap<-0.07?"Picks are winning less often than the model expected, so its confidence has been too high.":gap>0.07?"Picks are winning more often than the model expected, so it has been cautious.":"Hit rate is close to what the model expected.";
     $("#bbody").innerHTML=`<div class="tiles"><div class="tile"><div class="v">${L.n?pc0(L.won/L.n):"–"}</div><div class="k">Legs won (${L.won} of ${L.n}${L.pending?`, ${L.pending} pending`:""})</div></div>
