@@ -526,15 +526,31 @@ function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=esc(l.text||"
   else{hit=l.side=="over"?tot>l.line:tot<l.line;txt=`${tot} points so far (line ${Number(l.line)})`;frac=l.side=="over"?tot/l.line:1-(tot-l.line*.5)/(l.line*.5)}
   const done=g.state=="post",v=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${v}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${Math.max(2,Math.min(100,frac*100))}%"></i></div></div>`}
+// BEGIN playerLegProgress: pure display calculation, tested without a browser.
+function playerLegProgress(l,r){
+  let cur,tgt,hit,txt;const under=l.side=="under";
+  if(l.stat=="dd"||l.stat=="td"){
+    tgt=l.stat=="dd"?2:3;cur=catCount(r);hit=under?cur<tgt:cur>=tgt;
+    txt=`${cur} of ${tgt} categories at 10+ (PTS ${r.pts}, REB ${r.reb}, AST ${r.ast})`;
+  }else{
+    const parts={pra:["pts","reb","ast"],pr:["pts","reb"],pa:["pts","ast"]}[l.stat]||[l.stat],line=Number(l.line);
+    if(!Number.isFinite(line)||parts.some(k=>!Number.isFinite(r[k])))return null;
+    cur=parts.reduce((sum,k)=>sum+r[k],0);tgt=under?Math.ceil(line)-1:Math.floor(line)+1;hit=under?cur<line:cur>line;
+    txt=under?`${cur} ${statName[l.stat]} – ${hit?"below the line so far":"at or above the line"}`:
+      hit?`${cur} ${statName[l.stat]} – cleared`:`${cur} ${statName[l.stat]} – needs ${tgt-cur} more`;
+  }
+  const progress=under?(tgt-cur)/Math.max(1,tgt):cur/Math.max(1,tgt);
+  return{cur,tgt,hit,txt,percent:Math.max(0,Math.min(100,progress*100))};
+}
+// END playerLegProgress
 function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
   if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
   if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
   if(!r)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
-  let cur,tgt,hit,txt;
-  if(l.stat=="dd"||l.stat=="td"){tgt=l.stat=="dd"?2:3;cur=catCount(r);hit=cur>=tgt;txt=`${cur} of ${tgt} categories at 10+ (PTS ${r.pts}, REB ${r.reb}, AST ${r.ast})`}
-  else{cur=r[l.stat];tgt=l.line+0.5;hit=cur>l.line;txt=hit?`${cur} ${statName[l.stat]} – cleared`:`${cur} ${statName[l.stat]} – needs ${Math.ceil(tgt-cur)} more`}
+  const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog"><b>${name}</b> <span class="mute">Stats are temporarily unavailable</span></div>`;
+  const {hit,txt,percent}=progress;
   const done=g.state=="post",verdict=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
-  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${Math.min(100,cur/tgt*100)}%"></i></div></div>`}
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
 function myHTML(){const blocks=[];
   if(legs.length)blocks.push(`<div class="card"><h2>Your bet slip</h2>${legs.map(legProg).join("")}</div>`);
   myOpen.forEach(b=>{const l=JSON.parse(b.legs);blocks.push(`<div class="card"><h2>Your bet · $${b.stake} at ${b.odds}</h2>${l.map(legProg).join("")}</div>`)});
