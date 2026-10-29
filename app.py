@@ -14,14 +14,17 @@ ACCESS_CODE = os.environ.get("APP_ACCESS_CODE", "")  # shared secret for friends
 import threading, time, logging
 
 def refresh_odds():
+    """Fetch bookmaker prices. Returns {'problem': ...} when any part failed, so the refresh step is reported as partial/failed, not ok."""
     import odds
-    if not odds.available(): return
+    if not odds.available(): return dict(skipped=True, problem=None)
     preds = projections_all(); games = {}; pbg = {}
     for p in preds:
         games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], home=p["team"] if p["home"] else p["opp"], away=p["opp"] if p["home"] else p["team"]))
         pbg.setdefault(p["game_id"], []).append((p["player_id"], p["player"]))
     gl = list(games.values())
-    return dict(props=odds.refresh(gl, pbg), lines=odds.refresh_lines(gl))
+    props, lines = odds.refresh(gl, pbg), odds.refresh_lines(gl)
+    bad = [f"{name}: {r.get('msg') or 'failed'}" for name, r in (("player prices", props), ("team prices", lines)) if not r.get("ok")]
+    return dict(props=props, lines=lines, problem=odds.scrub("; ".join(bad))[:300] or None)
 
 REFRESH_LOCK = threading.Lock()   # one refresh at a time (background loop and /api/refresh share it)
 TRAIN_EVERY = 7 * 86400
@@ -63,6 +66,10 @@ def train_quietly():
                        capture_output=True, text=True, preexec_fn=lambda: os.nice(15), timeout=3600)
     if r.returncode: raise RuntimeError(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"training exited {r.returncode}")
 
+def _odds_on():
+    import odds
+    return odds.available()
+
 def refresh_once():
     """One full cycle. If the data repair or the download of new games did not finish properly, the model is NOT retrained and no
     new projections are made from half-repaired data (the last good projections stay). Other steps are independent and still run."""
@@ -77,7 +84,8 @@ def refresh_once():
             if _models_age() > TRAIN_EVERY or predict.model_stale(): _stage("train", train_quietly)
             if predict.model_stale(): _status_set("project", "skipped", "saved model is out of date; waiting for a good retrain")
             else: _stage("project", lambda: predict.save(predict.project()))
-        _stage("odds", lambda: logging.info("odds refresh: %s", refresh_odds()))
+        if _odds_on(): _stage("odds", refresh_odds)
+        else: _status_set("odds", "skipped", "no Odds API key set")
         _stage("grade", grade_picks); _stage("log_picks", log_picks)
         _stage("served_check", store_served_check)
         _stage("backup", backup_db)
@@ -908,20 +916,27 @@ def _safe(fn, default=None):
 
 @app.get("/api/health")
 def health():
-    """Public, secret-free status in plain terms. Never fails: anything missing is reported as a problem, not an error."""
+    """Public, secret-free status in plain terms. Always answers with useful text, even when the database or storage cannot be read."""
     import odds
-    now = dt.datetime.now(dt.timezone.utc)
-    with closing(con()) as c:
+    now = dt.datetime.now(dt.timezone.utc); problems = []
+    try:
+        c = con(); c.execute("SELECT 1 FROM sqlite_master LIMIT 1")
+    except Exception as e:
+        return JSONResponse(dict(overall="problem", problems=[odds.scrub(f"cannot open the database: {type(e).__name__}: {e}")[:200]], stages={}, model_current=None), status_code=503)
+    with closing(c):
         last = _safe(lambda: c.execute("SELECT max(date) d FROM games").fetchone()["d"])
         made = _safe(lambda: c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"])
         rows = _safe(lambda: c.execute("SELECT * FROM refresh_status").fetchall(), [])
+        sc = _safe(lambda: json.loads(c.execute("SELECT payload FROM model_checks ORDER BY checked_at DESC LIMIT 1").fetchone()[0]))
+        ostat = _safe(lambda: odds.status(c), {})
+    if last is None: problems.append("the game history cannot be read")
     st = {}
     for r in rows:
         k = r.keys()
         st[r["stage"]] = dict(state=(r["state"] if "state" in k and r["state"] else ("ok" if r["ok_at"] and not r["fail_at"] else "failed" if r["fail_at"] else "unknown")),
                               ok_at=r["ok_at"], fail_at=r["fail_at"], note=odds.scrub((r["note"] if "note" in k else None) or r["error"] or "") or None)
-    problems = []
-    for k in ESSENTIAL:
+    essential = ESSENTIAL + (("odds",) if _safe(odds.available, False) else ())
+    for k in essential:
         if k not in st: problems.append(f"{k}: has not run yet")
         elif st[k]["state"] != "ok": problems.append(f"{k}: {st[k]['state']}" + (f" ({st[k]['note']})" if st[k]["note"] else ""))
         else:
@@ -930,12 +945,14 @@ def health():
     current = _safe(lambda: not predict.model_stale(), False)
     if not current: problems.append("prediction model is out of date or missing")
     if made is None: problems.append("no projections stored yet")
-    sc = _safe(lambda: json.loads(con().execute("SELECT payload FROM model_checks ORDER BY checked_at DESC LIMIT 1").fetchone()[0]))
     if sc and sc.get("status") == "ok" and (sc.get("worst_high_chance_gap") or 0) > 0.06:
         problems.append(f"model's confident chances are running {sc['worst_high_chance_gap']*100:.0f} points too high on games since training")
     bdir = os.path.join(os.path.dirname(DB), "backups")
+    backups = _safe(lambda: sorted(os.listdir(bdir))[-3:] if os.path.isdir(bdir) else [])
+    if backups is None: problems.append("the backup folder cannot be read")
+    age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
-                models_age_days=round(_models_age() / 86400, 1) if _models_age() != float("inf") else None,
-                backups=sorted(os.listdir(bdir))[-3:] if os.path.isdir(bdir) else [])
+                prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None),
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

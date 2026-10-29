@@ -94,7 +94,7 @@ def refresh(games, players_by_game):
         for a, n in nick.items():
             if f.endswith(n): return a
     ev_by = {(abbr(e["home_team"]), abbr(e["away_team"])): e for e in events}
-    fetched = 0
+    fetched = 0; errors = []
     for g in sorted(games, key=lambda x: x["start"]):
         start = dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00"))
         if start - now > dt.timedelta(hours=30) or start < now: continue
@@ -106,7 +106,7 @@ def refresh(games, players_by_game):
         try:
             js, remaining = _get(f"/sports/basketball_nba/events/{ev['id']}/odds", regions="au", markets=MARKETS, oddsFormat="decimal")
         except Exception as e:
-            con.execute("INSERT OR REPLACE INTO odds_status VALUES('error',?)", (scrub(e)[:200],)); con.commit(); continue
+            errors.append(scrub(e)[:200]); continue
         n2p = {norm_name(nm): pid for pid, nm in players_by_game.get(g["game_id"], [])}
         rows = parse_event(js, n2p)
         con.execute("INSERT OR REPLACE INTO odds_fetch VALUES(?,?)", (g["game_id"], now.isoformat()))
@@ -117,10 +117,12 @@ def refresh(games, players_by_game):
             # append-only history of every price seen before tip-off: the only way to later check closing prices and real edge
             con.executemany("INSERT INTO odds_archive VALUES(?,?,?,?,?,?,?,?)", [(d[7], d[0], d[1], d[2], d[3], d[4], d[5], d[6]) for d in data])
         fetched += 1
-    for k, v in (("remaining", remaining), ("last_run", now.isoformat()), ("error", "")):
-        con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
+    # a run with any per-game error is NOT a success: keep the error text, and only move "last_ok" forward on a clean run
+    stamp = [("remaining", remaining), ("last_run", now.isoformat()), ("error", "; ".join(sorted(set(errors)))[:300])]
+    if not errors: stamp.append(("last_ok", now.isoformat()))
+    for k, v in stamp: con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
     con.commit()
-    return dict(ok=True, fetched=fetched, remaining=remaining)
+    return dict(ok=not errors, fetched=fetched, errors=len(errors), remaining=remaining, msg=("; ".join(sorted(set(errors)))[:200] if errors else None))
 
 def _better(cur, price, book):
     """Preferred book (Sportsbet) wins; otherwise the best price."""
@@ -155,7 +157,9 @@ def refresh_lines(games):
     row = con.execute("SELECT v FROM odds_status WHERE k='lines_at'").fetchone()
     if row and now - dt.datetime.fromisoformat(row[0]) < dt.timedelta(hours=LINES_REFETCH_HOURS): return dict(ok=True, skipped=True)
     try: js, remaining = _get("/sports/basketball_nba/odds", regions="au", markets="h2h,spreads,totals", oddsFormat="decimal")
-    except Exception as e: return dict(ok=False, msg=scrub(e))
+    except Exception as e:
+        con.execute("INSERT OR REPLACE INTO odds_status VALUES('lines_error',?)", (scrub(e)[:200],)); con.commit()
+        return dict(ok=False, msg=scrub(e))
     nick = {k: v.lower() for k, v in sl.TEAM_NICK.items()}
     abbr = lambda full: next((a for a, n in nick.items() if full.lower().endswith(n)), None)
     by = {(g["home"], g["away"]): g["game_id"] for g in games}; n = 0
@@ -176,7 +180,7 @@ def refresh_lines(games):
                     con.execute("INSERT OR REPLACE INTO book_lines VALUES(?,?,?,?,?,?,?)", (gid, mk, side, line, float(oc["price"]), b["key"], now.isoformat()))
                     con.execute("INSERT INTO lines_archive VALUES(?,?,?,?,?,?,?)", (now.isoformat(), gid, mk, side, line, float(oc["price"]), b["key"]))
         n += 1
-    for k, v in (("lines_at", now.isoformat()), ("remaining", remaining)): con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
+    for k, v in (("lines_at", now.isoformat()), ("lines_error", ""), ("remaining", remaining)): con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
     con.commit(); return dict(ok=True, games=n, remaining=remaining)
 
 def load_lines(con):
