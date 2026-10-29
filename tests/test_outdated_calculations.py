@@ -9,7 +9,7 @@ FUTURE, PAST = "2999-01-01T00:00Z", "2000-01-01T00:00Z"
 @pytest.fixture
 def current(tmp_path, monkeypatch):
     monkeypatch.setattr(predict, "MODELS", str(tmp_path / "m.pkl"))
-    pickle.dump(dict(models={}, alphas={"pts": .1}, corr={}, trained_through="x", report={}, schema=features.FEATURE_SCHEMA, model_id="NEW"), open(predict.MODELS, "wb"))
+    pickle.dump(dict(models={}, alphas={"pts": .1}, corr={}, trained_through="x", report={}, schema=features.FEATURE_SCHEMA, feature_columns=predict.feature_contract(), model_id="NEW"), open(predict.MODELS, "wb"))
 
 def _proj(**kw): return dict(game_id="g", player_id="p", **kw)
 

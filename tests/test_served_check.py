@@ -17,5 +17,6 @@ def test_too_small_spread_shows_overconfidence_in_high_chances():
     assert s["high_pred"] - s["high_actual"] > 0.04
 
 def test_served_check_says_waiting_when_few_later_games(monkeypatch):
-    monkeypatch.setattr(predict, "load_models", lambda strict=False: dict(trained_through="2999-01-01", models={}, alphas={}))
+    import features
+    monkeypatch.setattr(predict, "load_models", lambda strict=False: dict(trained_through="2999-01-01", models={}, alphas={}, schema=features.FEATURE_SCHEMA, feature_columns=predict.feature_contract(), model_id="M"))
     out = predict.served_check(); assert out["status"] == "waiting" and out["later_rows"] == 0

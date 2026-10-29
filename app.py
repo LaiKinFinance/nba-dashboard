@@ -91,14 +91,17 @@ def refresh_once():
         _stage("backup", backup_db)
 
 def store_served_check():
-    """Once a day, test the model being served on games played since it was trained and keep the result for the health page."""
+    """Once a day, test the model being served and the predictions actually published, and keep both results (with the model they belong to)."""
     with closing(con()) as c:
         c.execute("CREATE TABLE IF NOT EXISTS model_checks(checked_at TEXT, payload TEXT)")
         last = c.execute("SELECT max(checked_at) FROM model_checks").fetchone()[0]
         if last and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last)).total_seconds() < 20 * 3600: return
-    res = predict.served_check()
+    results = [predict.served_check(), predict.published_check()]
+    mid = (_safe(lambda: predict.load_models(strict=False)) or {}).get("model_id")
     with closing(con()) as c:
-        c.execute("INSERT INTO model_checks VALUES(?,?)", (dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(res))); c.commit()
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        for r in results: c.execute("INSERT INTO model_checks VALUES(?,?)", (now, json.dumps(dict(r, model_id=r.get("model_id") or mid))))
+        c.commit()
 
 def backup_db(keep=7):
     """Daily consistent copy of the database inside the data volume (SQLite online backup); keeps the newest `keep`."""
@@ -241,7 +244,7 @@ def model_status(preds=None):
     """(saved model or None, reason it should not be used for bets or None). Never trains."""
     try: b = predict.load_models(strict=False)
     except predict.ModelMissing: return None, "There is no prediction model yet"
-    if b.get("schema") != FEATURE_SCHEMA: return b, "Predictions are from an older version of the model and are being updated"
+    if predict.contract_problem(b): return b, "Predictions are from an older version of the model and are being updated"
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     if preds and any(p.get("model_id") != b.get("model_id") for p in preds if p.get("start", "") >= now):    # games already under way keep their old projections
         return b, "Predictions are being refreshed after a model update"
@@ -272,7 +275,7 @@ def guarded_projections():
     were not stored (made before this safeguard), they are left out rather than recalculated with a different model."""
     mb, _ = model_status()
     if mb is None: raise HTTPException(503, "There is no prediction model yet. Please try again in a few minutes.")
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"); cur_ok = mb.get("schema") == FEATURE_SCHEMA; out = []
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"); cur_ok = predict.contract_problem(mb) is None; out = []
     for p in projections():
         same = cur_ok and p.get("model_id") == mb.get("model_id")
         if p["start"] >= now:
@@ -970,7 +973,7 @@ def health():
         last = _safe(lambda: c.execute("SELECT max(date) d FROM games").fetchone()["d"])
         made = _safe(lambda: c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"])
         rows = _safe(lambda: c.execute("SELECT * FROM refresh_status").fetchall(), [])
-        sc = _safe(lambda: json.loads(c.execute("SELECT payload FROM model_checks ORDER BY checked_at DESC LIMIT 1").fetchone()[0]))
+        checks = _safe(lambda: [json.loads(r[0]) for r in c.execute("SELECT payload FROM model_checks ORDER BY checked_at DESC LIMIT 6").fetchall()], [])
         ostat = _safe(lambda: odds.status(c), {})
     if last is None: problems.append("the game history cannot be read")
     st = {}
@@ -988,8 +991,16 @@ def health():
     current = _safe(lambda: not predict.model_stale(), False)
     if not current: problems.append("prediction model is out of date or missing")
     if made is None: problems.append("no projections stored yet")
-    if sc and sc.get("status") == "ok" and (sc.get("worst_high_chance_gap") or 0) > 0.06:
-        problems.append(f"model's confident chances are running {sc['worst_high_chance_gap']*100:.0f} points too high on games since training")
+    cur_id = _safe(lambda: predict.load_models(strict=False).get("model_id"))
+    mine = {k: next((x for x in checks if x.get("kind") == k and x.get("model_id") == cur_id), None) for k in ("rebuilt_history", "published")}
+    old_results = [x for x in checks if x.get("model_id") != cur_id]
+    sc = dict(rebuilt_history=mine["rebuilt_history"], published=mine["published"], ignored_old_model_results=len(old_results))
+    pub = mine["published"]
+    if pub and pub.get("status") == "ok":
+        bad = [f"{k}: {v['gap']*100:.0f} points too confident (range {v['gap_low']*100:.0f} to {v['gap_high']*100:.0f})" for k, v in pub["by_stat"].items() if v.get("gap_low") is not None and v["gap_low"] > 0.04]
+        if bad: problems.append("published confident chances run too high: " + "; ".join(bad))
+    elif mine["rebuilt_history"] and mine["rebuilt_history"].get("status") == "ok" and (mine["rebuilt_history"].get("worst_high_chance_gap") or 0) > 0.06:
+        problems.append(f"model's confident chances ran {mine['rebuilt_history']['worst_high_chance_gap']*100:.0f} points too high on rebuilt recent games (diagnostic only)")
     bdir = os.path.join(os.path.dirname(DB), "backups")
     backups = _safe(lambda: sorted(os.listdir(bdir))[-3:] if os.path.isdir(bdir) else [])
     if backups is None: problems.append("the backup folder cannot be read")

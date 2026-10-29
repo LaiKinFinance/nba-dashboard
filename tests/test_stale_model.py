@@ -9,7 +9,7 @@ def models_path(tmp_path, monkeypatch):
     monkeypatch.setattr(predict, "MODELS", str(tmp_path / "m.pkl")); return predict.MODELS
 
 def _save(path, **kw):
-    b = dict(models={}, alphas={}, corr={}, trained_through="x", report={}, schema=features.FEATURE_SCHEMA, model_id="abc", **kw)
+    b = dict(models={}, alphas={}, corr={}, trained_through="x", report={}, schema=features.FEATURE_SCHEMA, feature_columns=predict.feature_contract(), model_id="abc", **kw)
     pickle.dump(b, open(path, "wb"))
 
 def test_loading_a_missing_model_never_trains(models_path, monkeypatch):

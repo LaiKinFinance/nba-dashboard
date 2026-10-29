@@ -45,21 +45,58 @@ class StaleModel(Exception):
 
 ALPHA_DAYS = 42      # newest weeks held out to measure dispersion on games the model has not seen
 
+def feature_contract():
+    """The exact input columns each stat's model must be given by the CURRENT code."""
+    return {**{t: list(feats_for(t)) for t in ALL}, "dd": list(FEATURES)}
+
+def contract_problem(b):
+    """None if the saved model matches the current feature definitions and columns, otherwise a plain reason."""
+    if b.get("schema") != FEATURE_SCHEMA: return "saved model is from another feature version"
+    if b.get("feature_columns") != feature_contract(): return "saved model expects different input columns than the current code builds"
+    return None
+
 def model_stale():
     try: b = pickle.load(open(MODELS, "rb"))
     except Exception: return True
-    return b.get("schema") != FEATURE_SCHEMA
+    return contract_problem(b) is not None
 
 MIN_TEST_ROWS = 1000
 
+def published_check(min_games=20, boots=400, seed=3):
+    """Check what we actually PUBLISHED: the chances saved before tip-off (prediction_log), against what happened. Chances from the same game
+    are not independent, so uncertainty is measured by resampling whole games."""
+    con = sqlite3.connect(DB)
+    try:
+        df = pd.read_sql("""SELECT l.game_id, l.player_id, l.stat, l.line, l.p_over, l.model_id, g.pts, g.reb, g.ast FROM prediction_log l
+                            JOIN player_games g ON g.game_id=l.game_id AND g.player_id=l.player_id""", con)
+    except Exception:
+        return dict(status="waiting", kind="published", games=0)
+    if df.empty or df.game_id.nunique() < min_games: return dict(status="waiting", kind="published", games=int(df.game_id.nunique()) if not df.empty else 0)
+    df["y"] = np.where(df.stat == "pts", df.pts, np.where(df.stat == "reb", df.reb, df.ast)) > df.line
+    out = {}; rng = np.random.default_rng(seed)
+    for stat, d in df.groupby("stat"):
+        hi = d[d.p_over >= 0.75]
+        if len(hi) < 50: out[stat] = dict(n=int(len(d)), games=int(d.game_id.nunique()), high_n=int(len(hi))); continue
+        per = hi.groupby("game_id").agg(n=("y", "size"), pred=("p_over", "sum"), act=("y", "sum")).to_numpy(float)
+        gaps = []
+        for _ in range(boots):
+            r = per[rng.integers(0, len(per), len(per))]; gaps.append(r[:, 1].sum() / r[:, 0].sum() - r[:, 2].sum() / r[:, 0].sum())
+        gap = float(hi.p_over.mean() - hi.y.mean())
+        out[stat] = dict(n=int(len(d)), games=int(d.game_id.nunique()), high_n=int(len(hi)), high_pred=float(hi.p_over.mean()), high_actual=float(hi.y.mean()),
+                         gap=gap, gap_low=float(np.percentile(gaps, 2.5)), gap_high=float(np.percentile(gaps, 97.5)))
+    return dict(status="ok", kind="published", games=int(df.game_id.nunique()), by_stat=out, models=sorted(df.model_id.dropna().unique().tolist()))
+
 def _finite(x): return isinstance(x, (int, float)) and np.isfinite(x)
 
-def validate(report, alphas=None):
-    """Gate before a new model replaces the old one. Returns (ok, reasons). It must have been tested on enough games, every number must
-    be a real number, and no core stat may be clearly worse than a plain 10-game average. (This checks accuracy only; probability honesty
-    is checked separately by served_check on games played after training.)"""
+def _count(x): return isinstance(x, (int, np.integer)) and not isinstance(x, bool) and x > 0
+
+def validate(report, alphas):
+    """Gate before a new model replaces the old one. Returns (ok, reasons). The sample size must be a real whole number of at least
+    MIN_TEST_ROWS, every number must be a real number, the spread value of EVERY expected stat must be present and sensible, and no core stat
+    may be clearly worse than a plain 10-game average. (Accuracy only; probability honesty is checked separately, on later games.)"""
     why = []
-    if not report.get("n_test") or report["n_test"] < MIN_TEST_ROWS: why.append("too few test games")
+    n = report.get("n_test")
+    if not (_count(n) or (isinstance(n, float) and np.isfinite(n) and n > 0 and float(n).is_integer())) or n < MIN_TEST_ROWS: why.append("too few test games, or the count is not a valid whole number")
     for t in TARGETS:
         st = (report.get("stats") or {}).get(t) or {}
         m, b = st.get("mae_model"), st.get("mae_10game_avg")
@@ -68,7 +105,11 @@ def validate(report, alphas=None):
     for t in ("dd", "td"):
         br = ((report.get("stats") or {}).get(t) or {}).get("brier")
         if not _finite(br): why.append(f"{t}: score is missing or not a number")
-    if alphas is not None and not all(_finite(a) and a > 0 for a in alphas.values()): why.append("spread values are not valid numbers")
+    alphas = alphas or {}
+    missing = [t for t in ALL if t not in alphas]
+    if missing: why.append("spread values missing for " + ", ".join(missing))
+    bad = [t for t in ALL if t in alphas and not (_finite(alphas[t]) and 0 < alphas[t] <= 5)]
+    if bad: why.append("spread values are not valid numbers for " + ", ".join(bad))
     return (not why), why
 
 def calibration_summary(p, y, high=0.75):
@@ -81,12 +122,14 @@ def calibration_summary(p, y, high=0.75):
 def served_check(min_rows=300, offsets=(-3, -2, -1, 0, 1, 2, 3)):
     """Test the model that is actually being served on games played AFTER it was trained. Honest answer to 'do 80% chances come true 80% of the time?'.
     Until enough later games exist it says so instead of guessing."""
-    b = load_models(strict=False)
+    b = load_models(strict=False); mid = b.get("model_id")
+    why = contract_problem(b)
+    if why: return dict(status="incompatible", kind="rebuilt_history", model_id=mid, why=why)          # never score a model with inputs it was not built for
     n_new = sqlite3.connect(DB).execute("SELECT count(*) FROM player_games WHERE date > ?", (b["trained_through"],)).fetchone()[0]
-    if n_new < min_rows: return dict(status="waiting", later_rows=int(n_new), trained_through=b["trained_through"])    # cheap exit: nothing to test yet
+    if n_new < min_rows: return dict(status="waiting", kind="rebuilt_history", model_id=mid, later_rows=int(n_new), trained_through=b["trained_through"])    # cheap exit: nothing to test yet
     df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
     later = full[full.date > b["trained_through"]]
-    if len(later) < min_rows: return dict(status="waiting", later_rows=int(len(later)), trained_through=b["trained_through"])
+    if len(later) < min_rows: return dict(status="waiting", kind="rebuilt_history", model_id=mid, later_rows=int(len(later)), trained_through=b["trained_through"])
     out = {}
     for t in ALL:
         mu = b["models"][t].predict(later[feats_for(t)]); ps, ys = [], []
@@ -94,7 +137,8 @@ def served_check(min_rows=300, offsets=(-3, -2, -1, 0, 1, 2, 3)):
             line = np.maximum(np.floor(mu) + 0.5 + o, 0.5); ps.append(nb_over(mu, b["alphas"][t], line)); ys.append((later[t].values > line).astype(int))
         out[t] = calibration_summary(np.concatenate(ps), np.concatenate(ys))
     worst = max(((v["high_pred"] - v["high_actual"]) for v in out.values() if v["high_n"] >= 100), default=None)
-    return dict(status="ok", later_rows=int(len(later)), trained_through=b["trained_through"], by_stat=out, worst_high_chance_gap=worst)
+    return dict(status="ok", kind="rebuilt_history", model_id=mid, later_rows=int(len(later)), trained_through=b["trained_through"], by_stat=out, worst_high_chance_gap=worst,
+                note="Diagnostic only: inputs are rebuilt from history and seven invented lines are tested per appearance, so these are not independent games and are not the published predictions.")
 
 def train(report=True):
     df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
@@ -113,7 +157,7 @@ def train(report=True):
     ok, bad = validate(rep, alphas)
     import hashlib
     mid = hashlib.sha1((FEATURE_SCHEMA + str(full.date.max()) + json.dumps(alphas, sort_keys=True)).encode()).hexdigest()[:12]   # stamped on every projection
-    bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=rep, schema=FEATURE_SCHEMA, model_id=mid)
+    bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=rep, schema=FEATURE_SCHEMA, model_id=mid, feature_columns=feature_contract())
     target = MODELS if ok else MODELS + ".rejected"      # a model that fails validation is kept for inspection but never used
     tmp = target + ".tmp"                                # write beside the live file, then swap: a crash never leaves a half-written model
     with open(tmp, "wb") as f: pickle.dump(bundle, f)
@@ -302,8 +346,12 @@ def save(preds):
     for gid, payload in con.execute("SELECT game_id, payload FROM projections").fetchall():
         if json.loads(payload)["start"] < cutoff: con.execute("DELETE FROM projections WHERE game_id=?", (gid,))
     con.executemany("DELETE FROM projections WHERE game_id=?", [(g,) for g in {x["game_id"] for x in preds}])
+    con.execute("CREATE TABLE IF NOT EXISTS prediction_log(game_id TEXT, player_id TEXT, stat TEXT, line REAL, p_over REAL, model_id TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id, stat, line))")
     for p in preds:
         con.execute("INSERT OR REPLACE INTO projections VALUES(?,?,?,?)", (p["game_id"], p["player_id"], json.dumps(p), now))
+        # permanent record of what we published before tip-off (replaced only until the game starts, never edited afterwards)
+        con.executemany("INSERT OR REPLACE INTO prediction_log VALUES(?,?,?,?,?,?,?)",
+                        [(p["game_id"], p["player_id"], st, l["line"], l["p_over"], p.get("model_id"), now) for st, ls in p["ladders"].items() for l in ls])
     con.execute("CREATE TABLE IF NOT EXISTS game_preds(game_id TEXT PRIMARY KEY, payload TEXT, made_at TEXT)")
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%MZ")
     for gid, payload in con.execute("SELECT game_id, payload FROM game_preds").fetchall():
