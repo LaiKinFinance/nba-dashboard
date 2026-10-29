@@ -448,14 +448,13 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;
     return `<div class="bet">${ls.map(l=>`<div>${legLine(l)}</div>`).join("")}<div class="mute" style="margin:6px 0">${esc(new Date(b.created).toLocaleString())}${b.model_prob!=null?` · estimated chance ${pct(b.model_prob)}`:""}</div>
       <b class="${b.result=="won"?"good":b.result=="lost"?"bad":""}">${label}</b> <span class="mute">${b.manual?"marked by you":b.result=="open"?"marked when the games finish":"from the game results"}</span>
       ${!["won","lost","open"].includes(b.result)?'<div class="mute">A tied result or a player who did not play stays out of the win/loss count.</div>':""}
-      <div style="display:flex;gap:6px;margin-top:8px"><button class="btn" onclick="res(${b.id},'won')">Mark won</button><button class="btn" onclick="res(${b.id},'lost')">Mark lost</button>${b.manual?`<button class="btn" onclick="res(${b.id},'open')">Use game results</button>`:""}</div></div>`};
+      </div>`};
   a.innerHTML=`<div class="note">Save a pick from Games or Best picks. This page shows whether it was right. Only completed picks with a clear result count.</div>
     <div class="tiles"><div class="tile"><div class="v">${u.bets}</div><div class="k">Picks saved</div></div><div class="tile"><div class="v">${u.wins}</div><div class="k">Won</div></div><div class="tile"><div class="v">${u.losses}</div><div class="k">Lost</div></div></div>
     ${open.length?`<div class="card"><h2>Waiting for the games</h2>${open.map(card).join("")}</div>`:""}
     <div class="card"><h2>Pick results</h2>${s.users.length?`<table class="t"><tr><th style="text-align:left">Name</th><th>Won</th><th>Lost</th><th>Right</th></tr>${s.users.map(x=>`<tr><td style="text-align:left">${esc(x.user)}</td><td>${x.wins}</td><td>${x.losses}</td><td>${x.settled?pct(x.hit_rate):"–"}</td></tr>`).join("")}</table><p class="mute">Counted picks only. Results marked by hand are included.</p>`:'<p class="mute">Nobody has saved a pick yet.</p>'}</div>
     ${done.length?`<div class="card"><h2>Past picks</h2>${done.map(card).join("")}</div>`:""}
     ${!mine.length?'<div class="card empty">Your saved picks will appear here.</div>':""}`}
-async function res(id,r){await post(`bets/${id}/result`,{result:r});render()}
 
 /* ---------- players ---------- */
 let pstat="pts",pline={},pdata=null;

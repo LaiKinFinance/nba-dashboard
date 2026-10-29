@@ -961,17 +961,6 @@ def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
         c.commit()
     return {"ok": True}
 
-@app.post("/api/bets/{bid}/result")
-def bet_result(bid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
-    user = who(x_user, x_code)
-    if body.get("result") not in ("won", "lost", "open"): raise HTTPException(400)
-    with closing(con()) as c:
-        # a hand-made mark is respected (manual=1); "undo" (open) hands the bet back to automatic marking
-        r = c.execute("UPDATE bets SET result=?, manual=?, settled_at=NULL, leg_results=NULL, settle_note=NULL WHERE id=? AND user=?",
-                      (body["result"], 0 if body["result"] == "open" else 1, bid, user)); c.commit()
-        if r.rowcount == 0: raise HTTPException(404, "Not your bet")
-    return {"ok": True}
-
 @app.get("/api/picks")
 def picks(x_code: str = Header("")):
     check(x_code)

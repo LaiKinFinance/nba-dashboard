@@ -11,7 +11,7 @@ test('the full page script parses after removing money controls', () => {
 });
 
 test('personal results render without a model, prices or money', async () => {
-  const source = script.slice(script.indexOf('const legLine='), script.indexOf('async function res('));
+  const source = script.slice(script.indexOf('const legLine='), script.indexOf('/* ---------- players ---------- */'));
   const response = {
     bets: [{id:1, user:'mark', created:'2026-10-29T00:00Z', legs:'[{"stat":"reb","line":7.5}]', result:'won', model_prob:.6, manual:0}],
     users: [{user:'mark', bets:1, wins:1, losses:0, settled:1, hit_rate:1}],
@@ -21,8 +21,7 @@ test('personal results render without a model, prices or money', async () => {
   const app = {innerHTML:''}; await render(app);
   assert.match(app.innerHTML, /Past picks/);
   assert.match(app.innerHTML, /Over 7.5 rebounds/);
-  assert.match(app.innerHTML, /Mark won/);
-  assert.match(app.innerHTML, /Mark lost/);
+  assert.doesNotMatch(app.innerHTML, /Mark won|Mark lost|<button/);
   assert.doesNotMatch(app.innerHTML, /\$|profit|stake|refund|Sportsbet|bankroll/i);
 });
 

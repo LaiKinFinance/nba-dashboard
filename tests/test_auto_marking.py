@@ -129,10 +129,8 @@ def test_existing_money_fields_and_records_are_preserved_but_unused(db):
     client = TestClient(app.app); score = client.get("/api/scorecard").json()
     assert _row(db, 1) == before
     assert score["users"][0]["wins"] == 1
-    assert client.post('/api/bets/1/result', json={"result":"lost"}, headers={"X-User":"mark"}).status_code == 200
-    after = _row(db, 1)
-    for col in ("stake", "odds", "payout_odds", "returned_amount", "needs_amount"):
-        assert after[col] == before[col]
+    assert client.post('/api/bets/1/result', json={"result":"lost"}, headers={"X-User":"mark"}).status_code in (404, 405)
+    assert _row(db, 1) == before
 
 
 def test_old_pending_records_do_not_wait_for_money(db):
@@ -154,17 +152,10 @@ def test_won_and_lost_counts_ignore_unscored_picks(db):
     assert user == dict(user="mark",bets=4,settled=2,wins=1,losses=1,open=1,not_counted=1,hit_rate=.5)
 
 
-def test_manual_results_and_undo_are_kept(db):
-    b = _bet(db, [L("pts", 30.5)]); client = TestClient(app.app)
-    assert client.post(f"/api/bets/{b}/result", json={"result": "won"}, headers={"X-User": "mark"}).status_code == 200
-    app.grade_bets(); assert _row(db, b)["result"] == "won" and _row(db, b)["manual"] == 1
-    client.post(f"/api/bets/{b}/result", json={"result": "open"}, headers={"X-User": "mark"}); app.grade_bets()
-    assert _row(db, b)["result"] == "lost" and _row(db, b)["manual"] == 0
-
-
-def test_only_the_owner_can_change_a_result(db):
+def test_results_cannot_be_set_by_hand(db):
     b = _bet(db, [L("pts", 24.5)])
-    assert TestClient(app.app).post(f'/api/bets/{b}/result',json={"result":"lost"},headers={"X-User":"other"}).status_code == 404
+    assert TestClient(app.app).post(f"/api/bets/{b}/result", json={"result": "lost"}, headers={"X-User": "mark"}).status_code in (404, 405)
+    app.grade_bets(); assert _row(db, b)["result"] == "won"
 
 
 def test_grading_twice_changes_nothing(db):
