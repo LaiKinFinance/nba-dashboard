@@ -554,7 +554,10 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
   const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog">${who}<b>${name}</b> <span class="mute">Stats are temporarily unavailable</span></div>`;
   const {hit,txt,percent,level}=progress;
   const done=g.state=="post",verdict=done?(level?' <b>Level</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
-  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?`${progress.cur} of ${progress.tgt} categories at 10+`:txt}${verdict}</span></div>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?catBars(r):`<div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div>`}</div>`}
+// one bar per category for double-double and triple-double picks: points, rebounds, assists, plus steals or blocks once they reach 5
+function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||0],["STL",r.stl||0],["BLK",r.blk||0]].filter(([k,v],i)=>i<3||v>=5);
+  return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:62px;font-size:12px">${k} ${v}</span><div class="pbar ${v>=10?"hit":""}" style="flex:1;margin:0"><i style="width:${Math.min(100,v*10)}%"></i></div></div>`).join("")}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
   const liveN=LG.filter(g=>g.state=="in").length;
