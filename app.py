@@ -917,11 +917,17 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     if can_refund:
         r["fair_odds"] = None
         r["refund_note"] = "A tie on a whole-number line refunds that part of the bet, so the chances shown are chances of winning outright and a single fair price does not apply."
+        leg_prices = [l.get("price") for l in legs]
+        product = float(np.prod(leg_prices)) if all(p is not None for p in leg_prices) else None
         ev = rp.get("ev") if pl_legs else pl.refund_ev([], [], [], [(o[0], o[1], l.get("price")) for o, l in zip(tout, tm_legs)])
-        if ev is not None:
-            r["value"] = dict(ev=ev, edge=ev, implied=None, kelly=0.0, assumption="Assumes the bet pays the product of each leg's own price, with a refunded leg counted as price 1.00.")
+        if product is None or ev is None:
+            r["value"] = None; r["value_note"] = "Value is not shown: this bet can be refunded on a tie, and the price of every leg is needed to work out what a refund would pay."
+        elif odds and abs(float(odds) / product - 1) > 0.02:
+            r["value"] = None; r["value_note"] = (f"Value is not shown: the price you entered ({float(odds):.2f}) is not the leg prices multiplied together ({product:.2f}), "
+                                                  "so the app cannot tell how a refunded leg would change the payout. Check with Sportsbet.")
         else:
-            r["value"] = None; r["value_note"] = "Value is not shown: this bet can be refunded on a tie, and the price of each leg is needed to work it out."
+            r["value"] = dict(ev=ev, edge=ev, implied=None, kelly=0.0, price_used=product,
+                              assumption=f"Uses the price {product:.2f} (each leg's own price multiplied) and pays a refunded leg at 1.00, the usual rule for a standard multi.")
     elif odds: r["value"] = pl.value(r["joint"], float(odds))
     r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
     return r

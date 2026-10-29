@@ -47,11 +47,31 @@ def client(monkeypatch):
 
 def test_api_without_leg_prices_gives_no_value_on_a_refundable_bet(client):
     r = client.post("/api/parlay", json=dict(odds=3.0, legs=[dict(game_id="g", player_id="p", stat="reb", line=3.0, side="over"), dict(game_id="g", stat="spread", side="home", line=-5.0)])).json()
-    assert r["value"] is None and "price of each leg" in r["value_note"] and r["fair_odds"] is None and "refund" in r["refund_note"].lower()
+    assert r["value"] is None and "price of every leg" in r["value_note"] and r["fair_odds"] is None and "refund" in r["refund_note"].lower()
 
 def test_api_with_leg_prices_gives_refund_aware_value(client):
     r = client.post("/api/parlay", json=dict(legs=[dict(game_id="g", player_id="p", stat="reb", line=3.0, side="over", price=1.9), dict(game_id="g", stat="spread", side="home", line=-5.0, price=1.9)])).json()
     assert "assumption" in r["value"] and r["fair_odds"] is None
+
+def _refund_slip(price_a, price_b):
+    return [dict(game_id="g", player_id="p", stat="reb", line=3.0, side="over", price=price_a), dict(game_id="g", stat="spread", side="home", line=-5.0, price=price_b)]
+
+def test_changing_the_entered_price_changes_or_hides_the_profit_estimate(client):
+    """The old code gave the same estimate whether the combined price was typed as 2.0 or 5.0."""
+    product = 1.9 * 1.9
+    matching = client.post("/api/parlay", json=dict(odds=product, legs=_refund_slip(1.9, 1.9))).json()
+    assert matching["value"]["price_used"] == pytest.approx(product) and "assumption" in matching["value"]
+    for typed in (2.0, 5.0):
+        r = client.post("/api/parlay", json=dict(odds=typed, legs=_refund_slip(1.9, 1.9))).json()
+        assert r["value"] is None and "not the leg prices multiplied" in r["value_note"] and f"{typed:.2f}" in r["value_note"]
+
+def test_value_follows_the_leg_prices_when_the_typed_price_matches(client):
+    a = client.post("/api/parlay", json=dict(odds=1.9 * 1.9, legs=_refund_slip(1.9, 1.9))).json()["value"]["ev"]
+    b = client.post("/api/parlay", json=dict(odds=2.4 * 1.9, legs=_refund_slip(2.4, 1.9))).json()["value"]["ev"]
+    assert b > a                                                     # a better price must give a better expected profit
+
+def test_small_rounding_in_the_typed_price_is_accepted(client):
+    r = client.post("/api/parlay", json=dict(odds=3.62, legs=_refund_slip(1.9, 1.9))).json(); assert r["value"] is not None
 
 def test_api_half_point_bets_keep_the_normal_value(client):
     r = client.post("/api/parlay", json=dict(odds=3.0, legs=[dict(game_id="g", player_id="p", stat="reb", line=2.5, side="over")])).json()
