@@ -35,6 +35,9 @@ def leg_prob_single(pred, alphas, leg):
     elif s in COMBO: return None
     else:
         from model import nb_over
+        if leg.get("side", "over") == "under":
+            # At integer lines, equality is a push, not an under win.
+            return float(1 - nb_over(pred["proj"][s], alphas[s], np.ceil(leg["line"]) - 1))
         p = float(nb_over(pred["proj"][s], alphas[s], leg["line"]))
     return p if leg.get("side", "over") == "over" else 1 - p
 
@@ -71,7 +74,9 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7):
     wins, probs = [], []
     for l in legs:
         game, pid, s = l["game_id"], l["player_id"], l["stat"]
-        if s in ("dd", "td"): w = vals[(game, pid, s)] > 0.5
+        if s in ("dd", "td"):
+            w = vals[(game, pid, s)] > 0.5
+            if l.get("side", "over") == "under": w = ~w
         else:
             x = sum(vals[(game, pid, c)] for c in (COMBO[s] if s in COMBO else (s,)))
             w = x > l["line"] if l.get("side", "over") == "over" else x < l["line"]
