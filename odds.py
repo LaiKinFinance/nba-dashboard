@@ -9,6 +9,7 @@ import requests
 BASE = "https://api.the-odds-api.com/v4"
 MARKETS = os.environ.get("ODDS_MARKETS", "player_points,player_rebounds,player_assists,player_double_double,player_triple_double")
 STAT_OF = {"player_points": "pts", "player_rebounds": "reb", "player_assists": "ast",
+           "player_points_alternate": "pts", "player_rebounds_alternate": "reb", "player_assists_alternate": "ast",
            "player_double_double": "dd", "player_triple_double": "td"}
 PREFERRED = "sportsbet"
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
@@ -30,7 +31,9 @@ def init(con):
     CREATE TABLE IF NOT EXISTS book_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, price REAL, book TEXT, fetched_at TEXT,
         PRIMARY KEY(game_id, player_id, stat, line, side, book));
     CREATE TABLE IF NOT EXISTS odds_status(k TEXT PRIMARY KEY, v TEXT);
-    CREATE TABLE IF NOT EXISTS odds_fetch(game_id TEXT PRIMARY KEY, fetched_at TEXT);""")
+    CREATE TABLE IF NOT EXISTS odds_fetch(game_id TEXT PRIMARY KEY, fetched_at TEXT);
+    CREATE TABLE IF NOT EXISTS book_lines(game_id TEXT, market TEXT, side TEXT, line REAL, price REAL, book TEXT, fetched_at TEXT,
+        PRIMARY KEY(game_id, market, side, line, book));""")
 
 def _get(path, **params):
     r = requests.get(f"{BASE}{path}", params={"apiKey": os.environ["ODDS_API_KEY"], **params}, timeout=30)
@@ -111,3 +114,48 @@ def load(con):
 def status(con):
     try: return dict(con.execute("SELECT k,v FROM odds_status").fetchall())
     except sqlite3.OperationalError: return {}
+
+
+LINES_REFETCH_HOURS = float(os.environ.get("ODDS_LINES_HOURS", "8"))
+
+def refresh_lines(games):
+    """Winner / handicap / total prices for every upcoming game in ONE request (3 credits), at most every LINES_REFETCH_HOURS."""
+    import slate as sl
+    if not available(): return dict(ok=False, msg="No ODDS_API_KEY set")
+    con = sqlite3.connect(DB); init(con); now = dt.datetime.now(dt.timezone.utc)
+    row = con.execute("SELECT v FROM odds_status WHERE k='lines_at'").fetchone()
+    if row and now - dt.datetime.fromisoformat(row[0]) < dt.timedelta(hours=LINES_REFETCH_HOURS): return dict(ok=True, skipped=True)
+    try: js, remaining = _get("/sports/basketball_nba/odds", regions="au", markets="h2h,spreads,totals", oddsFormat="decimal")
+    except Exception as e: return dict(ok=False, msg=str(e))
+    nick = {k: v.lower() for k, v in sl.TEAM_NICK.items()}
+    abbr = lambda full: next((a for a, n in nick.items() if full.lower().endswith(n)), None)
+    by = {(g["home"], g["away"]): g["game_id"] for g in games}; n = 0
+    for ev in js:
+        h, a = abbr(ev["home_team"]), abbr(ev["away_team"]); gid = by.get((h, a))
+        if not gid: continue
+        con.execute("DELETE FROM book_lines WHERE game_id=?", (gid,))
+        for b in ev.get("bookmakers", []):
+            for m in b.get("markets", []):
+                for oc in m.get("outcomes", []):
+                    nm = oc["name"]; side = "home" if abbr(nm) == h else "away" if abbr(nm) == a else nm.lower()
+                    if m["key"] == "h2h" and side in ("home", "away"): mk, line = "h2h", 0.0
+                    elif m["key"] == "spreads" and side in ("home", "away") and oc.get("point") is not None:
+                        mk, line = "spread", float(oc["point"]) if side == "home" else -float(oc["point"])  # always stored as the HOME handicap
+                    elif m["key"] == "totals" and side in ("over", "under") and oc.get("point") is not None: mk, line = "total", float(oc["point"])
+                    else: continue
+                    con.execute("INSERT OR REPLACE INTO book_lines VALUES(?,?,?,?,?,?,?)", (gid, mk, side, line, float(oc["price"]), b["key"], now.isoformat()))
+        n += 1
+    for k, v in (("lines_at", now.isoformat()), ("remaining", remaining)): con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
+    con.commit(); return dict(ok=True, games=n, remaining=remaining)
+
+def load_lines(con):
+    """{game_id: {h2h:{home:(p,book),away:..}, spread:{line:{home:(p,b),away:(p,b)}}, total:{line:{over:..,under:..}}}} preferring Sportsbet."""
+    try: rows = con.execute("SELECT game_id,market,side,line,price,book FROM book_lines").fetchall()
+    except sqlite3.OperationalError: return {}
+    out = {}
+    for gid, mk, side, line, price, book in rows:
+        slot = out.setdefault(gid, {}).setdefault(mk, {})
+        if mk != "h2h": slot = slot.setdefault(line, {})
+        cur = slot.get(side)
+        if cur is None or (book == PREFERRED and cur[1] != PREFERRED) or (cur[1] != PREFERRED and book != PREFERRED and price > cur[0]): slot[side] = (price, book)
+    return out

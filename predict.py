@@ -6,6 +6,7 @@ from features import build, FEATURES
 from model import rotation, fit, dispersion, nb_over, TARGETS
 from top3 import top3
 import slate as sl
+import team_model
 
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db"); MODELS = os.path.join(os.environ.get("DATA_DIR", "data"), "models.pkl")
 
@@ -83,6 +84,13 @@ def project(days=2):
                                  starting=any(sl.name_match(r.player, s) for s in lu.get(team, {}).get("starters", [])),
                                  lineup_status=lu.get(team, {}).get("status", "No lineup posted yet"),
                                  injury=next((v for n, v in inj.items() if sl.name_match(r.player, n) and v["team"] == team), None)))
+    try:
+        gp = team_model.predict([dict(game_id=g["game_id"], date=g["date"], home=g["home"], away=g["away"]) for g in games])
+        project.game_preds = {gid: dict(team_model.price(v), game_id=gid, start=next(x["start"] for x in games if x["game_id"] == gid),
+                                        home=next(x["home"] for x in games if x["game_id"] == gid), away=next(x["away"] for x in games if x["game_id"] == gid))
+                              for gid, v in gp.items()}
+    except Exception as e:
+        print("team model failed:", e); project.game_preds = {}
     if not rows: return []
     ph = pd.DataFrame(rows)
     base = raw.drop(columns=["cur_team"]).assign(_upcoming=0)
@@ -121,6 +129,12 @@ def save(preds):
     con.executemany("DELETE FROM projections WHERE game_id=?", [(g,) for g in {x["game_id"] for x in preds}])
     for p in preds:
         con.execute("INSERT OR REPLACE INTO projections VALUES(?,?,?,?)", (p["game_id"], p["player_id"], json.dumps(p), now))
+    con.execute("CREATE TABLE IF NOT EXISTS game_preds(game_id TEXT PRIMARY KEY, payload TEXT, made_at TEXT)")
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%MZ")
+    for gid, payload in con.execute("SELECT game_id, payload FROM game_preds").fetchall():
+        if json.loads(payload)["start"] < cutoff: con.execute("DELETE FROM game_preds WHERE game_id=?", (gid,))
+    for gid, v in getattr(project, "game_preds", {}).items():
+        con.execute("INSERT OR REPLACE INTO game_preds VALUES(?,?,?)", (gid, json.dumps(v, default=float), now))
     con.commit()
 
 if __name__ == "__main__":

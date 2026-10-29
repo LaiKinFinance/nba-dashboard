@@ -30,3 +30,10 @@ The app refreshes data every 4 hours and retrains weekly (AUTO_REFRESH=1). The a
 ## Odds API budget
 Each game's player-prop odds cost 5 credits (5 markets x 1 region) and are fetched once per game (about 10h cooldown), only for games starting within 30h.
 The free plan's 500 credits/month covers roughly 100 games. Tune with `ODDS_MARKETS`, `ODDS_GAMES_PER_DAY`, `ODDS_MIN_CREDITS`.
+
+## Match betting and alternate lines
+- Team model (`team_model.py`): margin-Elo for the winner/handicap, scoring-form formula for the total. Backtest numbers are shown on the My bets tab data and in `python team_model.py`.
+- Winner/handicap/total prices come from ONE Odds API call (3 credits) at most every `ODDS_LINES_HOURS` (default 8).
+- Alternate player lines are off by default because they cost extra credits per game. To enable, set `ODDS_MARKETS` to
+  `player_points,player_rebounds,player_assists,player_double_double,player_triple_double,player_points_alternate,player_rebounds_alternate,player_assists_alternate`.
+  Lines with no bookmaker price still show the model's fair odds.

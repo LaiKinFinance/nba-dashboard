@@ -68,3 +68,34 @@ if __name__ == "__main__":
     for g in upcoming(): print(g["date"], g["away"], "@", g["home"], g["status"])
     L = lineups(); print(len(L), sorted(L))
     print(L.get("ORL"))
+
+
+def lineups_full():
+    """Per-game lineup data from Rotowire without the page's ad boxes: tip time, status, starters (pos, name, play likelihood) and may-not-play list."""
+    s = BeautifulSoup(requests.get(RW, headers=H, timeout=30).text, "lxml")
+    games = []
+    for b in s.select("div.lineup.is-nba"):
+        if not b.select_one(".lineup__abbr"): continue  # sponsor/ad blocks share the same wrapper class
+        abbrs = [ALIAS.get(a.get_text(strip=True), a.get_text(strip=True)) for a in b.select(".lineup__abbr")]
+        recs = [re.sub(r"[()]", "", w.get_text(strip=True)) for w in b.select(".lineup__wl")]
+        sides = []
+        for i, (ab, ul) in enumerate(zip(abbrs, b.select("ul.lineup__list"))):
+            st = ul.select_one(".lineup__status")
+            starters, out = [], []
+            for li in ul.select("li.lineup__player"):
+                a = li.select_one("a"); name = (a.get("title") or a.get_text(" ", strip=True)) if a else li.get_text(" ", strip=True)
+                pos = li.select_one(".lineup__pos"); pos = pos.get_text(strip=True) if pos else ""
+                m = re.search(r"is-pct-play-(\d+)", " ".join(li.get("class", [])))
+                row = dict(name=name, pos=pos, pct=int(m.group(1)) if m else None, note=li.get("title", ""))
+                if "has-injury-status" in li.get("class", []):
+                    if "hide" in li.get("class", []): continue
+                    inj = li.select_one(".lineup__inj"); t = inj.get_text(strip=True) if inj else "Out"
+                    row["status"] = {"Ques": "Questionable", "GTD": "Game-time decision", "Prob": "Probable", "Doubt": "Doubtful"}.get(t, t)
+                    out.append(row)
+                else:
+                    starters.append(row)
+            sides.append(dict(team=ab, record=recs[i] if i < len(recs) else "", status=(st.get_text(strip=True) if st else ""),
+                              confirmed=bool(st and "is-confirmed" in st.get("class", [])), starters=starters, out=out))
+        t = b.select_one(".lineup__time")
+        if len(sides) == 2: games.append(dict(time=t.get_text(strip=True) if t else "", away=sides[0], home=sides[1]))
+    return games

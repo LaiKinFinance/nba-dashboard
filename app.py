@@ -18,7 +18,8 @@ def refresh_odds():
     for p in preds:
         games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], home=p["team"] if p["home"] else p["opp"], away=p["opp"] if p["home"] else p["team"]))
         pbg.setdefault(p["game_id"], []).append((p["player_id"], p["player"]))
-    return odds.refresh(list(games.values()), pbg)
+    gl = list(games.values())
+    return dict(props=odds.refresh(gl, pbg), lines=odds.refresh_lines(gl))
 
 def _refresh_loop():
     """Background refresh every 4h: new box scores, re-project upcoming games, fetch bookmaker odds. Retrains weekly."""
@@ -115,17 +116,65 @@ def enriched():
                 out.append(dict(line=line, price=price, book=bk, p_over=po, edge=po - 1 / price,
                                 hit=sum(1 for r in l10 if r[s] > line), n=n, under=(sides.get("under") or [None])[0]))
             if out: p["book"][s] = out
+        p["strip"] = {}
+        for s in ("pts", "reb", "ast"):
+            mu, bl = p["proj"][s], {x["line"]: x for x in p["book"].get(s, [])}; lines = {}
+            for k in range(-14, 15):
+                L = float(np.floor(mu) + k + 0.5)
+                if L < 0.5: continue
+                q = float(nb_over(mu, alphas[s], L))
+                if 0.10 <= q <= 0.92: lines[L] = q
+            for L in bl:
+                q = float(nb_over(mu, alphas[s], L))
+                if 0.04 <= q <= 0.97: lines[L] = q
+            ordered = sorted(lines)
+            if len(ordered) > 16:  # keep the 16 lines closest to a coin flip
+                ordered = sorted(sorted(ordered, key=lambda L: abs(lines[L] - 0.5))[:16])
+            p["strip"][s] = [dict(line=L, p_over=lines[L], hit=sum(1 for r in l10 if r[s] > L), n=n,
+                                  price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
+                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl else None)) for L in ordered]
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
     return preds
 
+def game_preds():
+    with closing(con()) as c:
+        try: return {r["game_id"]: json.loads(r["payload"]) for r in c.execute("SELECT game_id, payload FROM game_preds")}
+        except sqlite3.OperationalError: return {}
+
+def match_payload(gp, bl):
+    """Model prices for winner/handicap/total, with bookmaker prices merged in where the Odds API supplied them."""
+    if not gp: return None
+    m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals")}
+    bl = bl or {}
+    h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(v) for s, v in h2.items()}
+    hand = {l["line"]: dict(l) for l in m["handicaps"]}
+    for line, sides in (bl.get("spread") or {}).items():
+        e = hand.setdefault(line, dict(line=line, p_home=float(stats_norm_cdf((gp["margin"] + line) / gp["sigma_margin"]))))
+        e["p_away"] = 1 - e["p_home"]
+        for s, v in sides.items(): e[f"price_{s}"] = v[0]; e["book"] = v[1]
+    m["handicaps"] = [hand[k] for k in sorted(hand)]
+    tot = {l["line"]: dict(l) for l in m["totals"]}
+    for line, sides in (bl.get("total") or {}).items():
+        e = tot.setdefault(line, dict(line=line, p_over=float(stats_norm_cdf((gp["total"] - line) / gp["sigma_total"]))))
+        e["p_under"] = 1 - e["p_over"]
+        for s, v in sides.items(): e[f"price_{s}"] = v[0]; e["book"] = v[1]
+    m["totals"] = [tot[k] for k in sorted(tot)]
+    return m
+
+def stats_norm_cdf(x):
+    from scipy.stats import norm
+    return norm.cdf(x)
+
 @app.get("/api/slate")
 def get_slate(x_code: str = Header("")):
     check(x_code)
-    games = {}
+    import odds
+    games = {}; gp = game_preds(); with_c = closing(con())
+    with with_c as c: bl = odds.load_lines(c)
     for p in enriched():
-        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}))
+        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]))))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
 
@@ -174,6 +223,42 @@ def live_status(x_code: str = Header("")):
                                    lineup=t.get("status", ""))
     return out
 
+_lu_cache = dict(t=0, data=None, starts={})
+@app.get("/api/lineups")
+def lineups_tab(x_code: str = Header("")):
+    """Ad-free starting lineups (Rotowire data) with photos, our top-3 picks flagged, and starters who differ from the team's last game."""
+    check(x_code)
+    if time.time() - _lu_cache["t"] > 300:
+        try:
+            _lu_cache.update(t=time.time(), data=sl.lineups_full(),
+                             starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)})
+        except Exception:
+            logging.exception("lineups fetch failed")
+            if not _lu_cache["data"]: raise HTTPException(502, "Lineups are temporarily unavailable")
+    with closing(con()) as c:
+        roster = pd.read_sql("SELECT player_id, player, team, max(date) d FROM player_games GROUP BY player_id", c)
+        pg = pd.read_sql("SELECT team, game_id, date, player, starter FROM player_games WHERE date >= date('now','-45 day')", c)
+    last = pd.DataFrame(columns=["team", "player"])
+    if not pg.empty:
+        latest = pg.sort_values(["date", "game_id"]).groupby("team").tail(1)[["team", "game_id"]]
+        last = pg.merge(latest, on=["team", "game_id"]); last = last[last.starter == 1]
+    picks = {}
+    for p in projections_all(): picks.setdefault(p["team"], set()).add(p["player_id"])
+    last_starters = {t: list(d.player) for t, d in last.groupby("team")}
+    ros = {t: list(zip(d.player_id, d.player)) for t, d in roster.groupby("team")}
+    import copy
+    games = copy.deepcopy(_lu_cache["data"] or [])
+    for g in games:
+        g["start"] = _lu_cache["starts"].get((g["home"]["team"], g["away"]["team"]))
+        for side in (g["away"], g["home"]):
+            for lst, is_start in ((side["starters"], True), (side["out"], False)):
+                for r in lst:
+                    r["player_id"] = next((pid for pid, nm in ros.get(side["team"], []) if sl.name_match(nm, r["name"])), None)
+                    r["top3"] = r["player_id"] in picks.get(side["team"], set())
+                    if is_start and last_starters.get(side["team"]):
+                        r["new"] = not any(sl.name_match(nm, r["name"]) for nm in last_starters[side["team"]])
+    return games
+
 @app.get("/api/live")
 def live_scores(x_code: str = Header("")):
     check(x_code)
@@ -215,19 +300,41 @@ def player(pid: str, x_code: str = Header("")):
                 last20=dict(dd=int(d.head(20).dd.sum()), td=int(d.head(20).td.sum())),
                 tonight=dict(game_id=tonight["game_id"], opp=tonight["opp"], home=tonight["home"], start=tonight["start"], proj=tonight["proj"], p_dd=tonight["p_dd"], p_td=tonight["p_td"]) if tonight else None)
 
+TEAM_STATS = ("ml", "spread", "total")
+
+def team_leg_prob(l, gp):
+    k = l["stat"]
+    if k == "ml": return gp["p_home"] if l["side"] == "home" else gp["p_away"]
+    if k == "spread":
+        q = float(stats_norm_cdf((gp["margin"] + l["line"]) / gp["sigma_margin"])); return q if l["side"] == "home" else 1 - q
+    q = float(stats_norm_cdf((gp["total"] - l["line"]) / gp["sigma_total"])); return q if l["side"] == "over" else 1 - q
+
 @app.post("/api/parlay")
 def parlay_calc(body: dict = Body(...), x_code: str = Header("")):
     check(x_code)
     preds = {(p["game_id"], p["player_id"]): p for p in projections()}
-    legs = body["legs"]
+    gps = game_preds(); legs = body["legs"]
     if not 1 <= len(legs) <= 6: raise HTTPException(400, "1-6 legs")
-    for l in legs:
+    pl_legs = [l for l in legs if l["stat"] not in TEAM_STATS]; tm_legs = [l for l in legs if l["stat"] in TEAM_STATS]
+    for l in pl_legs:
         if (l["game_id"], l["player_id"]) not in preds: raise HTTPException(400, "Unknown player/game")
+    for l in tm_legs:
+        if l["game_id"] not in gps: raise HTTPException(400, "Unknown game")
+    side_games = [l["game_id"] for l in tm_legs if l["stat"] in ("ml", "spread")]
+    if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner or handicap leg per game")
     b = predict.load_models()
-    r = pl.parlay(legs, preds, b["alphas"], b["corr"])
+    rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
+    tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
+    pi, ti = iter(rp["leg_probs"]), iter(tp)
+    probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
+    joint = rp["joint"] * float(np.prod(tp) if tp else 1.0); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
+    r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None))
+    mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
+    r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
+                    "so this combined chance is approximate.") if mixed else None
     odds = body.get("odds")
     if odds: r["value"] = pl.value(r["joint"], float(odds))
-    r["legs"] = [dict(l, player=preds[(l["game_id"], l["player_id"])]["player"], p=p) for l, p in zip(legs, r["leg_probs"])]
+    r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
     return r
 
 @app.get("/api/scorecard")
