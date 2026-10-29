@@ -1,7 +1,7 @@
 """Leak-free per-player-game features: everything is computed from games strictly before the row's game."""
 import numpy as np, pandas as pd
 from top3 import load
-import absence
+import absence, sqlite3, os
 
 STATS = ["min", "pts", "reb", "ast"]
 
@@ -38,12 +38,29 @@ def build(df=None):
         dfn[f"opp_allow_{c}"] = (1 + 0.5 * (ratio - 1)).clip(0.93, 1.07)
     dfn = dfn[["game_id", "def_team", "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"]]
     df = df.merge(dfn, left_on=["game_id", "opp"], right_on=["game_id", "def_team"], how="left").drop(columns="def_team")
+    # market context: DraftKings total/spread via ESPN (known before tip-off). Historical rows come from the games table;
+    # tonight's placeholder rows may carry their own ou/spread_home columns.
+    try:
+        con = sqlite3.connect(os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db"))
+        ln = pd.read_sql("SELECT game_id, ou, spread_home FROM games", con)
+    except Exception:
+        ln = pd.DataFrame(columns=["game_id", "ou", "spread_home"])
+    if "ou" in df.columns:
+        ph = df[["game_id", "ou", "spread_home"]].dropna(); ln = pd.concat([ln, ph]).drop_duplicates("game_id", keep="last")
+        df = df.drop(columns=["ou", "spread_home"])
+    df = df.merge(ln, on="game_id", how="left")
+    df["game_total"] = df.ou
+    df["team_margin"] = np.where(df.home == 1, -df.spread_home, df.spread_home)      # >0: his team is favoured
+    df["team_implied"] = df.ou / 2 + df.team_margin / 2
+    df["starter_today"] = df["starter"]
     # teammate absences (computed on real games only; tonight's rows are filled in by the caller from the injury/lineup feeds)
     real = df[df["_upcoming"] == 0] if "_upcoming" in df else df
     af, _ = absence.track(real)
     df = df.merge(af.reset_index(), on=["game_id", "team"], how="left")
     return df
 
+MARKET = ["game_total", "team_margin", "team_implied"]
+START = ["starter_today"]
 FEATURES = [f"{c}_{s}" for c in ["min", "pts", "reb", "ast", "pra", "dd", "td", "starter"] for s in ("m5", "m10", "m20", "exp")] \
     + ["pts_sd10", "reb_sd10", "ast_sd10", "min_sd10", "td_m40", "home", "rest", "b2b", "prior_games",
        "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"] + absence.ABS

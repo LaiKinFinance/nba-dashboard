@@ -111,9 +111,10 @@ def project(days=2):
             picks = pick_top3(raw, team, outs, lu.get(team, {}).get("starters", []))
             for r in picks:
                 pg = raw[raw.player_id == r.player_id].iloc[-1]
+                starting_now = any(sl.name_match(r.player, s) for s in lu.get(team, {}).get("starters", []))
                 rows.append(dict(game_id=g["game_id"], player_id=r.player_id, player=r.player, team=team, opp=opp, home=home,
-                                 date=g["date"], season=pg.season, starter=0, min=0., pts=0, reb=0, ast=0, stl=0, blk=0, tov=0,
-                                 fg3m=0, plusminus=0, team_id="", _upcoming=1))
+                                 date=g["date"], season=pg.season, starter=int(starting_now), min=0., pts=0, reb=0, ast=0, stl=0, blk=0, tov=0,
+                                 fg3m=0, plusminus=0, team_id="", _upcoming=1, ou=g.get("ou"), spread_home=g.get("spread_home")))
                 meta.append(dict(game=g, player_id=r.player_id,
                                  starting=any(sl.name_match(r.player, s) for s in lu.get(team, {}).get("starters", [])),
                                  lineup_status=lu.get(team, {}).get("status", "No lineup posted yet"),

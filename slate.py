@@ -19,7 +19,9 @@ def upcoming(days=2):
         for e in js["events"]:
             c = e["competitions"][0]["competitors"]
             h = next(x for x in c if x["homeAway"] == "home"); a = next(x for x in c if x["homeAway"] == "away")
+            od = (e["competitions"][0].get("odds") or [{}])[0]
             out.append(dict(game_id=e["id"], start=e["date"], status=e["status"]["type"]["name"], date=e["date"][:10],
+                            ou=od.get("overUnder"), spread_home=od.get("spread"),
                             home=h["team"]["abbreviation"], away=a["team"]["abbreviation"],
                             home_record=(h.get("records") or [{}])[0].get("summary"), away_record=(a.get("records") or [{}])[0].get("summary")))
     seen = set(); res = []

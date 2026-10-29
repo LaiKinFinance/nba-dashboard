@@ -16,6 +16,21 @@ CREATE TABLE IF NOT EXISTS player_games(game_id TEXT, player_id TEXT, player TEX
   tov INT, fg3m INT, plusminus INT, PRIMARY KEY(game_id, player_id));
 """
 
+LINE_COLS = {"ou": "REAL", "spread_home": "REAL", "ml_home": "REAL", "ml_away": "REAL"}
+
+def ensure_columns(con):
+    have = {r[1] for r in con.execute("PRAGMA table_info(games)")}
+    for c, t in LINE_COLS.items():
+        if c not in have: con.execute(f"ALTER TABLE games ADD COLUMN {c} {t}")
+
+def market_lines(js):
+    """ESPN's pickcenter (DraftKings): total, home spread (negative = home favoured), moneylines. Empty dict if absent."""
+    pc = (js.get("pickcenter") or [None])[0]
+    if not pc: return {}
+    num = lambda x: float(x) if isinstance(x, (int, float)) else None
+    return dict(ou=num(pc.get("overUnder")), spread_home=num(pc.get("spread")),
+                ml_home=num((pc.get("homeTeamOdds") or {}).get("moneyLine")), ml_away=num((pc.get("awayTeamOdds") or {}).get("moneyLine")))
+
 def get(url, params, tries=4):
     for i in range(tries):
         try:
@@ -74,11 +89,11 @@ def parse_box(g):
                              int(s["blocks"]), int(s["turnovers"]),
                              int(s["threePointFieldGoalsMade-threePointFieldGoalsAttempted"].split("-")[0]),
                              int(pm) if pm.lstrip("-").isdigit() else 0))
-    return rows
+    return rows, market_lines(js)
 
 def run(start, end):
     os.makedirs(os.path.dirname(DB), exist_ok=True)
-    con = sqlite3.connect(DB); con.executescript(SCHEMA)
+    con = sqlite3.connect(DB); con.executescript(SCHEMA); ensure_columns(con)
     have = {r[0] for r in con.execute("SELECT game_id FROM games")}
     todo = [g for g in final_games(start, end) if g["game_id"] not in have]
     print(f"{len(todo)} new games {start}..{end}", flush=True)
@@ -87,10 +102,12 @@ def run(start, end):
         except Exception as ex: print("fail", g["game_id"], ex, flush=True); return g, None
     done = 0
     with ThreadPoolExecutor(6) as ex:
-        for g, rows in ex.map(work, todo):
-            if rows is None: continue
+        for g, res in ex.map(work, todo):
+            if res is None: continue
+            rows, lines = res
             con.execute("INSERT OR REPLACE INTO games VALUES(:game_id,:date,:season,:season_type,:home_id,:home,:away_id,:away,:home_pts,:away_pts)", g)
             con.executemany("INSERT OR REPLACE INTO player_games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            if lines: con.execute("UPDATE games SET ou=:ou, spread_home=:spread_home, ml_home=:ml_home, ml_away=:ml_away WHERE game_id=:gid", dict(lines, gid=g["game_id"]))
             done += 1
             if done % 100 == 0: con.commit(); print(done, flush=True)
     con.commit()
