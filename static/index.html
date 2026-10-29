@@ -398,7 +398,7 @@ function valueHTML(){if(!VAL)return"";
      <div style="margin-top:3px"><span class="conf ${o.confidence}">${o.confidence}</span> <span class="mute">hit ${o.n?o.hit+"/"+o.n:"–"}</span>${o.price_age_h!=null?` <span class="mute" style="${o.price_age_h>6?"color:#b45309":""}">· price ${o.price_age_h<1?"under 1h":Math.round(o.price_age_h)+"h"} old${o.price_age_h>6?" — check Sportsbet":""}</span>`:""}</div>
      <details><summary style="font-size:12px">Evidence</summary><ul class="why">${o.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details></div>
      <div style="text-align:right"><div class="good" style="font-weight:800">${o.edge>0?"+":""}${(o.edge*100).toFixed(0)} pts</div><div class="mute">${o.price.toFixed(2)} ${bkName(o.book)}</div><button class="btn p" style="margin-top:4px;padding:4px 10px" onclick="addValue(${i})">Add</button></div></div>`).join("")}
-   <p class="mute" style="margin:8px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check, and track results on the My bets tab.</p></div>`}
+   <details style="margin:8px 0 0"><summary>How are these picked?</summary><p class="mute" style="margin:6px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check. You can save a pick and see how it went on the My picks tab.</p></details></div>`}
 function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o.stat,o.side,o.line,o.price,o.book,o.p,o.text);
   else pick(o.game_id,o.player_id,o.stat,o.line,o.price,o.book,o.p,o.hit,o.n)}
 
