@@ -491,7 +491,7 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
 
 
 /* ---------- live scores ---------- */
-let LG=[],boxes={},openLive=new Set(),fullStats=false,myOpen=[],liveTimer=null,showAll=new Set();
+let LG=[],boxes={},openLive=new Set(),fullStats=false,liveTimer=null,showAll=new Set();
 const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g.state=="post"?g.detail:timeOf(g.start);
 function catCount(r){return["pts","reb","ast","stl","blk"].reduce((n,k)=>n+((r[k]||0)>=10?1:0),0)}   // official rule: any five categories
 function tag(r){const c=catCount(r);if(c>=3)return'<span class="ch2 td">TD</span>';
@@ -553,20 +553,15 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
   const {hit,txt,percent,level}=progress;
   const done=g.state=="post",verdict=done?(level?' <b>Level</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
-function myHTML(){const blocks=[];
-  if(legs.length)blocks.push(`<div class="card"><h2>Your bet slip</h2>${legs.map(legProg).join("")}</div>`);
-  myOpen.forEach(b=>{const l=JSON.parse(b.legs);blocks.push(`<div class="card"><h2>Your pick</h2>${l.map(legProg).join("")}</div>`)});
-  return blocks.length?`<h3 style="margin-top:0">Your bets in play</h3>${blocks.join("")}`:""}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
   const liveN=LG.filter(g=>g.state=="in").length;
-  el.innerHTML=myHTML()+(LG.length?`<h3 ${myHTML()?"":'style="margin-top:0"'}>${liveN?`${liveN} game${liveN>1?"s":""} live now`:"Games"}</h3>`+LG.map(liveHTML).join(""):'<div class="card empty">No games on the scoreboard right now.</div>')}
+  el.innerHTML=(LG.length?`<h3 style="margin-top:0">${liveN?`${liveN} game${liveN>1?"s":""} live now`:"Games"}</h3>`+LG.map(liveHTML).join(""):'<div class="card empty">No games on the scoreboard right now.</div>')}
 async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catch(e){return}
-  const ids=new Set(openLive);[...legs,...myOpen.flatMap(b=>JSON.parse(b.legs))].forEach(l=>ids.add(l.game_id));
+  const ids=new Set(openLive);
   await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
   if(tab=="live")drawLive()}
 async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. ⭐ marks the model's top-3 players.</div><div id="lbody"><p class="mute">Loading…</p></div>`;
-  try{const sc=await api("scorecard");myOpen=sc.bets.filter(b=>b.user==localStorage.user&&b.result=="open")}catch(e){myOpen=[]}
   await refreshLive();liveTimer=setInterval(refreshLive,20000)}
 
 /* ---------- lineups ---------- */
