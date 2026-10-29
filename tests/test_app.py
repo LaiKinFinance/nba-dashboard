@@ -59,3 +59,25 @@ def test_incomplete_or_inconsistent_markets_are_validation_errors(leg):
     from inputs import Leg
     with pytest.raises(ValidationError):
         Leg(**leg)
+
+
+def test_shared_code_rejects_missing_or_wrong_header(api_module, monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(api_module, 'ACCESS_CODE', 'synthetic-auth-test')
+    client = TestClient(api_module.app)
+    assert client.get('/api/picks').status_code == 401
+    assert client.get('/api/picks', headers={'X-Code': 'wrong'}).status_code == 401
+    assert client.get('/api/picks', headers={'X-Code': 'synthetic-auth-test'}).status_code == 200
+
+
+def test_player_search_treats_sql_payload_as_a_value(api_module, monkeypatch):
+    from contextlib import closing
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(api_module, 'ACCESS_CODE', '')
+    with closing(api_module.con()) as con:
+        con.execute('CREATE TABLE player_games(player_id TEXT, player TEXT, team TEXT, date TEXT)')
+        con.execute('INSERT INTO player_games VALUES(?,?,?,?)', ('p', 'Desmond Bane', 'ORL', '2026-10-28'))
+        con.commit()
+    client = TestClient(api_module.app)
+    assert client.get('/api/players', params={'q': 'Bane'}).json()[0]['player_id'] == 'p'
+    assert client.get('/api/players', params={'q': "x%' OR 1=1 --"}).json() == []
