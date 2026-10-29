@@ -659,11 +659,8 @@ def track_record(x_code: str = Header("")):
         g = [r for r in rows if r["result"] in ("won", "lost")]
         return dict(n=len(g), won=sum(1 for r in g if r["result"] == "won"), avg_p=(sum(r["model_p"] for r in g) / len(g)) if g else None,
                     pending=sum(1 for r in rows if r["result"] is None), void=sum(1 for r in rows if r["result"] == "void"))
-    cur = _current_model_id()
-    older = [r for r in legs if r.get("model_id") != cur]; legs = [r for r in legs if r.get("model_id") == cur]; ocombos = [x for x in combos if x.get("model_id") != cur]; combos = [x for x in combos if x.get("model_id") == cur]
     L = [r for r in legs if r["kind"] == "leg"]; V = [r for r in legs if r["kind"] == "value"]
-    out = dict(legs=summ(L), value=summ(V), model_id=cur,
-               earlier_versions=dict(legs=summ([r for r in older if r["kind"] == "leg"]), value=summ([r for r in older if r["kind"] == "value"]), combos=dict(n=sum(1 for x in ocombos if x["result"] in ("won", "lost")))))
+    out = dict(legs=summ(L), value=summ(V))
     bins = []
     for lo, hi in ((0.0, 0.7), (0.7, 0.8), (0.8, 1.01)):
         g = [r for r in L if r["result"] in ("won", "lost") and lo <= r["model_p"] < hi]
