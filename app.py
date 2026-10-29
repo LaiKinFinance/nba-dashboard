@@ -289,14 +289,14 @@ def match_payload(gp, bl):
         e = hand.setdefault(line, dict(line=line, p_home=float(stats_norm_cdf((gp["margin"] + line) / gp["sigma_margin"]))))
         e["p_away"] = 1 - e["p_home"]
         for s in ("home", "away"):
-            if s in sides: e[f"price_{s}"] = sides[s][0]; e["book"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
+            if s in sides: e[f"price_{s}"] = sides[s][0]; e[f"book_{s}"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
     m["handicaps"] = [hand[k] for k in sorted(hand)]
     tot = {l["line"]: dict(l) for l in m["totals"]}
     for line, sides in (bl.get("total") or {}).items():
         e = tot.setdefault(line, dict(line=line, p_over=float(stats_norm_cdf((gp["total"] - line) / gp["sigma_total"]))))
         e["p_under"] = 1 - e["p_over"]
         for s in ("over", "under"):
-            if s in sides: e[f"price_{s}"] = sides[s][0]; e["book"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
+            if s in sides: e[f"price_{s}"] = sides[s][0]; e[f"book_{s}"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
     m["totals"] = [tot[k] for k in sorted(tot)]
     return m
 
