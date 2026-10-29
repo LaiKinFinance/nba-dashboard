@@ -96,7 +96,7 @@ def refresh_once():
             else: _stage("project", project_quietly)
         if _odds_on(): _stage("odds", refresh_odds)
         else: _status_set("odds", "skipped", "no Odds API key set")
-        _stage("grade", grade_picks); _stage("log_picks", log_picks)
+        _stage("grade", grade_picks); _stage("grade_bets", grade_bets); _stage("log_picks", log_picks)
         _stage("served_check", store_served_check)
         _stage("backup", backup_db)
 
@@ -213,6 +213,9 @@ def init():
         CREATE TABLE IF NOT EXISTS combo_log(id INTEGER PRIMARY KEY, day TEXT UNIQUE, legs TEXT, joint REAL, fair_odds REAL, created TEXT, result TEXT, graded_at TEXT);
         CREATE TABLE IF NOT EXISTS manual_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, odds REAL, PRIMARY KEY(game_id, player_id, stat, line, side));
         """)
+        bhave = {r[1] for r in c.execute("PRAGMA table_info(bets)")}
+        for col, typ in (("manual", "INTEGER DEFAULT 0"), ("settled_at", "TEXT"), ("leg_results", "TEXT"), ("settle_note", "TEXT"), ("payout_odds", "REAL")):
+            if col not in bhave: c.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
         have = {r[1] for r in c.execute("PRAGMA table_info(pick_log)")}
         for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL")):
             if col not in have: c.execute(f"ALTER TABLE pick_log ADD COLUMN {col} {typ}")
@@ -585,6 +588,34 @@ def grade_picks():
             c.execute("UPDATE combo_log SET result=?, graded_at=? WHERE id=?", (res, now, r["id"]))
         c.commit()
 
+def grade_bets():
+    """Mark open bets won / lost / refunded from real results, by the same rules for everyone. Bets a person marked by hand are left alone.
+    Returns {'graded': n, 'problem': None}. Safe to run any number of times."""
+    import settle
+    n = 0
+    with closing(con()) as c:
+        for b in c.execute("SELECT * FROM bets WHERE result='open' AND COALESCE(manual,0)=0").fetchall():
+            legs = json.loads(b["legs"]); results = []
+            for l in legs:
+                g = c.execute("SELECT home_pts, away_pts FROM games WHERE game_id=? AND home_pts IS NOT NULL", (l["game_id"],)).fetchone()
+                pl = None
+                if g and l["stat"] not in TEAM_STATS:
+                    have_box = c.execute("SELECT 1 FROM player_games WHERE game_id=? LIMIT 1", (l["game_id"],)).fetchone()
+                    if have_box:
+                        r = c.execute("SELECT pts,reb,ast,fg3m,stl,blk FROM player_games WHERE game_id=? AND player_id=?", (l["game_id"], l.get("player_id"))).fetchone()
+                        pl = dict(r) if r else "missing"
+                results.append(settle.leg_result(l, dict(g) if g else None, pl))
+            res = settle.settle_bet(legs, results)
+            if res == "open" and "lost" not in results: continue
+            odds, exact = settle.reduced_odds(legs, results, b["odds"]) if res == "won" else (b["odds"], True)
+            note = None
+            if res == "won" and any(r in ("push", "void") for r in results):
+                note = "Some legs were refunded or cancelled, so the real payout is lower than the full odds." + ("" if exact else " Check the exact amount on Sportsbet.")
+            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=?, payout_odds=? WHERE id=?",
+                      (res, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(results), note, odds if res == "won" else None, b["id"])); n += 1
+        c.commit()
+    return dict(graded=n, problem=None)
+
 @app.get("/api/track")
 def track_record(x_code: str = Header("")):
     """Track record of the published best picks and value bets, graded against real results."""
@@ -907,6 +938,7 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
 @app.get("/api/scorecard")
 def scorecard(x_code: str = Header("")):
     check(x_code)
+    _safe(grade_bets)
     mb, _ = model_status()
     if mb is None: raise HTTPException(503, "There is no prediction model yet.")
     rep = mb["report"]
@@ -918,7 +950,7 @@ def scorecard(x_code: str = Header("")):
         u["bets"] += 1; u["all_prob_sum"] += b["model_prob"] or 0; u["open"] += b["result"] == "open"
         if b["result"] in ("won", "lost"):
             u["settled"] += 1; u["staked"] += b["stake"]; u["wins"] += b["result"] == "won"
-            u["returned"] += b["stake"] * b["odds"] if b["result"] == "won" else 0; u["model_prob_sum"] += b["model_prob"] or 0
+            u["returned"] += b["stake"] * (b.get("payout_odds") or b["odds"]) if b["result"] == "won" else 0; u["model_prob_sum"] += b["model_prob"] or 0
     for u in users.values():
         u["profit"] = u["returned"] - u["staked"]; u["avg_model_prob"] = u["all_prob_sum"] / u["bets"]
         u["roi"] = (u["returned"] - u["staked"]) / u["staked"] if u["staked"] else None
@@ -941,7 +973,9 @@ def bet_result(bid: int, body: dict = Body(...), x_user: str = Header(""), x_cod
     user = who(x_user, x_code)
     if body["result"] not in ("won", "lost", "void", "open"): raise HTTPException(400)
     with closing(con()) as c:
-        r = c.execute("UPDATE bets SET result=? WHERE id=? AND user=?", (body["result"], bid, user)); c.commit()
+        # a hand-made mark is respected (manual=1); "undo" (open) hands the bet back to automatic marking
+        r = c.execute("UPDATE bets SET result=?, manual=?, settled_at=NULL, leg_results=NULL, settle_note=NULL, payout_odds=NULL WHERE id=? AND user=?",
+                      (body["result"], 0 if body["result"] == "open" else 1, bid, user)); c.commit()
         if r.rowcount == 0: raise HTTPException(404, "Not your bet")
     return {"ok": True}
 
