@@ -26,3 +26,7 @@ Set `NBA_DB` to a path on a persistent disk when hosting.
     fly secrets set APP_ACCESS_CODE=NBA2026 ODDS_API_KEY=<your key>
     fly deploy
 The app refreshes data every 4 hours and retrains weekly (AUTO_REFRESH=1). The access code lives only in Fly secrets, not in git.
+
+## Odds API budget
+Each game's player-prop odds cost 5 credits (5 markets x 1 region) and are fetched once per game (about 10h cooldown), only for games starting within 30h.
+The free plan's 500 credits/month covers roughly 100 games. Tune with `ODDS_MARKETS`, `ODDS_GAMES_PER_DAY`, `ODDS_MIN_CREDITS`.

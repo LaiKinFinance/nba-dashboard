@@ -7,6 +7,7 @@ H = {"User-Agent": "Mozilla/5.0"}
 SB = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 INJ = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
 RW = "https://www.rotowire.com/basketball/nba-lineups.php"
+TEAM_NICK = {"ATL":"Hawks","BOS":"Celtics","BKN":"Nets","CHA":"Hornets","CHI":"Bulls","CLE":"Cavaliers","DAL":"Mavericks","DEN":"Nuggets","DET":"Pistons","GS":"Warriors","HOU":"Rockets","IND":"Pacers","LAC":"Clippers","LAL":"Lakers","MEM":"Grizzlies","MIA":"Heat","MIL":"Bucks","MIN":"Timberwolves","NO":"Pelicans","NY":"Knicks","OKC":"Thunder","ORL":"Magic","PHI":"76ers","PHX":"Suns","POR":"Trail Blazers","SAC":"Kings","SA":"Spurs","TOR":"Raptors","UTAH":"Jazz","WSH":"Wizards"}
 ALIAS = {"NYK": "NY", "SAS": "SA", "GSW": "GS", "NOP": "NO", "WAS": "WSH", "UTA": "UTAH", "PHO": "PHX"}  # rotowire -> espn
 
 def upcoming(days=2):
