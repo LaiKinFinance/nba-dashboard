@@ -236,6 +236,7 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
    <div class="kv"><span class="mute">Fair odds</span><b>${r&&r.fair_odds?r.fair_odds.toFixed(2):"–"}</b></div>
    ${r&&legs.length>1?`<div class="kv"><span class="mute">If legs were unrelated</span><span>${pct(r.independent)}</span></div>`:""}</div>
    <label class="mute">Odds for this multi (decimal)${e&&!oddsManual?` — estimated from leg prices, check Sportsbet's real multi price`:""}</label><input class="inp" id="podds" type="number" step="0.01" min="1.01" placeholder="e.g. 3.60" value="${esc(oddsVal)}" oninput="oddsManual=true;recalc()" style="margin-top:4px">
+   ${r&&r.points_warning?`<div class="note" style="margin:8px 0">${esc(r.points_warning)}</div>`:""}
    ${r&&r.refund_note?`<div class="note" style="margin:8px 0">${esc(r.refund_note)}</div>`:""}${r&&r.value_note?`<div class="note" style="margin:8px 0">${esc(r.value_note)}</div>`:""}
    ${r&&r.value&&r.value.assumption?`<div class="edge ${r.value.ev>0?"g":"b"}"><b>Expected profit ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)} per $1</b><br><span class="mute">${esc(r.value.assumption)}</span></div>`:""}
    ${r&&r.value&&!r.value.assumption?`<div class="edge ${r.value.edge>0?"g":"b"}"><b>${r.value.edge>0?"+":""}${(r.value.edge*100).toFixed(1)} pts edge</b> · EV ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)} per $1<br><span class="mute">${r.value.edge>0?"The model rates this higher than the price implies.":"The price is better than the model thinks. Consider skipping."}</span></div>`:""}
@@ -247,7 +248,8 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
   </div></div>`;
   if(fid&&$("#"+fid)){const el=$("#"+fid);el.focus();try{el.setSelectionRange(el.value.length,el.value.length)}catch(x){}}}
 /* stake guide: never more than 1% of bankroll; with a positive edge, a quarter of the Kelly stake (capped at 2%) */
-function stakeGuide(r){let bank=0;try{bank=parseFloat(localStorage.bankroll)||0}catch(e){}
+const POINTS_STATS=["pts","pra","pr","pa"];
+function stakeGuide(r){if((typeof legs!=="undefined"?legs:[]).some(l=>POINTS_STATS.includes(l.stat))||(r&&r.no_advice))return "";let bank=0;try{bank=parseFloat(localStorage.bankroll)||0}catch(e){}
   const o=calc&&calc.o,ev=r&&r.value,f=ev&&ev.edge>0&&o>1?Math.min(0.02,0.25*ev.edge/(o-1)):0.01,share=Math.max(0.0025,Math.min(f,0.01*(ev&&ev.edge>0?2:1)));
   return `<div class="note" style="margin:8px 0"><b>Stake guide:</b> ${bank?`about $${(bank*share).toFixed(2)} (${(share*100).toFixed(1)}% of your $${bank} bankroll)`:`keep it to ${(share*100).toFixed(1)}% of your bankroll`}${ev&&ev.edge<=0?". The price is no better than the model's estimate, so consider skipping.":"."} Multis lose most of the time even with an edge, so only use money you can afford to lose.<br><label class="mute">Your betting bankroll $ <input class="inp" type="number" min="0" value="${bank||""}" style="width:90px;display:inline-block" onchange="try{localStorage.bankroll=this.value}catch(e){};drawSlip()"></label></div>`}
 function clearSlip(){legs=[];calc=null;oddsManual=false;paintSel();drawSlip()}

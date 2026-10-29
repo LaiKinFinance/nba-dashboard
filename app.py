@@ -891,6 +891,13 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
                     "so this combined chance is approximate.") if mixed else None
     odds = body.get("odds"); can_refund = any(p > 1e-9 for p in pushes)
+    has_points = any(l["stat"] in POINTS_BASED for l in legs)
+    if has_points and not POINTS_CLAIMS_ENABLED:
+        # points chances have run too confident, so a slip with any points leg (including combined bets) gets no profit, value or stake advice
+        r["value"] = None; r["no_advice"] = True
+        r["points_warning"] = "Points chances have been running too confident in testing. Treat this chance as rough: there is no value, profit or stake advice for bets that include points."
+        r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
+        return r
     if can_refund:
         r["fair_odds"] = None
         r["refund_note"] = "A tie on a whole-number line refunds that part of the bet, so the chances shown are chances of winning outright and a single fair price does not apply."

@@ -46,13 +46,13 @@ def client(monkeypatch):
     return TestClient(app.app, raise_server_exceptions=False)
 
 def test_api_without_leg_prices_gives_no_value_on_a_refundable_bet(client):
-    r = client.post("/api/parlay", json=dict(odds=3.0, legs=[dict(game_id="g", player_id="p", stat="pts", line=20.0, side="over"), dict(game_id="g", stat="spread", side="home", line=-5.0)])).json()
+    r = client.post("/api/parlay", json=dict(odds=3.0, legs=[dict(game_id="g", player_id="p", stat="reb", line=3.0, side="over"), dict(game_id="g", stat="spread", side="home", line=-5.0)])).json()
     assert r["value"] is None and "price of each leg" in r["value_note"] and r["fair_odds"] is None and "refund" in r["refund_note"].lower()
 
 def test_api_with_leg_prices_gives_refund_aware_value(client):
-    r = client.post("/api/parlay", json=dict(legs=[dict(game_id="g", player_id="p", stat="pts", line=20.0, side="over", price=1.9), dict(game_id="g", stat="spread", side="home", line=-5.0, price=1.9)])).json()
+    r = client.post("/api/parlay", json=dict(legs=[dict(game_id="g", player_id="p", stat="reb", line=3.0, side="over", price=1.9), dict(game_id="g", stat="spread", side="home", line=-5.0, price=1.9)])).json()
     assert "assumption" in r["value"] and r["fair_odds"] is None
 
 def test_api_half_point_bets_keep_the_normal_value(client):
-    r = client.post("/api/parlay", json=dict(odds=3.0, legs=[dict(game_id="g", player_id="p", stat="pts", line=20.5, side="over")])).json()
+    r = client.post("/api/parlay", json=dict(odds=3.0, legs=[dict(game_id="g", player_id="p", stat="reb", line=2.5, side="over")])).json()
     assert r["value"]["ev"] is not None and r["fair_odds"] is not None and "refund_note" not in r
