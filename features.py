@@ -11,7 +11,7 @@ def build(df=None):
     df["td"] = ((df.pts >= 10).astype(int) + (df.reb >= 10) + (df.ast >= 10) >= 3).astype(int)
     df["dd"] = ((df.pts >= 10).astype(int) + (df.reb >= 10) + (df.ast >= 10) >= 2).astype(int)
     g = df.groupby("player_id", group_keys=False)
-    cols = STATS + ["pra", "td", "dd", "starter"]
+    cols = STATS + ["pra", "td", "dd", "starter", "fg3m", "stl", "blk"]
     for c in cols:
         s = g[c].shift(1)  # previous games only
         for w in (5, 10, 20):

@@ -10,6 +10,8 @@ BASE = "https://api.the-odds-api.com/v4"
 MARKETS = os.environ.get("ODDS_MARKETS", "player_points,player_rebounds,player_assists,player_double_double,player_triple_double")
 STAT_OF = {"player_points": "pts", "player_rebounds": "reb", "player_assists": "ast",
            "player_points_alternate": "pts", "player_rebounds_alternate": "reb", "player_assists_alternate": "ast",
+           "player_points_rebounds_assists": "pra", "player_points_rebounds": "pr", "player_points_assists": "pa",
+           "player_threes": "fg3m", "player_threes_alternate": "fg3m", "player_steals": "stl", "player_blocks": "blk",
            "player_double_double": "dd", "player_triple_double": "td"}
 PREFERRED = "sportsbet"
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
@@ -99,16 +101,22 @@ def refresh(games, players_by_game):
     con.commit()
     return dict(ok=True, fetched=fetched, remaining=remaining)
 
+def _better(cur, price, book):
+    """Preferred book (Sportsbet) wins; otherwise the best price."""
+    return cur is None or (book == PREFERRED and cur[1] != PREFERRED) or (cur[1] != PREFERRED and book != PREFERRED and price > cur[0])
+
 def load(con):
-    """{player_id: {stat: {line: {over:(price,book), under:(price,book)}}}} preferring Sportsbet, else best price."""
+    """{(game_id, player_id): {stat: {line: {over:(price,book), under:(..), over_best:(price,book)}}}}.
+    over/under = Sportsbet if it offers the line, else the best other bookmaker; *_best = highest price across all bookmakers
+    (used to flag when TAB, Ladbrokes etc. pay more)."""
     try: rows = con.execute("SELECT game_id,player_id,stat,line,side,price,book FROM book_odds").fetchall()
     except sqlite3.OperationalError: return {}
     out = {}
     for gid, pid, stat, line, side, price, book in rows:
         slot = out.setdefault((gid, pid), {}).setdefault(stat, {}).setdefault(line, {})
-        cur = slot.get(side)
-        better = cur is None or (book == PREFERRED and cur[1] != PREFERRED) or (cur[1] != PREFERRED and book != PREFERRED and price > cur[0])
-        if better: slot[side] = (price, book)
+        if _better(slot.get(side), price, book): slot[side] = (price, book)
+        bk = slot.get(side + "_best")
+        if bk is None or price > bk[0]: slot[side + "_best"] = (price, book)
     return out
 
 def status(con):
@@ -149,13 +157,14 @@ def refresh_lines(games):
     con.commit(); return dict(ok=True, games=n, remaining=remaining)
 
 def load_lines(con):
-    """{game_id: {h2h:{home:(p,book),away:..}, spread:{line:{home:(p,b),away:(p,b)}}, total:{line:{over:..,under:..}}}} preferring Sportsbet."""
+    """{game_id: {h2h:{home:(p,b),away:..,home_best:..}, spread:{line:{...}}, total:{line:{...}}}} (Sportsbet preferred, plus *_best)."""
     try: rows = con.execute("SELECT game_id,market,side,line,price,book FROM book_lines").fetchall()
     except sqlite3.OperationalError: return {}
     out = {}
     for gid, mk, side, line, price, book in rows:
         slot = out.setdefault(gid, {}).setdefault(mk, {})
         if mk != "h2h": slot = slot.setdefault(line, {})
-        cur = slot.get(side)
-        if cur is None or (book == PREFERRED and cur[1] != PREFERRED) or (cur[1] != PREFERRED and book != PREFERRED and price > cur[0]): slot[side] = (price, book)
+        if _better(slot.get(side), price, book): slot[side] = (price, book)
+        bk = slot.get(side + "_best")
+        if bk is None or price > bk[0]: slot[side + "_best"] = (price, book)
     return out

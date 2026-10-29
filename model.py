@@ -7,6 +7,12 @@ from sklearn.metrics import mean_absolute_error, brier_score_loss, log_loss
 from features import build, FEATURES
 
 TARGETS = ["pts", "reb", "ast"]
+EXTRA = ["fg3m", "stl", "blk"]          # three-pointers made, steals, blocks
+ALL = TARGETS + EXTRA
+XF = {t: [f"{t}_{s}" for s in ("m5", "m10", "m20", "exp")] for t in EXTRA}   # their own recent form
+
+def feats_for(t):
+    return list(FEATURES) + XF.get(t, [])
 
 def rotation(df):
     return df[(df.min_m10 >= 22) & (df.prior_games >= 5)]
@@ -28,9 +34,9 @@ class TDModel:
 
 def fit(train):
     m = {}
-    for t in TARGETS:
+    for t in ALL:
         m[t] = HGR(loss="poisson", max_iter=250, learning_rate=0.04, max_depth=4, min_samples_leaf=60,
-                   l2_regularization=2.0, random_state=0).fit(train[FEATURES], train[t])
+                   l2_regularization=2.0, random_state=0).fit(train[feats_for(t)], train[t])
     m["dd"] = HGC(max_iter=200, learning_rate=0.04, max_depth=3, min_samples_leaf=80, l2_regularization=3.0,
                   random_state=0).fit(train[FEATURES], train["dd"])
     m["td"] = TDModel().fit(train)
@@ -49,8 +55,8 @@ def nb_over(mu, alpha, line):
 def evaluate(df, cut="2026-02-01"):
     """Backtest metrics for the scorecard page (trained before `cut`, scored after)."""
     tr, te = df[df.date < cut], df[df.date >= cut]; m = fit(tr); rep = dict(cut=cut, n_train=len(tr), n_test=len(te), stats={})
-    for t in TARGETS:
-        pred = m[t].predict(te[FEATURES]); base = te[f"{t}_m10"].fillna(te[f"{t}_exp"])
+    for t in ALL:
+        pred = m[t].predict(te[feats_for(t)]); base = te[f"{t}_m10"].fillna(te[f"{t}_exp"])
         rep["stats"][t] = dict(mae_model=float(mean_absolute_error(te[t], pred)), mae_10game_avg=float(mean_absolute_error(te[t], base)))
     for t in ("dd", "td"):
         p = m[t].predict_proba(te) if t == "td" else m[t].predict_proba(te[FEATURES])[:, 1]; y = te[t]

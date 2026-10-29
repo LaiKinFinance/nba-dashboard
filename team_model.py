@@ -108,7 +108,20 @@ def price(p):
     for L in np.arange(180.5, 280.6, 2.0):
         q = float(stats.norm.cdf((t - L) / st))
         if 0.2 <= q <= 0.8: tot.append(dict(line=float(L), p_over=q, p_under=1 - q))
-    return dict(margin=m, total=t, home_pts=(t + m) / 2, away_pts=(t - m) / 2, p_home=ph, p_away=1 - ph, handicaps=hand, totals=tot,
+    # team totals: each side's expected points; its spread is the margin/total uncertainty split between the two teams
+    hp, ap = (t + m) / 2, (t - m) / 2; sg = float(np.sqrt((st ** 2 + sm ** 2) / 4)); tteam = {}
+    for side, mu in (("home", hp), ("away", ap)):
+        tteam[side] = [dict(line=float(L), p_over=float(1 - stats.norm.cdf((L - mu) / sg))) for L in np.arange(60.5, 170.6, 2.0)
+                       if 0.2 <= 1 - stats.norm.cdf((L - mu) / sg) <= 0.8]
+    # winning-margin bands (integer margins, so use continuity at x.5)
+    bands = []
+    for side, mm in (("home", m), ("away", -m)):
+        for lo, hi in ((1, 6), (7, 12), (13, 18), (19, None)):
+            q = float((1 - stats.norm.cdf((lo - 0.5 - mm) / sm)) - ((1 - stats.norm.cdf((hi + 0.5 - mm) / sm)) if hi else 0.0))
+            bands.append(dict(team=side, lo=lo, hi=hi, p=q))
+    tot_b = sum(b["p"] for b in bands) or 1.0
+    for b in bands: b["p"] = b["p"] / tot_b          # margins of 0 are impossible, so the bands must add to 1
+    return dict(margin=m, total=t, home_pts=hp, away_pts=ap, p_home=ph, p_away=1 - ph, handicaps=hand, totals=tot, team_totals=tteam, bands=bands,
                 sigma_margin=sm, sigma_total=st, source=p.get("source", "model"))
 
 if __name__ == "__main__":

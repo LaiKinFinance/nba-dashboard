@@ -42,6 +42,9 @@ def get(url, params, tries=4):
                 raise
             time.sleep(1.5 * (i + 1))
 
+# the 30 real NBA teams (ESPN abbreviations); All-Star weekend games use teams like STARS/STRIPES/WORLD and must be ignored
+REAL_TEAMS = {"ATL","BOS","BKN","CHA","CHI","CLE","DAL","DEN","DET","GS","HOU","IND","LAC","LAL","MEM","MIA","MIL","MIN","NO","NY","OKC","ORL","PHI","PHX","POR","SAC","SA","TOR","UTAH","WSH"}
+
 def day_games(d):
     js = get(SB, {"dates": f"{d:%Y%m%d}", "limit": 100})
     out = []
@@ -51,6 +54,7 @@ def day_games(d):
         c = e["competitions"][0]["competitors"]
         home = next(x for x in c if x["homeAway"] == "home")
         away = next(x for x in c if x["homeAway"] == "away")
+        if home["team"]["abbreviation"] not in REAL_TEAMS or away["team"]["abbreviation"] not in REAL_TEAMS: continue
         out.append(dict(game_id=e["id"], date=e["date"][:10], season=str(e["season"]["year"]),
                         season_type=e["season"]["type"], home_id=home["team"]["id"], home=home["team"]["abbreviation"],
                         away_id=away["team"]["id"], away=away["team"]["abbreviation"],

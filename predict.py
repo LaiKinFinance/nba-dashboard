@@ -3,7 +3,8 @@ import json, pickle, sqlite3, datetime as dt, os
 import numpy as np, pandas as pd
 from scipy import stats
 from features import build, FEATURES
-from model import rotation, fit, dispersion, nb_over, TARGETS
+from model import rotation, fit, dispersion, nb_over, TARGETS, ALL, feats_for
+import combos
 from top3 import top3
 import slate as sl
 import team_model
@@ -12,24 +13,23 @@ import absence
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db"); MODELS = os.path.join(os.environ.get("DATA_DIR", "data"), "models.pkl")
 
 def residual_corr(df, m, alphas, cut="2026-02-01"):
-    """Gaussian-copula correlations of PIT normal scores: same player across stats, teammates, opponents."""
+    """Gaussian-copula correlations of PIT normal scores: same player across all six stats, plus teammates / opponents (core stats)."""
     te = df[df.date >= cut].copy()
-    for t in TARGETS:
-        mu = m[t].predict(te[FEATURES]); a = alphas[t]; n = 1 / a; p = n / (n + mu)
+    for t in ALL:
+        mu = m[t].predict(te[feats_for(t)]); a = alphas[t]; n = 1 / a; p = n / (n + np.maximum(mu, 0.05))
         lo = stats.nbinom.cdf(te[t] - 1, n, p); hi = stats.nbinom.cdf(te[t], n, p)
         te[f"z_{t}"] = stats.norm.ppf(np.clip((lo + hi) / 2, 1e-3, 1 - 1e-3))
-    same = te[[f"z_{t}" for t in TARGETS]].corr().values
-    # teammate / opponent correlations: pair players within a game among high-minute players
+    same6 = te[[f"z_{t}" for t in ALL]].corr().values
+    same = same6[:3, :3]
     tm, op = {t: [] for t in TARGETS}, {t: [] for t in TARGETS}
     for _, g in te[te.min_m10 >= 28].groupby("game_id"):
-        for i, r in g.iterrows():
-            for j, q in g.iterrows():
-                if r.player_id >= q.player_id: continue
-                (tm if r.team == q.team else op)  # noqa
+        rows = list(g.itertuples())
+        for i, r in enumerate(rows):
+            for q in rows[i + 1:]:
                 for t in TARGETS:
-                    (tm if r.team == q.team else op)[t].append((r[f"z_{t}"], q[f"z_{t}"]))
+                    (tm if r.team == q.team else op)[t].append((getattr(r, f"z_{t}"), getattr(q, f"z_{t}")))
     cross = lambda d: {t: float(np.corrcoef(np.array(v).T)[0, 1]) for t, v in d.items() if len(v) > 30}
-    return dict(same=same.tolist(), teammate=cross(tm), opponent=cross(op))
+    return dict(same=same.tolist(), same6=same6.tolist(), order=list(ALL), teammate=cross(tm), opponent=cross(op))
 
 def _team_report():
     try:
@@ -40,9 +40,9 @@ def _team_report():
 def train(report=True):
     df = build(); full = rotation(df).dropna(subset=["min_m10", "pts_m10"])
     cut = "2026-02-01"; tr = full[full.date < cut]
-    m_eval = fit(tr); alphas = {t: dispersion(m_eval[t], tr[FEATURES], tr[t]) for t in TARGETS}
+    m_eval = fit(tr); alphas = {t: dispersion(m_eval[t], tr[feats_for(t)], tr[t]) for t in ALL}
     corr = residual_corr(full, m_eval, alphas)
-    m = fit(full); alphas = {t: dispersion(m[t], full[FEATURES], full[t]) for t in TARGETS}
+    m = fit(full); alphas = {t: dispersion(m[t], full[feats_for(t)], full[t]) for t in ALL}
     from model import evaluate
     pickle.dump(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report())), open(MODELS, "wb"))
     return m, alphas, corr
@@ -153,7 +153,7 @@ def project(days=2):
         for c in absence.ABS: Xb.at[idx, c] = float(r[c]) if r is not None else 0.0
     Xf = X.copy()   # "full strength" counterfactual: nobody missing
     for c in absence.ABS: Xf[c] = 0.0
-    mus = {t: m[t].predict(X) for t in TARGETS}
+    mus = {t: m[t].predict(feats[feats_for(t)]) for t in ALL}
     mus_base = {t: m[t].predict(Xb) for t in TARGETS}
     mus_full = {t: m[t].predict(Xf) for t in TARGETS}
     pdd = m["dd"].predict_proba(X)[:, 1]; ptd = m["td"].predict_proba(feats)
@@ -174,6 +174,9 @@ def project(days=2):
             if a["player_id"] == f.player_id: continue
             w, wo = with_without(real, f.team, f.player_id, a["player_id"])
             if wo and wo["n"] >= 3 and w and w["n"] >= 3: rec["evidence"].append(dict(who=a["name"], who_pts=a["pts"], weight=a["weight"], with_=w, without=wo))
+        for t in ALL:
+            rec["proj"][t] = float(mus[t][k])
+        rec["combo"] = combos.combo_lines({t: rec["proj"][t] for t in TARGETS}, alphas, bundle["corr"]["same"])
         for t in TARGETS:
             mu = float(mus[t][k]); rec["proj"][t] = mu
             lines = sorted({max(0.5, np.floor(mu) + d + 0.5) for d in range(-6 if t == "pts" else -4, 7 if t == "pts" else 5)})

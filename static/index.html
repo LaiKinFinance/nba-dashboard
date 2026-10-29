@@ -62,6 +62,10 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .od .p{font-size:10.5px;color:var(--mute)}.od.on .p{color:#d8e6ff}.od .p .hg{color:var(--good);font-weight:700}.od .p .hb{color:var(--bad);font-weight:700}.od.on .p .hg,.od.on .p .hb{color:#fff}
 .od.val{border-color:var(--good)}.od .vt{position:absolute;top:-7px;right:4px;background:var(--good);color:#04130c;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}
 .od .bt,.od .ft{position:absolute;bottom:-7px;left:4px;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}.od .bt{background:#a56bff;color:#fff}.od .ft{background:#ff9a3d;color:#1a0d00}.od.bst{border-color:#a56bff}.od.fad{border-color:#ff9a3d}
+.od .alt{position:absolute;bottom:-7px;right:4px;background:#1f4a7a;color:#9fd0ff;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px}
+.more>summary{font-size:12px;color:var(--acc);cursor:pointer;margin-top:8px}.seg.mini{margin:2px 0 0}.seg.mini button{padding:4px 8px;font-size:12px;flex:none}
+.mhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 2px}.mhd .mt{margin:0}
+.wn4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:6px}.th.clk{cursor:pointer}.th.clk:hover{background:var(--card2)}.lsum{font-size:12px;color:var(--mute);margin:-2px 0 6px}
 .od .bk{font-size:9px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px}
 .mk2{display:flex;gap:5px;margin-top:5px;min-width:0}.mk2 .od{flex:1;display:flex;justify-content:space-between;padding:6px 10px;align-items:center;text-align:left;gap:6px}.mk2 .od .p{display:block}
 .l5t{background:none;border:0;color:var(--acc);font-size:12px;padding:6px 0 0}.l5{display:none;margin-top:4px}.l5.open{display:block}
@@ -163,7 +167,9 @@ const ini=n=>n.split(" ").filter(Boolean).map(w=>w[0]).slice(0,2).join("");
 const photo=(id,n,sz)=>`<span class="ph ${sz||""}" data-i="${esc(ini(n))}"><img src="${face(id)}" alt="" loading="lazy" onerror="this.remove()"></span>`;
 const timeOf=s=>new Date(s).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
 const dayKey=s=>{const d=new Date(s),t=new Date(),tm=new Date(t.getTime()+864e5),k=x=>x.toDateString();return k(d)==k(t)?"Today":k(d)==k(tm)?"Tomorrow":d.toLocaleDateString([],{weekday:"long",day:"numeric",month:"short"})};
-const statName={pts:"PTS",reb:"REB",ast:"AST",dd:"Double-double",td:"Triple-double"};
+const statName={pts:"PTS",reb:"REB",ast:"AST",fg3m:"3PM",stl:"STL",blk:"BLK",pra:"Pts+Reb+Ast",pr:"Pts+Reb",pa:"Pts+Ast",dd:"Double-double",td:"Triple-double"};
+const BK={sportsbet:"SB",tab:"TAB",ladbrokes_au:"LAD",ladbrokes:"LAD",neds:"NEDS",pointsbet_au:"PB",pointsbet:"PB",betfair_ex_au:"BF",unibet:"UNI",bet365_au:"B365",playup:"PLAY",betr_au:"BETR",boombet:"BOOM",dabble_au:"DAB",tabtouch:"TT"};
+const bk=b=>BK[b]||String(b||"").slice(0,4).toUpperCase();
 const money=x=>(x<0?"-":"")+"$"+Math.abs(x).toFixed(2);
 const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 
@@ -177,23 +183,23 @@ const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object
 const allPlayers=()=>slate.flatMap(g=>Object.values(g.teams).flatMap(t=>t.players));
 
 /* ---------- bet slip ---------- */
-const key=l=>[l.game_id,l.player_id||"",l.stat,l.line,l.side].join("|");
-const grp=x=>x=="ml"||x=="spread"?"side":x=="total"?"total":null;
+const key=l=>[l.game_id,l.player_id||"",l.stat,l.line,l.side,l.team||"",l.lo||""].join("|");
+const grp=x=>x=="ml"||x=="spread"||x=="band"?"side":x=="total"||x=="tt"?"total":null;
 const sgn=x=>x>0?"+"+x:""+x;
-const legDesc=l=>l.stat=="ml"?"To win":l.stat=="spread"?`Handicap ${sgn(l.side=="home"?l.line:-l.line)}`:l.stat=="total"?`${l.side=="over"?"Over":"Under"} ${l.line} total points`:["dd","td"].includes(l.stat)?statName[l.stat]:`Over ${l.line} ${statName[l.stat]}`;
+const legDesc=l=>l.stat=="ml"?"To win":l.stat=="spread"?`Handicap ${sgn(l.side=="home"?l.line:-l.line)}`:l.stat=="total"?`${l.side=="over"?"Over":"Under"} ${l.line} total points`:l.stat=="tt"?`Team total ${l.side} ${l.line}`:l.stat=="band"?`Win by ${l.hi?l.lo+"–"+l.hi:l.lo+"+"}`:["dd","td"].includes(l.stat)?statName[l.stat]:`Over ${l.line} ${statName[l.stat]}`;
 function addLeg(l,quiet){const i=legs.findIndex(x=>key(x)==key(l));
   if(i>=0){if(!quiet)legs.splice(i,1)}else{
     legs=legs.filter(x=>grp(l.stat)?!(x.game_id==l.game_id&&grp(x.stat)==grp(l.stat)):!(x.game_id==l.game_id&&x.player_id==l.player_id&&x.stat==l.stat));
     legs.push(l);if(legs.length>6)legs.shift();
     const p=l.player_id&&findP(l.game_id,l.player_id);if(p)snaps[l.player_id]={starting:p.starting,injury:(p.injury&&p.injury.status)||null}}}
-function pickTeam(g,stat,side,line,price,book,prob,text){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob});oddsManual=false;calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
+function pickTeam(g,stat,side,line,price,book,prob,text,team,lo,hi){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob,team:team||undefined,lo:lo||undefined,hi:hi||undefined});oddsManual=false;calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
 function pick(g,pid,stat,line,price,book,prob,hit,n){const p=findP(g,pid);addLeg({game_id:g,player_id:pid,stat,line,side:"over",text:p?p.player:pid,price:price||null,book:book||null,p:prob,hit,n});
   oddsManual=false;calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
 function paintSel(){const on=new Set(legs.map(key));document.querySelectorAll(".od[data-k]").forEach(b=>b.classList.toggle("on",on.has(b.dataset.k)))}
 function estOdds(){return legs.length&&legs.every(l=>l.price)?legs.reduce((a,l)=>a*l.price,1):null}
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
   const e=estOdds(),inp=$("#podds");let o=oddsManual&&inp&&inp.value!==""?parseFloat(inp.value):(e||null);
-  try{const r=await post("parlay",{legs:legs.map(({game_id,player_id,stat,line,side})=>({game_id,player_id,stat,line,side})),odds:o||null});calc={r,o:o||null};drawSlip()}catch(x){}},250)}
+  try{const r=await post("parlay",{legs:legs.map(({game_id,player_id,stat,line,side,team,lo,hi})=>({game_id,player_id,stat,line,side,team,lo,hi})),odds:o||null});calc={r,o:o||null};drawSlip()}catch(x){}},250)}
 function drawSlip(){const w=$("#slipwrap");if(tab!="today"){w.innerHTML="";return}
   const fid=document.activeElement&&document.activeElement.id;
   const keep=($("#podds")||{}).value,stake=($("#stake")||{}).value||"",note=($("#note")||{}).value||"";const r=calc&&calc.r,e=estOdds();
@@ -213,7 +219,7 @@ function drawSlip(){const w=$("#slipwrap");if(tab!="today"){w.innerHTML="";retur
    <p class="mute" style="margin:8px 0 0">Model edges are small. Log bets to see how it really performs.</p>`:""}
   </div></div>`;
   if(fid&&$("#"+fid)){const el=$("#"+fid);el.focus();try{el.setSelectionRange(el.value.length,el.value.length)}catch(x){}}}
-const legsPayload=()=>legs.map(l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:l.side,text:l.text}));
+const legsPayload=()=>legs.map(l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:l.side,team:l.team,lo:l.lo,hi:l.hi,text:l.text}));
 async function share(){if(!needName()||!calc)return;await post("picks",{legs:legsPayload(),note:$("#note").value,odds:calc.o,model_prob:calc.r.joint});legs=[];calc=null;go("picks")}
 async function logBet(){if(!needName())return;const s=parseFloat($("#stake").value);if(!s||!calc||!calc.o){alert("Enter the odds and your stake first");return}
   await post("bets",{legs:legsPayload(),stake:s,odds:calc.o,model_prob:calc.r.joint});legs=[];calc=null;go("bets")}
@@ -234,9 +240,9 @@ setInterval(pollStatus,180000);
 async function loadSlate(){slate=await api("slate")}
 function hitTxt(h,n){if(!n)return"";const c=h/n>=.8?"hg":h/n<=.3?"hb":"";return `<span class="${c}">${h}/${n}</span>`}
 function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
-  const val=o.price&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=[p.game_id,p.player_id,s,o.line,"over"].join("|");
-  return `<button class="od ${val?"val":""} ${bst?"bst":""} ${fad?"fad":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}${bst?'<span class="bt">BOOST</span>':fad?'<span class="ft">FADE</span>':""}
-   <div class="l">O ${o.line}${o.price?" · SB":""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
+  const val=o.price&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
+  return `<button class="od ${val?"val":""} ${bst?"bst":""} ${fad?"fad":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}${bst?'<span class="bt">BOOST</span>':fad?'<span class="ft">FADE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}
+   <div class="l">O ${o.line}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
 function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return"";
   const full=p.proj_full||{},d=k=>(p.proj[k]-(full[k]??p.proj[k]));const dtxt=["pts","reb","ast"].map(k=>`${d(k)>=0?"+":""}${d(k).toFixed(1)} ${k}`).join(", ");
   return `<details class="why-d"><summary style="font-size:12px;color:#c8a6ff">Why the change? ${ab.length} teammate${ab.length>1?"s":""} out</summary><ul class="why">`+
@@ -244,39 +250,52 @@ function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return
    `<li>Model effect vs a full-strength roster: <b>${dtxt}</b></li>`+
    ev.map(e=>`<li>Without ${esc(e.who)}: <b>${e.without.pts.toFixed(1)}</b> pts / ${e.without.reb.toFixed(1)} reb / ${e.without.ast.toFixed(1)} ast in ${e.without.n} games, vs ${e.with_.pts.toFixed(1)} / ${e.with_.reb.toFixed(1)} / ${e.with_.ast.toFixed(1)} in ${e.with_.n} with him</li>`).join("")+
    (ev.length?"":`<li>Not enough games with and without this teammate for a direct comparison; the estimate comes from how all players on all teams responded to similar absences.</li>`)+`</ul></details>`}
+function statRow(p,st,lab){const L=(p.strip&&p.strip[st])||[];if(!L.length)return"";
+  const core=["pts","reb","ast"].includes(st),thr={pts:1,reb:.6,ast:.6}[st],effB=core?p.proj[st]-((p.proj_full||p.proj)[st]):0,effF=core?p.proj[st]-((p.proj_base||p.proj)[st]):0;   // BOOST/FADE only when the stat-level effect is meaningful
+  return `<div class="mkr"><div class="lb">${lab}</div><div class="stw"><div class="strip">${L.map(o=>{const rel=o.p_over>=.3&&o.p_over<=.75;return btn(p,st,{line:o.line,prob:o.p_over,price:o.price,book:o.book,alt:o.alt,edge:o.edge,hit:o.hit,n:o.n,boost:(core&&rel&&effB>=thr)?o.boost:0,fade:(core&&rel&&effF<=-thr)?o.fade:0})}).join("")}</div></div></div>`}
+function moreHTML(p){const defs=[["pra","PRA"],["pr","P+R"],["pa","P+A"],["fg3m","3PM"],["stl","STL"],["blk","BLK"]].filter(([s])=>((p.strip||{})[s]||[]).length);if(!defs.length)return"";
+  const low=defs.some(d=>d[0]=="stl"||d[0]=="blk");
+  return `<details class="more"><summary>More markets: ${defs.map(d=>d[1]).join(", ")}</summary>${defs.map(([s,l])=>statRow(p,s,l)).join("")}${low?'<div class="mute" style="font-size:11px;margin-top:4px">Steals and blocks: in testing our model was no better than a plain average, so treat those as low-confidence.</div>':""}</details>`}
 function playerHTML(p){
-  const mk=["pts","reb","ast"].map(st=>{const L=(p.strip&&p.strip[st])||[];
-    const thr={pts:1,reb:.6,ast:.6}[st],effB=p.proj[st]-((p.proj_full||p.proj)[st]),effF=p.proj[st]-((p.proj_base||p.proj)[st]);   // BOOST/FADE only when the stat-level effect is meaningful
-    return `<div class="mkr"><div class="lb">${st.toUpperCase()}</div><div class="stw"><div class="strip">${L.map(o=>{const rel=o.p_over>=.3&&o.p_over<=.75;return btn(p,st,{line:o.line,prob:o.p_over,price:o.price,book:o.book,edge:o.edge,hit:o.hit,n:o.n,boost:(rel&&effB>=thr)?o.boost:0,fade:(rel&&effF<=-thr)?o.fade:0})}).join("")}</div></div></div>`}).join("");
+  const mk=["pts","reb","ast"].map(st=>statRow(p,st,st.toUpperCase())).join("");
   const dd=p.book&&p.book.dd,td=p.book&&p.book.td;
-  const sp=(s,prob,b,h)=>{const val=b&&b.edge>=0.04;const k=[p.game_id,p.player_id,s,0,"over"].join("|"),hist=p.dd_td_hist||{};
+  const sp=(s,prob,b,h)=>{const val=b&&b.edge>=0.04;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:0,side:"over"}),hist=p.dd_td_hist||{};
     const note=s=="td"?`${hist.td||0} in ${hist.games||0} games`:`${hist.dd20||0} in last 20`;
     return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',0,${b?b.price:0},'${b?b.book:""}',${prob},${h.k},${h.n})">${val?'<span class="vt">VALUE</span>':""}<span class="l" style="text-align:left">${statName[s]}</span><span><span class="o">${b?b.price.toFixed(2):dec(prob)}</span><span class="p">${pct(prob)} · ${note}</span></span></button>`};
   const l10=p.last10||[],l5=l10.slice(0,5),av=k=>l5.length?(l5.reduce((a,x)=>a+x[k],0)/l5.length).toFixed(1):"–";
   const inj=p.injury&&p.injury.status&&p.injury.status!="Active"?`<span class="chip i">${esc(p.injury.status)}</span>`:"";
   return `<div class="pl"><div class="pt">${photo(p.player_id,p.player,"l")}<div style="min-width:0"><span class="pn" onclick="go('players','${p.player_id}')">${esc(p.player)}</span>${p.starting?'<span class="chip s">Starting</span>':'<span class="chip q">Bench / TBC</span>'}${inj}${(p.absent||[]).length?(((p.proj.pts-(p.proj_full||p.proj).pts)>=1||(p.proj.reb-(p.proj_full||p.proj).reb)>=.6||(p.proj.ast-(p.proj_full||p.proj).ast)>=.6)?'<span class="chip b">▲ Teammate out</span>':'<span class="chip q">Teammate out</span>'):""}
    <div class="proj"><span>Proj <b>${p.proj.pts.toFixed(1)}</b> pts · <b>${p.proj.reb.toFixed(1)}</b> reb · <b>${p.proj.ast.toFixed(1)}</b> ast</span></div></div></div>
-   ${whyHTML(p)}${mk}${(p.show_dd||p.show_td)?`<div class="mk2">${p.show_dd?sp("dd",p.p_dd,dd,p.dd_hit):""}${p.show_td?sp("td",p.p_td,td,p.td_hit):""}</div>`:""}
+   ${whyHTML(p)}${mk}${(p.show_dd||p.show_td)?`<div class="mk2">${p.show_dd?sp("dd",p.p_dd,dd,p.dd_hit):""}${p.show_td?sp("td",p.p_td,td,p.td_hit):""}</div>`:""}${moreHTML(p)}
    ${l5.length?`<button class="l5t" onclick="const t=this.nextElementSibling;t.classList.toggle('open');this.textContent=t.classList.contains('open')?'Hide last 5 ▴':this.dataset.o" data-o="Last 5 · avg ${av("pts")} / ${av("reb")} / ${av("ast")} ▾">Last 5 · avg ${av("pts")} / ${av("reb")} / ${av("ast")} ▾</button>
    <div class="l5"><table><tr><th></th><th>PTS</th><th>REB</th><th>AST</th><th>MIN</th></tr>${l5.map(g=>`<tr><td>${g.home?"vs":"@"} ${g.opp}</td><td class="${g.pts>p.proj.pts+3?"hi":g.pts<p.proj.pts-5?"lo":""}">${g.pts}</td><td class="${g.reb>p.proj.reb+2?"hi":g.reb<p.proj.reb-2?"lo":""}">${g.reb}</td><td class="${g.ast>p.proj.ast+2?"hi":g.ast<p.proj.ast-2?"lo":""}">${g.ast}</td><td>${Math.round(g.min)}</td></tr>`).join("")}</table><div class="mute" style="font-size:11px">Green = well above today's projection, red = well below.</div></div>`:""}</div>`}
 const gtab={};let gameIdx={};
 const nm=t=>NAMES[t]||t;
-function tbtn(g,stat,side,line,o){const val=o.price&&o.edge>=0.04,k=[g,"",stat,line,side].join("|");
-  return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pickTeam('${g}','${stat}','${side}',${line},${o.price||0},'${o.book||""}',${o.prob},'${esc(o.text)}')">${val?'<span class="vt">VALUE</span>':""}<div class="l">${esc(o.label)}${o.price?" · SB":""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)}</div></button>`}
+function tbtn(g,stat,side,line,o){const val=o.price&&o.edge>=0.04,k=key({game_id:g,stat,line,side,team:o.team,lo:o.lo});
+  return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pickTeam('${g}','${stat}','${side}',${line},${o.price||0},'${o.book||""}',${o.prob},'${esc(o.text)}','${o.team||""}',${o.lo||0},${o.hi==null?"null":o.hi})">${val?'<span class="vt">VALUE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}<div class="l">${esc(o.label)}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)}</div></button>`}
 const stripH=h=>`<div class="stw"><div class="strip">${h}</div></div>`;
-function matchHTML(g){const m=g.match;if(!m)return'<p class="mute" style="margin:10px 0">Match markets appear once the model has priced this game (upcoming games only).</p>';
-  const H=m.home,A=m.away,bh=m.book_h2h||{},ed=(p,b)=>b?p-1/b[0]:null;
-  const win=(side,t,p)=>tbtn(g.game_id,"ml",side,0,{label:`${nm(t)} to win`,prob:p,price:bh[side]&&bh[side][0],book:bh[side]&&bh[side][1],edge:ed(p,bh[side]),text:`${nm(t)} to win`});
-  const hs=m.handicaps.map(l=>tbtn(g.game_id,"spread","home",l.line,{label:`${nm(H)} ${sgn(l.line)}`,prob:l.p_home,price:l.price_home,book:l.book,edge:l.price_home?l.p_home-1/l.price_home:null,text:`${nm(H)} ${sgn(l.line)}`})).join("");
-  const as=[...m.handicaps].reverse().map(l=>tbtn(g.game_id,"spread","away",l.line,{label:`${nm(A)} ${sgn(-l.line)}`,prob:l.p_away,price:l.price_away,book:l.book,edge:l.price_away?l.p_away-1/l.price_away:null,text:`${nm(A)} ${sgn(-l.line)}`})).join("");
-  const ov=m.totals.map(l=>tbtn(g.game_id,"total","over",l.line,{label:`Over ${l.line}`,prob:l.p_over,price:l.price_over,book:l.book,edge:l.price_over?l.p_over-1/l.price_over:null,text:`Over ${l.line} total points`})).join("");
-  const un=m.totals.map(l=>tbtn(g.game_id,"total","under",l.line,{label:`Under ${l.line}`,prob:l.p_under,price:l.price_under,book:l.book,edge:l.price_under?l.p_under-1/l.price_under:null,text:`Under ${l.line} total points`})).join("");
+const mb={},MBD={hand:"home",tot:"over",ttT:"home",ttO:"over"};
+const mbg=(id,k)=>(mb[id]&&mb[id][k])||MBD[k];
+function setMB(id,k,v){(mb[id]=mb[id]||{})[k]=v;const el=$("#g"+id);el.querySelector(".gbody").innerHTML=gbodyHTML(gameIdx[id]);paintSel();centerStrips(el)}
+const segc=(id,k,opts)=>`<div class="seg mini">${opts.map(([v,l])=>`<button class="${mbg(id,k)==v?"on":""}" onclick="setMB('${id}','${k}','${v}')">${esc(l)}</button>`).join("")}</div>`;
+function matchHTML(g){const m=g.match;if(!m)return'<p class="mute" style="margin:10px 0">Match markets appear once the game has been priced (upcoming games only).</p>';
+  const H=m.home,A=m.away,id=g.game_id,bh=m.book_h2h||{},ah=m.alt_h2h||{},ed=(p,b)=>b?p-1/b[0]:null;
+  const win=(side,t,p)=>tbtn(id,"ml",side,0,{label:`${nm(t)} to win`,prob:p,price:bh[side]&&bh[side][0],book:bh[side]&&bh[side][1],alt:ah[side],edge:ed(p,bh[side]),text:`${nm(t)} to win`});
+  const hd=mbg(id,"hand"),to=mbg(id,"tot"),tT=mbg(id,"ttT"),tO=mbg(id,"ttO");
+  const hs=(hd=="home"?m.handicaps:[...m.handicaps].reverse()).map(l=>{const home=hd=="home",tm=home?H:A,ln=home?l.line:-l.line,p=home?l.p_home:l.p_away,pr=home?l.price_home:l.price_away,al=home?l.alt_home:l.alt_away;
+    return tbtn(id,"spread",hd,l.line,{label:`${nm(tm)} ${sgn(ln)}`,prob:p,price:pr,book:l.book,alt:al,edge:pr?p-1/pr:null,text:`${nm(tm)} ${sgn(ln)}`})}).join("");
+  const ts=m.totals.map(l=>{const o=to=="over",p=o?l.p_over:l.p_under,pr=o?l.price_over:l.price_under,al=o?l.alt_over:l.alt_under;
+    return tbtn(id,"total",to,l.line,{label:`${o?"Over":"Under"} ${l.line}`,prob:p,price:pr,book:l.book,alt:al,edge:pr?p-1/pr:null,text:`${o?"Over":"Under"} ${l.line} total points`})}).join("");
+  const tt=((m.team_totals||{})[tT]||[]).map(l=>{const o=tO=="over",tm=tT=="home"?H:A,p=o?l.p_over:1-l.p_over;
+    return tbtn(id,"tt",tO,l.line,{label:`${nm(tm)} ${o?"over":"under"} ${l.line}`,prob:p,team:tT,text:`${nm(tm)} ${o?"over":"under"} ${l.line} points`})}).join("");
+  const bands=(t)=>(m.bands||[]).filter(b=>b.team==t).map(b=>{const tm=t=="home"?H:A,r=b.hi?`${b.lo}–${b.hi}`:`${b.lo}+`;return tbtn(id,"band",t,0,{label:`${nm(tm)} by ${r}`,prob:b.p,team:t,lo:b.lo,hi:b.hi,text:`${nm(tm)} to win by ${r}`})}).join("");
   return `<div class="sumln">Expected score${m.source=="market"?" (from the betting market)":" (our model)"}: <b>${nm(A)} ${m.away_pts.toFixed(0)}</b> – <b>${nm(H)} ${m.home_pts.toFixed(0)}</b> · total <b>${m.total.toFixed(0)}</b> · ${m.margin>0?nm(H):nm(A)} by <b>${Math.abs(m.margin).toFixed(0)}</b></div>
    <div class="mt">Match winner</div><div class="wn">${win("away",A,m.p_away)}${win("home",H,m.p_home)}</div>
-   <div class="mt"><img src="${logo(A)}" alt="">${nm(A)} handicap</div>${stripH(as)}
-   <div class="mt"><img src="${logo(H)}" alt="">${nm(H)} handicap</div>${stripH(hs)}
-   <div class="mt">Total points – over</div>${stripH(ov)}<div class="mt">Total points – under</div>${stripH(un)}
-   <div class="mute" style="font-size:11px;margin-top:8px">Drag or swipe the rows sideways to see more lines. Lines shown cover the realistic range (about 20%–80% chance). In testing, market lines predicted game results better than our own team model, so they are the starting point here; a VALUE tag then means Sportsbet's price is out of line with the market. Team results are linked to player stats in the same game, so mixing them in one slip is approximate.</div>`}
+   <div class="mhd"><div class="mt">Handicap</div>${segc(id,"hand",[["away",nm(A)],["home",nm(H)]])}</div>${stripH(hs)}
+   <div class="mhd"><div class="mt">Total points</div>${segc(id,"tot",[["over","Over"],["under","Under"]])}</div>${stripH(ts)}
+   ${tt?`<div class="mhd"><div class="mt">Team total</div>${segc(id,"ttT",[["away",nm(A)],["home",nm(H)]])}${segc(id,"ttO",[["over","Over"],["under","Under"]])}</div>${stripH(tt)}`:""}
+   ${(m.bands||[]).length?`<div class="mt">Winning margin</div><div class="wn4">${bands("away")}</div><div class="wn4">${bands("home")}</div>`:""}
+   <div class="mute" style="font-size:11px;margin-top:8px">Swipe or drag rows sideways for more lines (about 20%–80% chance range). Starting point is the betting market, which beat our own team model in testing; VALUE means Sportsbet's price is out of line with it. A small badge like <b>TAB 2.05</b> means another bookmaker pays at least 3% more. Team results are linked to player stats in the same game, so mixing them in one slip is approximate.</div>`}
 function gbodyHTML(g){const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   if((gtab[g.game_id]||"players")=="match")return matchHTML(g);
   const side=tm=>`<div><div class="th"><img src="${logo(tm.team)}" alt="">${nm(tm.team)} <span>${esc(tm.lineup||"Lineup not posted")}</span></div>${tm.players.map(playerHTML).join("")}</div>`;
@@ -427,10 +446,12 @@ function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=esc(l.text||"
   const hm=g.home.score-g.away.score,tot=g.home.score+g.away.score;let hit,txt,frac;
   if(l.stat=="ml"){const m=l.side=="home"?hm:-hm;hit=m>0;txt=m==0?"Tied":`${m>0?"Leading":"Trailing"} by ${Math.abs(m)}`;frac=.5+m/40}
   else if(l.stat=="spread"){const m=(l.side=="home"?hm:-hm)+(l.side=="home"?l.line:-l.line);hit=m>0;txt=`${m>0?"Covering by":"Behind the line by"} ${Math.abs(m)}`;frac=.5+m/40}
+  else if(l.stat=="tt"){const pts=l.team=="home"?g.home.score:g.away.score;hit=l.side=="over"?pts>l.line:pts<l.line;txt=`${pts} points so far (line ${l.line})`;frac=l.side=="over"?pts/l.line:1-(pts-l.line*.5)/(l.line*.5)}
+  else if(l.stat=="band"){const m=l.team=="home"?hm:-hm;hit=m>=l.lo&&(l.hi==null||m<=l.hi);txt=m>0?`Leading by ${m}`:m<0?`Trailing by ${-m}`:"Tied";frac=hit?1:.15}
   else{hit=l.side=="over"?tot>l.line:tot<l.line;txt=`${tot} points so far (line ${l.line})`;frac=l.side=="over"?tot/l.line:1-(tot-l.line*.5)/(l.line*.5)}
   const done=g.state=="post",v=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${v}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${Math.max(2,Math.min(100,frac*100))}%"></i></div></div>`}
-function legProg(l){if(["ml","spread","total"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
+function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
   if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
   if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
   if(!r)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
@@ -459,15 +480,21 @@ async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refres
 let LU=[],luF={q:"",conf:false};
 const luChip=t=>/out|ofs/i.test(t)?"out":/ques|doubt|game-time|gtd/i.test(t)?"q":"ok";
 const dotc=p=>p==null||p>=100?"var(--good)":p>=50?"var(--gold)":"var(--bad)";
-function luSide(sd){const row=(p,out)=>`<div class="lp"><span class="pos">${esc(p.pos)}</span>${photo(p.player_id||0,p.name)}<span class="nm2" ${p.player_id?`onclick="go('players','${p.player_id}')"`:""}>${p.top3?"⭐ ":""}${esc(p.name)}${p.new?'<span class="newb">NEW</span>':""}</span>${out?`<span class="stc ${luChip(p.status)}">${esc(p.status)}</span>`:`<span class="dot" style="background:${dotc(p.pct)}" title="${esc(p.note||"")}"></span>`}</div>`;
-  return `<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span></div>
-   ${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
-   ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
+let luOpen={};const luOn=k=>luOpen[k]!==false;
+function luTog(k){luOpen[k]=!luOn(k);drawLineups()}
+function luAll(open){LU.forEach(g=>[g.away,g.home].forEach(sd=>luOpen[luId(g)+"|"+sd.team]=open));drawLineups()}
+const luId=g=>g.away.team+"-"+g.home.team;
+function luSide(sd,gid){const k=gid+"|"+sd.team,open=luOn(k);
+  const row=(p,out)=>`<div class="lp"><span class="pos">${esc(p.pos)}</span>${photo(p.player_id||0,p.name)}<span class="nm2" ${p.player_id?`onclick="go('players','${p.player_id}')"`:""}>${p.top3?"⭐ ":""}${esc(p.name)}${p.new?'<span class="newb">NEW</span>':""}</span>${out?`<span class="stc ${luChip(p.status)}">${esc(p.status)}</span>`:`<span class="dot" style="background:${dotc(p.pct)}" title="${esc(p.note||"")}"></span>`}</div>`;
+  const sum=sd.starters.map(p=>p.name.split(" ").slice(-1)[0]).join(", ");
+  return `<div><div class="th clk" onclick="luTog('${k}')"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span><span style="margin-left:auto;color:var(--mute)">${open?"▾":"▸"}</span></div>
+   ${open?`${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
+   ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}`:`<div class="lsum">${esc(sum||"Lineup not posted yet")}${sd.out.length?` · ${sd.out.length} may not play`:""}</div>`}</div>`}
 function drawLineups(){const q=luF.q.toLowerCase();
   const gs=LU.filter(g=>(!luF.conf||(g.away.confirmed&&g.home.confirmed))&&(!q||[g.away,g.home].some(sd=>(sd.team+" "+nm(sd.team)+" "+sd.starters.concat(sd.out).map(p=>p.name).join(" ")).toLowerCase().includes(q))));
   $("#lubody").innerHTML=gs.map(g=>`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><img src="${logo(g.away.team)}" style="width:30px;height:30px" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" style="width:30px;height:30px" alt=""><span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span></div>
-    <div class="lu">${luSide(g.away)}${luSide(g.home)}</div></div>`).join("")||'<div class="card empty">No lineups match.</div>'}
-async function lineupsTab(a){a.innerHTML=`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button></div>
+    <div class="lu">${luSide(g.away,luId(g))}${luSide(g.home,luId(g))}</div></div>`).join("")||'<div class="card empty">No lineups match.</div>'}
+async function lineupsTab(a){a.innerHTML=`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
    <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team. Source: Rotowire, refreshed every 5 minutes.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
   LU=await api("lineups");drawLineups()}
 

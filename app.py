@@ -87,6 +87,10 @@ def meta(x_code: str = Header("")):
 def _dd(r): return int((r["pts"] >= 10) + (r["reb"] >= 10) + (r["ast"] >= 10) >= 2)
 def _td(r): return int((r["pts"] >= 10) + (r["reb"] >= 10) + (r["ast"] >= 10) >= 3)
 
+STRIPS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa")
+COMBO_PARTS = {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}
+EXTRA_MIN = {"fg3m": 0.7, "stl": 0.8, "blk": 0.6}   # only show a market when the player realistically produces it
+
 def enriched():
     """Projections + last-10 games, consistency counts per line, and bookmaker prices/edges where available."""
     import odds
@@ -96,7 +100,7 @@ def enriched():
     with closing(con()) as c:
         if ids:
             q = ",".join("?" * len(ids))
-            for r in c.execute(f"SELECT player_id,date,opp,home,min,pts,reb,ast FROM player_games WHERE player_id IN ({q}) ORDER BY date DESC", ids):
+            for r in c.execute(f"SELECT player_id,date,opp,home,min,pts,reb,ast,fg3m,stl,blk FROM player_games WHERE player_id IN ({q}) ORDER BY date DESC", ids):
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
         book = odds.load(c)
@@ -121,34 +125,47 @@ def enriched():
         for s in ("pts", "reb", "ast"):
             for l in p["ladders"][s]: l["hit"] = sum(1 for r in l10 if r[s] > l["line"]); l["n"] = n
         p["dd_hit"] = dict(k=sum(_dd(r) for r in l10), n=n); p["td_hit"] = dict(k=h["td"], n=h["games"])
-        b = book.get((p["game_id"], p["player_id"]), {}); p["book"] = {}
-        for s in ("pts", "reb", "ast"):
-            out = []
+        b = book.get((p["game_id"], p["player_id"]), {}); p["book"] = {}; p["strip"] = {}
+        for s in STRIPS:
+            combo = s in COMBO_PARTS
+            mu = None if combo else p["proj"].get(s)
+            cm = {x["line"]: x["p_over"] for x in (p.get("combo") or {}).get(s, [])} if combo else {}
+            if not combo and (mu is None or mu < EXTRA_MIN.get(s, 0)): p["strip"][s] = []; continue
+            if combo and not cm: p["strip"][s] = []; continue
+            pmodel = (lambda L, s=s, mu=mu: float(nb_over(mu, alphas[s], L))) if not combo else (lambda L, cm=cm: cm.get(L))
+            val = (lambda r, s=s: sum(r[c] for c in COMBO_PARTS[s])) if combo else (lambda r, s=s: r[s])
+            bl = {}
             for line, sides in sorted(b.get(s, {}).items()):
                 if "over" not in sides: continue
-                po = float(nb_over(p["proj"][s], alphas[s], line)); price, bk = sides["over"]
-                out.append(dict(line=line, price=price, book=bk, p_over=po, edge=po - 1 / price,
-                                hit=sum(1 for r in l10 if r[s] > line), n=n, under=(sides.get("under") or [None])[0]))
-            if out: p["book"][s] = out
-        p["strip"] = {}
-        for s in ("pts", "reb", "ast"):
-            mu, bl = p["proj"][s], {x["line"]: x for x in p["book"].get(s, [])}; lines = {}
-            for k in range(-14, 15):
-                L = float(np.floor(mu) + k + 0.5)
-                if L < 0.5: continue
-                q = float(nb_over(mu, alphas[s], L))
-                if 0.10 <= q <= 0.92: lines[L] = q
+                po = pmodel(line)
+                if po is None: continue
+                price, bk = sides["over"]; best = sides.get("over_best"); alt = None
+                if best and best[1] != bk and best[0] >= price * 1.03: alt = [best[0], best[1]]
+                bl[line] = dict(line=line, price=price, book=bk, p_over=po, edge=po - 1 / price, hit=sum(1 for r in l10 if val(r) > line), n=n,
+                                under=(sides.get("under") or [None])[0], alt=alt)
+            if bl: p["book"][s] = list(bl.values())
+            lines = {}
+            if combo:
+                lines = {L: q for L, q in cm.items() if 0.10 <= q <= 0.92}
+            else:
+                for k in range(-14, 15):
+                    L = float(np.floor(mu) + k + 0.5)
+                    if L < 0.5: continue
+                    q = pmodel(L)
+                    if 0.10 <= q <= 0.92: lines[L] = q
             for L in bl:
-                q = float(nb_over(mu, alphas[s], L))
-                if 0.04 <= q <= 0.97: lines[L] = q
+                q = pmodel(L)
+                if q is not None and 0.04 <= q <= 0.97: lines[L] = q
             ordered = sorted(lines)
             if len(ordered) > 16:  # keep the 16 lines closest to a coin flip
                 ordered = sorted(sorted(ordered, key=lambda L: abs(lines[L] - 0.5))[:16])
-            pf, pb = p.get("proj_full", {}).get(s), p.get("proj_base", {}).get(s)
-            p["strip"][s] = [dict(line=L, p_over=lines[L], hit=sum(1 for r in l10 if r[s] > L), n=n,
+            core = s in ("pts", "reb", "ast")
+            pf, pb = (p.get("proj_full", {}).get(s), p.get("proj_base", {}).get(s)) if core else (None, None)
+            p["strip"][s] = [dict(line=L, p_over=lines[L], hit=sum(1 for r in l10 if val(r) > L), n=n,
                                   boost=(lines[L] - float(nb_over(pf, alphas[s], L))) if pf is not None and p.get("absent") else 0.0,
                                   fade=(lines[L] - float(nb_over(pb, alphas[s], L))) if pb is not None else 0.0,
                                   price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
+                                  alt=(bl[L]["alt"] if L in bl else None),
                                   edge=((lines[L] - 1 / bl[L]["price"]) if L in bl else None)) for L in ordered]
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
@@ -160,23 +177,32 @@ def game_preds():
         try: return {r["game_id"]: json.loads(r["payload"]) for r in c.execute("SELECT game_id, payload FROM game_preds")}
         except sqlite3.OperationalError: return {}
 
+def _alt(sides, side):
+    """[price, book] when another bookmaker pays at least 3% more than the one shown (Sportsbet preferred)."""
+    cur, best = sides.get(side), sides.get(side + "_best")
+    return [best[0], best[1]] if cur and best and best[1] != cur[1] and best[0] >= cur[0] * 1.03 else None
+
 def match_payload(gp, bl):
-    """Model prices for winner/handicap/total, with bookmaker prices merged in where the Odds API supplied them."""
+    """Market-based prices for winner/handicap/total/team totals/margin bands, with bookmaker prices merged in where the Odds API supplied them."""
     if not gp: return None
-    m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals")}; m["source"] = gp.get("source", "model")
+    m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals", "team_totals", "bands") if k in gp}
+    m["source"] = gp.get("source", "model")
     bl = bl or {}
-    h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(v) for s, v in h2.items()}
+    h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(h2[s]) for s in ("home", "away") if s in h2}
+    m["alt_h2h"] = {s: _alt(h2, s) for s in ("home", "away") if _alt(h2, s)}
     hand = {l["line"]: dict(l) for l in m["handicaps"]}
     for line, sides in (bl.get("spread") or {}).items():
         e = hand.setdefault(line, dict(line=line, p_home=float(stats_norm_cdf((gp["margin"] + line) / gp["sigma_margin"]))))
         e["p_away"] = 1 - e["p_home"]
-        for s, v in sides.items(): e[f"price_{s}"] = v[0]; e["book"] = v[1]
+        for s in ("home", "away"):
+            if s in sides: e[f"price_{s}"] = sides[s][0]; e["book"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
     m["handicaps"] = [hand[k] for k in sorted(hand)]
     tot = {l["line"]: dict(l) for l in m["totals"]}
     for line, sides in (bl.get("total") or {}).items():
         e = tot.setdefault(line, dict(line=line, p_over=float(stats_norm_cdf((gp["total"] - line) / gp["sigma_total"]))))
         e["p_under"] = 1 - e["p_over"]
-        for s, v in sides.items(): e[f"price_{s}"] = v[0]; e["book"] = v[1]
+        for s in ("over", "under"):
+            if s in sides: e[f"price_{s}"] = sides[s][0]; e["book"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
     m["totals"] = [tot[k] for k in sorted(tot)]
     return m
 
@@ -210,12 +236,13 @@ def _conf(p, s, line, hit, n, edge, with_evidence):
     return "Strong" if pts >= 4 else "Medium" if pts >= 3 else "Speculative"
 
 def _evidence(p, s, line, prob, price, edge, adj):
+    parts = COMBO_PARTS.get(s, (s,)); pv = sum(p["proj"][c] for c in parts); lab = {"pra": "pts+reb+ast", "pr": "pts+reb", "pa": "pts+ast", "fg3m": "3PM"}.get(s, s)
     ev = [f"Model chance {prob*100:.0f}% vs price implies {100/price:.0f}% (edge {edge*100:+.0f} pts; {adj*100:.0f}% after leaning 30% toward the market to stay cautious)"]
+    ev.append(f"Projection {pv:.1f} {lab} vs line {line}")
+    l10 = [sum(r[c] for c in parts) for r in p.get("last10", [])]
+    if l10: ev.append(f"Cleared {line} in {sum(1 for v in l10 if v > line)} of his last {len(l10)} games (avg {sum(l10)/len(l10):.1f})")
+    if p.get("min"): ev.append(f"Averaging {p['min']:.0f} minutes" + (", starting tonight" if p["starting"] else ", not a confirmed starter"))
     if s in ("pts", "reb", "ast"):
-        ev.append(f"Projection {p['proj'][s]:.1f} vs line {line}")
-        l10 = [r[s] for r in p.get("last10", [])]
-        if l10: ev.append(f"Cleared {line} in {sum(1 for v in l10 if v > line)} of his last {len(l10)} games (avg {sum(l10)/len(l10):.1f})")
-        if p.get("min"): ev.append(f"Averaging {p['min']:.0f} minutes" + (", starting tonight" if p["starting"] else ", not a confirmed starter"))
         of = (p.get("opp_factor") or {}).get(s)
         if of and abs(of - 1) >= 0.03: ev.append(f"{p['opp']} has allowed {'more' if of > 1 else 'less'} {s} than average lately ({(of-1)*100:+.0f}%)")
     for a in (p.get("absent") or [])[:3]:
@@ -234,7 +261,7 @@ def value_picks(x_code: str = Header("")):
     preds = enriched(); out = []
     for p in preds:
         if (p.get("injury") or {}).get("status") in ("Out",): continue
-        for s in ("pts", "reb", "ast"):
+        for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
             for l in p["strip"].get(s, []):
                 if not l["price"]: continue
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
@@ -399,14 +426,23 @@ def player(pid: str, x_code: str = Header("")):
                 last20=dict(dd=int(d.head(20).dd.sum()), td=int(d.head(20).td.sum())),
                 tonight=dict(game_id=tonight["game_id"], opp=tonight["opp"], home=tonight["home"], start=tonight["start"], proj=tonight["proj"], p_dd=tonight["p_dd"], p_td=tonight["p_td"]) if tonight else None)
 
-TEAM_STATS = ("ml", "spread", "total")
+TEAM_STATS = ("ml", "spread", "total", "tt", "band")
+PLAYER_STATS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa", "dd", "td")
+SIDE_GROUP, TOTAL_GROUP = ("ml", "spread", "band"), ("total", "tt")
 
 def team_leg_prob(l, gp):
     k = l["stat"]
     if k == "ml": return gp["p_home"] if l["side"] == "home" else gp["p_away"]
     if k == "spread":
         q = float(stats_norm_cdf((gp["margin"] + l["line"]) / gp["sigma_margin"])); return q if l["side"] == "home" else 1 - q
-    q = float(stats_norm_cdf((gp["total"] - l["line"]) / gp["sigma_total"])); return q if l["side"] == "over" else 1 - q
+    if k == "total":
+        q = float(stats_norm_cdf((gp["total"] - l["line"]) / gp["sigma_total"])); return q if l["side"] == "over" else 1 - q
+    if k == "tt":
+        mu = gp["home_pts"] if l["team"] == "home" else gp["away_pts"]; sg = float(np.sqrt((gp["sigma_total"] ** 2 + gp["sigma_margin"] ** 2) / 4))
+        q = float(1 - stats_norm_cdf((l["line"] - mu) / sg)); return q if l["side"] == "over" else 1 - q
+    b = next((x for x in gp["bands"] if x["team"] == l["team"] and x["lo"] == l["lo"] and x["hi"] == l.get("hi")), None)
+    if not b: raise HTTPException(400, "Unknown margin band")
+    return float(b["p"])
 
 @app.post("/api/parlay")
 def parlay_calc(body: dict = Body(...), x_code: str = Header("")):
@@ -416,11 +452,14 @@ def parlay_calc(body: dict = Body(...), x_code: str = Header("")):
     if not 1 <= len(legs) <= 6: raise HTTPException(400, "1-6 legs")
     pl_legs = [l for l in legs if l["stat"] not in TEAM_STATS]; tm_legs = [l for l in legs if l["stat"] in TEAM_STATS]
     for l in pl_legs:
+        if l["stat"] not in PLAYER_STATS: raise HTTPException(400, "Unknown market")
         if (l["game_id"], l["player_id"]) not in preds: raise HTTPException(400, "Unknown player/game")
     for l in tm_legs:
         if l["game_id"] not in gps: raise HTTPException(400, "Unknown game")
-    side_games = [l["game_id"] for l in tm_legs if l["stat"] in ("ml", "spread")]
-    if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner or handicap leg per game")
+    side_games = [l["game_id"] for l in tm_legs if l["stat"] in SIDE_GROUP]
+    if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner, handicap or margin leg per game")
+    tot_games = [l["game_id"] for l in tm_legs if l["stat"] in TOTAL_GROUP]
+    if len(tot_games) != len(set(tot_games)): raise HTTPException(400, "Pick only one game total or team total per game")
     b = predict.load_models()
     rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
     tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]

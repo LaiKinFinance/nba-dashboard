@@ -37,3 +37,6 @@ The free plan's 500 credits/month covers roughly 100 games. Tune with `ODDS_MARK
 - Alternate player lines are off by default because they cost extra credits per game. To enable, set `ODDS_MARKETS` to
   `player_points,player_rebounds,player_assists,player_double_double,player_triple_double,player_points_alternate,player_rebounds_alternate,player_assists_alternate`.
   Lines with no bookmaker price still show the model's fair odds.
+
+## Audit
+`python tools/audit_data.py` checks data integrity; see `AUDIT.md` for the architecture map and review checklist.
