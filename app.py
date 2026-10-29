@@ -55,7 +55,11 @@ def init():
             model_p REAL, hit INT, n INT, price REAL, book TEXT, in_combo INT, created TEXT, result TEXT, actual REAL, graded_at TEXT, UNIQUE(game_id, player_id, stat, kind));
         CREATE TABLE IF NOT EXISTS combo_log(id INTEGER PRIMARY KEY, day TEXT UNIQUE, legs TEXT, joint REAL, fair_odds REAL, created TEXT, result TEXT, graded_at TEXT);
         CREATE TABLE IF NOT EXISTS manual_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, odds REAL, PRIMARY KEY(game_id, player_id, stat, line, side));
-        """); c.commit()
+        """)
+        have = {r[1] for r in c.execute("PRAGMA table_info(pick_log)")}
+        for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL")):
+            if col not in have: c.execute(f"ALTER TABLE pick_log ADD COLUMN {col} {typ}")
+        c.commit()
 init()
 
 def who(x_user, x_code):
@@ -109,7 +113,7 @@ def enriched():
             for r in c.execute(f"SELECT player_id,date,opp,home,min,pts,reb,ast,fg3m,stl,blk FROM player_games WHERE player_id IN ({q}) ORDER BY date DESC", ids):
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
-        book = odds.load(c)
+        book = odds.load(c); ages = odds.fetch_ages(c)
     alphas = predict.load_models(strict=False)["alphas"]
     # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
     hist = {}
@@ -132,6 +136,7 @@ def enriched():
             for l in p["ladders"][s]: l["hit"] = sum(1 for r in l10 if r[s] > l["line"]); l["n"] = n
         p["dd_hit"] = dict(k=sum(_dd(r) for r in l10), n=n); p["td_hit"] = dict(k=h["td"], n=h["games"])
         b = book.get((p["game_id"], p["player_id"]), {}); p["book"] = {}; p["strip"] = {}
+        p["odds_age_h"] = ages.get(p["game_id"])
         for s in STRIPS:
             combo = s in COMBO_PARTS
             mu = None if combo else p["proj"].get(s)
@@ -259,7 +264,7 @@ def _conf(p, s, line, hit, n, edge, with_evidence):
 
 def _evidence(p, s, line, prob, price, edge, adj):
     parts = COMBO_PARTS.get(s, (s,)); pv = sum(p["proj"][c] for c in parts); lab = {"pra": "pts+reb+ast", "pr": "pts+reb", "pa": "pts+ast", "fg3m": "3PM"}.get(s, s)
-    ev = [f"Model chance {prob*100:.0f}% vs price implies {100/price:.0f}% (edge {edge*100:+.0f} pts; {adj*100:.0f}% after leaning 30% toward the market to stay cautious)"]
+    ev = [f"Model chance {prob*100:.0f}% vs price implies {100/price:.0f}% (edge {edge*100:+.0f} pts; ranked on 70% of that gap to stay cautious)"]
     ev.append(f"Projection {pv:.1f} {lab} vs line {line}")
     l10 = [sum(r[c] for c in parts) for r in p.get("last10", [])]
     if l10: ev.append(f"Cleared {line} in {sum(1 for v in l10 if v > line)} of his last {len(l10)} games (avg {sum(l10)/len(l10):.1f})")
@@ -305,6 +310,14 @@ def log_picks(best=None, value=None):
                        o.get("hit"), o.get("n"), o["price"], o.get("book"), 0, now.isoformat()))
         c.commit()
 
+def record_closing_prices(c):
+    """For picks whose game has started, store the last price we archived before tip-off, to compare with the price we showed."""
+    import odds
+    for r in c.execute("""SELECT p.id, p.game_id, p.player_id, p.stat, p.line, p.side, p.book, g.tip_utc FROM pick_log p JOIN games g ON g.game_id=p.game_id
+                          WHERE p.price IS NOT NULL AND p.price_close IS NULL AND p.player_id<>'' AND g.tip_utc IS NOT NULL""").fetchall():
+        cp = odds.closing_price(c, r["game_id"], r["player_id"], r["stat"], r["line"], r["side"], r["book"], r["tip_utc"])
+        if cp: c.execute("UPDATE pick_log SET price_close=?, close_book=?, close_mins_before=? WHERE id=?", (cp[0], cp[1], cp[2], r["id"]))
+
 def grade_picks():
     """Grade logged picks against final box scores (void when the player did not play)."""
     now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -323,6 +336,7 @@ def grade_picks():
                 else:
                     actual = float(sum(pr[k] for k in COMBO_PARTS.get(r["stat"], (r["stat"],)))); res = "won" if actual > r["line"] else "lost"
             c.execute("UPDATE pick_log SET result=?, actual=?, graded_at=? WHERE id=?", (res, actual, now, r["id"]))
+        record_closing_prices(c)
         for r in c.execute("SELECT * FROM combo_log WHERE result IS NULL").fetchall():
             legs = json.loads(r["legs"]); rs = []
             for l in legs:
@@ -358,6 +372,10 @@ def track_record(x_code: str = Header("")):
         if r["result"] in ("won", "lost"): d = by.setdefault(r["stat"], dict(n=0, won=0)); d["n"] += 1; d["won"] += r["result"] == "won"
     out["by_stat"] = by
     pv = [r for r in V if r["result"] in ("won", "lost") and r["price"]]
+    cl = [r for r in V if r.get("price_close") and r["price"]]
+    clv = [r["price"] / r["price_close"] - 1 for r in cl]
+    out["closing"] = dict(n=len(clv), avg_clv=(sum(clv) / len(clv)) if clv else None, share_beat=(sum(1 for x in clv if x > 0) / len(clv)) if clv else None,
+                          avg_mins_before_tip=(sum(r["close_mins_before"] for r in cl) / len(cl)) if cl else None)
     out["value_roi"] = (sum((r["price"] - 1) if r["result"] == "won" else -1 for r in pv) / len(pv)) if pv else None
     gc = [x for x in combos if x["result"] in ("won", "lost")]
     out["combos"] = dict(n=len(gc), won=sum(1 for x in gc if x["result"] == "won"), avg_p=(sum(x["joint"] for x in gc) / len(gc)) if gc else None, pending=sum(1 for x in combos if x["result"] is None))
@@ -379,24 +397,33 @@ def value_picks(x_code: str = Header("")):
     except Exception: logging.exception("pick logging failed")
     return res
 
+MIN_EDGE, MIN_EDGE_UNSURE, STALE_H, MAX_AGE_H = 0.06, 0.09, 6.0, 14.0
+
+def min_edge(p):
+    """Smallest model-vs-price gap worth flagging. Higher when the price is old or the player's status is not settled; None-age (manual) counts as fresh."""
+    age = p.get("odds_age_h")
+    unsure = (age is not None and age > STALE_H) or (p.get("injury") or {}).get("status") in ("Questionable", "Day-To-Day", "Doubtful", "Game Time Decision")
+    return MIN_EDGE_UNSURE if unsure else MIN_EDGE
+
 def compute_value():
     preds = enriched(); out = []
     for p in preds:
         if (p.get("injury") or {}).get("status") in ("Out",): continue
+        if (p.get("odds_age_h") or 0) > MAX_AGE_H: continue      # prices this old are too stale to call "value"
         for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
             for l in p["strip"].get(s, []):
                 if not l["price"]: continue
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
-                if edge < 0.06 or l["n"] < 5: continue
+                if edge < min_edge(p) or l["n"] < 5: continue
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
                 out.append(dict(kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
-                                price=l["price"], book=l["book"], p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
+                                price=l["price"], book=l["book"], price_age_h=p.get("odds_age_h"), p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
                                 confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             b = p["book"].get(s)
             if not b or not p.get("show_" + s): continue
             edge = p[pk] - 1 / b["price"]; adj = 0.7 * p[pk] + 0.3 / b["price"]
-            if edge < 0.06: continue
+            if edge < min_edge(p): continue
             hk = p[f"{s}_hit"]
             out.append(dict(kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
                             p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0,
