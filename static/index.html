@@ -148,7 +148,7 @@ const money=x=>(x<0?"-":"")+"$"+Math.abs(x).toFixed(2);
 const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 
 function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
-function go(t,pid){tab=t;localStorage.tab=t;if(pid)playerId=pid;nav();render();scrollTo(0,0)}
+function go(t,pid){tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
 async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",tab!="today");
   clearInterval(liveTimer);try{await({today,live:liveTab,picks,bets,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
@@ -297,9 +297,11 @@ async function res(id,r){await post(`bets/${id}/result`,{result:r});render()}
 
 /* ---------- players ---------- */
 let pstat="pts",pline={},pdata=null;
+const strip=()=>`<div class="pillrow" style="margin-top:10px">${slate.flatMap(g=>Object.values(g.teams).flatMap(t=>t.players)).filter((p,i,arr)=>arr.findIndex(x=>x.player_id==p.player_id)==i).map(p=>`<button class="sl ${p.player_id==playerId?"on":""}" style="min-width:0;${p.player_id==playerId?"border-color:var(--acc)":""}" onclick="go('players','${p.player_id}')"><div class="pt">${photo(p.player_id,p.player)}<b style="white-space:nowrap">${esc(p.player)}</b></div></button>`).join("")}</div>`;
 async function players(a){
+  if(!slate.length)await loadSlate();
   a.innerHTML=`<div class="srch"><input class="inp" id="ps" placeholder="Search any player (e.g. Jokic)" oninput="psearch(this.value)" autocomplete="off"><div class="res" id="pres" style="display:none"></div></div><div id="pbody" style="margin-top:12px"></div>`;
-  if(!playerId){await loadSlate();$("#pbody").innerHTML=`<div class="note">Pick a player to see how consistent they have been recently, or tap one playing tonight.</div>`+
+  if(!playerId){$("#pbody").innerHTML=`<div class="note">Pick a player to see how consistent they have been recently, or tap one playing soon.</div>`+
      slate.map(g=>Object.values(g.teams).map(t=>`<div class="card"><div class="th"><img src="${logo(t.team)}" alt="">${NAMES[t.team]||t.team} <span>${NAMES[t.opp]?"vs "+NAMES[t.opp]:""}</span></div><div class="pillrow">${t.players.map(p=>`<button class="sl" onclick="go('players','${p.player_id}')"><div class="pt">${photo(p.player_id,p.player)}<div><b>${esc(p.player)}</b></div></div></button>`).join("")}</div></div>`).join("")).join("");return}
   pdata=await api("player/"+playerId);drawPlayer()}
 let pst;function psearch(q){clearTimeout(pst);pst=setTimeout(async()=>{const r=$("#pres");if(q.trim().length<2){r.style.display="none";return}
@@ -310,7 +312,7 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
   const hits=vals.filter(v=>v>line).length,mx=Math.max(line,...vals,1)*1.12;
   const t=d.tonight,s=d.season,label={pts:"points",reb:"rebounds",ast:"assists"}[pstat];
   const verdict=hits>=8?"good":hits<=3?"bad":"";
-  $("#pbody").innerHTML=`<div class="card"><div class="pt">${photo(playerId,d.player,"xl")}<div><h2 style="margin:0;font-size:20px">${esc(d.player)}</h2><div class="mute">${NAMES[d.team]||d.team} · this season: <b style="color:var(--ink)">${s.pts.toFixed(1)}</b> pts · <b style="color:var(--ink)">${s.reb.toFixed(1)}</b> reb · <b style="color:var(--ink)">${s.ast.toFixed(1)}</b> ast in ${s.games} games</div></div></div>
+  $("#pbody").innerHTML=`<button class="btn" onclick="playerId=null;render()">← All players</button>${strip()}<div class="card" style="margin-top:12px"><div class="pt">${photo(playerId,d.player,"xl")}<div><h2 style="margin:0;font-size:20px">${esc(d.player)}</h2><div class="mute">${NAMES[d.team]||d.team} · this season: <b style="color:var(--ink)">${s.pts.toFixed(1)}</b> pts · <b style="color:var(--ink)">${s.reb.toFixed(1)}</b> reb · <b style="color:var(--ink)">${s.ast.toFixed(1)}</b> ast in ${s.games} games</div></div></div>
    ${t?`<div class="note" style="margin:12px 0 0">Playing ${t.home?"vs":"at"} ${NAMES[t.opp]||t.opp} at ${timeOf(t.start)}. Model projects <b style="color:var(--ink)">${t.proj.pts.toFixed(1)}</b> pts, <b style="color:var(--ink)">${t.proj.reb.toFixed(1)}</b> reb, <b style="color:var(--ink)">${t.proj.ast.toFixed(1)}</b> ast. <a href="#" style="color:var(--gold)" onclick="openGames.add('${t.game_id}');go('today');return false">See prices →</a></div>`:`<p class="mute" style="margin-bottom:0">Not on the current slate (not a top-3 player for their team, or no game soon).</p>`}</div>
    <div class="card"><h2>How consistent are they?</h2><p class="mute" style="margin:0 0 10px">Their last ${vals.length} games, oldest to newest. Green bars cleared the dashed line; red bars did not.</p>
    <div style="display:flex;gap:6px">${["pts","reb","ast"].map(k=>`<button class="pill ${pstat==k?"on":""}" onclick="pstat='${k}';drawPlayer()">${{pts:"Points",reb:"Rebounds",ast:"Assists"}[k]}</button>`).join("")}</div>
