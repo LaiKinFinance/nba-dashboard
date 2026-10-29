@@ -89,9 +89,3 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7):
         probs.append(float(exact) if exact is not None else float(w.mean()))
     joint = float(np.logical_and.reduce(wins).mean()) if wins else 1.0
     return dict(leg_probs=probs, independent=float(np.prod(probs)) if probs else 1.0, joint=joint, fair_odds=float(1 / joint) if joint > 0 else None)
-
-def value(joint, decimal_odds):
-    """Edge and expected value per 1 staked; kelly fraction (full) for reference."""
-    ev = joint * decimal_odds - 1
-    kelly = max(0.0, (joint * decimal_odds - 1) / (decimal_odds - 1)) if decimal_odds > 1 else 0.0
-    return dict(implied=1 / decimal_odds, edge=joint - 1 / decimal_odds, ev=ev, kelly=kelly)

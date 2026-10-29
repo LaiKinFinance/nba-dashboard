@@ -227,7 +227,8 @@ def init():
         CREATE TABLE IF NOT EXISTS manual_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, odds REAL, PRIMARY KEY(game_id, player_id, stat, line, side));
         """)
         bhave = {r[1] for r in c.execute("PRAGMA table_info(bets)")}
-        for col, typ in (("manual", "INTEGER DEFAULT 0"), ("settled_at", "TEXT"), ("leg_results", "TEXT"), ("settle_note", "TEXT"), ("payout_odds", "REAL"), ("returned_amount", "REAL"), ("needs_amount", "INTEGER DEFAULT 0")):
+        # Existing money columns are left untouched. New records only track outcomes.
+        for col, typ in (("manual", "INTEGER DEFAULT 0"), ("settled_at", "TEXT"), ("leg_results", "TEXT"), ("settle_note", "TEXT")):
             if col not in bhave: c.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
         have = {r[1] for r in c.execute("PRAGMA table_info(pick_log)")}
         for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL"), ("model_id", "TEXT")):
@@ -607,13 +608,11 @@ def grade_picks():
         c.commit()
 
 def grade_bets():
-    """Mark open bets won / lost from real results, by the same rules for everyone. A bet with a level or cancelled leg is flagged "needs your amount"
-    (the app never works out or guesses a refund). Bets a person marked by hand are left alone.
-    Returns {'graded': n, 'problem': None}. Safe to run any number of times."""
+    """Score saved personal picks. Unplayed or tied picks do not count as wins/losses."""
     import settle
     n = 0
     with closing(con()) as c:
-        for b in c.execute("SELECT * FROM bets WHERE result='open' AND COALESCE(manual,0)=0 AND COALESCE(needs_amount,0)=0").fetchall():
+        for b in c.execute("SELECT * FROM bets WHERE result='open' AND COALESCE(manual,0)=0").fetchall():
             legs = json.loads(b["legs"]); results = []
             for l in legs:
                 g = c.execute("SELECT home_pts, away_pts FROM games WHERE game_id=? AND home_pts IS NOT NULL", (l["game_id"],)).fetchone()
@@ -625,11 +624,8 @@ def grade_bets():
                         pl = dict(r) if r else "missing"
                 results.append(settle.leg_result(l, dict(g) if g else None, pl))
             res = settle.settle_bet(legs, results)
-            if res == "open" and "lost" not in results: continue
-            if res == "review":      # finished level or cancelled leg: wait for the person to enter what Sportsbet returned
-                note = "A part of this bet finished exactly level or was cancelled. Enter the amount Sportsbet actually returned."
-                c.execute("UPDATE bets SET leg_results=?, settle_note=?, needs_amount=1 WHERE id=?", (json.dumps(results), note, b["id"])); n += 1; continue
-            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=NULL, needs_amount=0 WHERE id=?",
+            if res == "open": continue
+            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=NULL WHERE id=?",
                       (res, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(results), b["id"])); n += 1
         c.commit()
     return dict(graded=n, problem=None)
@@ -661,12 +657,10 @@ def track_record(x_code: str = Header("")):
     for r in L:
         if r["result"] in ("won", "lost"): d = by.setdefault(r["stat"], dict(n=0, won=0)); d["n"] += 1; d["won"] += r["result"] == "won"
     out["by_stat"] = by
-    pv = [r for r in V if r["result"] in ("won", "lost") and r["price"]]
     cl = [r for r in V if r.get("price_close") and r["price"]]
     clv = [r["price"] / r["price_close"] - 1 for r in cl]
     out["closing"] = dict(n=len(clv), avg_clv=(sum(clv) / len(clv)) if clv else None, share_beat=(sum(1 for x in clv if x > 0) / len(clv)) if clv else None,
                           avg_mins_before_tip=(sum(r["close_mins_before"] for r in cl) / len(cl)) if cl else None)
-    out["value_roi"] = (sum((r["price"] - 1) if r["result"] == "won" else -1 for r in pv) / len(pv)) if pv else None
     gc = [x for x in combos if x["result"] in ("won", "lost")]
     out["combos"] = dict(n=len(gc), won=sum(1 for x in gc if x["result"] == "won"), avg_p=(sum(x["joint"] for x in gc) / len(gc)) if gc else None, pending=sum(1 for x in combos if x["result"] is None))
     days = {}
@@ -929,77 +923,51 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     pi, ti = iter(rp["leg_probs"]), iter(tp)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
     joint = rp["joint"] * float(np.prod(tp) if tp else 1.0); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
-    r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None))
+    r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None), value=None)
     mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
     r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
                     "so this combined chance is approximate.") if mixed else None
-    odds = body.get("odds")
     if any(l["stat"] in POINTS_BASED for l in legs) and not POINTS_CLAIMS_ENABLED:
-        # points chances have run too confident, so a slip with any points leg (including combined bets) gets no profit, value or stake advice
-        r["value"] = None; r["no_advice"] = True
-        r["points_warning"] = "Points chances have been running too confident in testing. Treat this chance as rough: there is no value, profit or stake advice for bets that include points."
-    elif odds: r["value"] = pl.value(r["joint"], float(odds))
+        r["no_advice"] = True
+        r["points_warning"] = "Points chances have been too confident in testing. Treat this chance as a rough estimate. Points picks receive no VALUE or safe-pick labels."
     r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
     return r
 
 @app.get("/api/scorecard")
 def scorecard(x_code: str = Header("")):
+    """Personal pick outcomes only. Old financial fields stay stored, but are not used."""
     check(x_code)
     _safe(grade_bets)
-    mb, _ = model_status()
-    if mb is None: raise HTTPException(503, "There is no prediction model yet.")
-    rep = mb["report"]
     with closing(con()) as c:
-        bets = [dict(r) for r in c.execute("SELECT * FROM bets ORDER BY id DESC")]
+        bets = [dict(r) for r in c.execute("SELECT id,user,created,legs,model_prob,result,manual,leg_results FROM bets ORDER BY id DESC")]
     users = {}
     for b in bets:
-        u = users.setdefault(b["user"], dict(user=b["user"], bets=0, settled=0, staked=0.0, returned=0.0, wins=0, model_prob_sum=0.0, all_prob_sum=0.0, open=0, awaiting_amount=0))
-        u["bets"] += 1; u["all_prob_sum"] += b["model_prob"] or 0; u["open"] += b["result"] == "open"
-        u["awaiting_amount"] += b["result"] == "open" and bool(b.get("needs_amount"))
-        got = b.get("returned_amount")
-        if got is not None:              # the amount the person typed in from Sportsbet: confirmed money
-            u["settled"] += 1; u["staked"] += b["stake"]; u["returned"] += got; u["wins"] += got > b["stake"]; u["model_prob_sum"] += b["model_prob"] or 0
-        elif b["result"] in ("won", "lost"):
-            u["settled"] += 1; u["staked"] += b["stake"]; u["wins"] += b["result"] == "won"
-            u["returned"] += b["stake"] * b["odds"] if b["result"] == "won" else 0; u["model_prob_sum"] += b["model_prob"] or 0
+        u = users.setdefault(b["user"], dict(user=b["user"], bets=0, settled=0, wins=0, losses=0, open=0, not_counted=0))
+        u["bets"] += 1; u["open"] += b["result"] == "open"
+        u["wins"] += b["result"] == "won"; u["losses"] += b["result"] == "lost"
+        u["not_counted"] += b["result"] not in ("won", "lost", "open")
     for u in users.values():
-        u["profit"] = u["returned"] - u["staked"]; u["avg_model_prob"] = u["all_prob_sum"] / u["bets"]
-        u["roi"] = (u["returned"] - u["staked"]) / u["staked"] if u["staked"] else None
+        u["settled"] = u["wins"] + u["losses"]
         u["hit_rate"] = u["wins"] / u["settled"] if u["settled"] else None
-        u["expected_hit_rate"] = u["model_prob_sum"] / u["settled"] if u["settled"] else None
-    return dict(model=rep, users=sorted(users.values(), key=lambda u: -(u["profit"])), bets=bets[:100])
+    return dict(users=sorted(users.values(), key=lambda u: u["user"].casefold()), bets=bets[:100])
 
 @app.post("/api/bets")
 def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
     body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
-        c.execute("INSERT INTO bets(user,created,legs,stake,odds,model_prob) VALUES(?,?,?,?,?,?)",
-                  (user, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(body["legs"]), float(body["stake"]), float(body["odds"]), body.get("model_prob")))
+        c.execute("INSERT INTO bets(user,created,legs,model_prob) VALUES(?,?,?,?)",
+                  (user, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(body["legs"]), body.get("model_prob")))
         c.commit()
     return {"ok": True}
-
-@app.post("/api/bets/{bid}/returned")
-def bet_returned(bid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
-    """The person enters the money Sportsbet actually returned for a bet (0 if nothing). Only this number is used for that bet's profit: nothing is guessed."""
-    user = who(x_user, x_code)
-    try: amount = float(body["amount"])
-    except (KeyError, TypeError, ValueError): raise HTTPException(400, "Enter the amount as a number")
-    if not (amount == amount and 0 <= amount <= 10_000_000): raise HTTPException(400, "Enter an amount of 0 or more")
-    with closing(con()) as c:
-        b = c.execute("SELECT stake FROM bets WHERE id=? AND user=?", (bid, user)).fetchone()
-        if not b: raise HTTPException(404, "Not your bet")
-        result = "won" if amount > b["stake"] else ("void" if amount == b["stake"] else "lost")
-        c.execute("UPDATE bets SET returned_amount=?, result=?, manual=1, needs_amount=0, settled_at=? WHERE id=?", (amount, result, dt.datetime.now(dt.timezone.utc).isoformat(), bid)); c.commit()
-    return {"ok": True, "result": result}
 
 @app.post("/api/bets/{bid}/result")
 def bet_result(bid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
-    if body["result"] not in ("won", "lost", "void", "open"): raise HTTPException(400)
+    if body.get("result") not in ("won", "lost", "open"): raise HTTPException(400)
     with closing(con()) as c:
         # a hand-made mark is respected (manual=1); "undo" (open) hands the bet back to automatic marking
-        r = c.execute("UPDATE bets SET result=?, manual=?, settled_at=NULL, leg_results=NULL, settle_note=NULL, payout_odds=NULL, returned_amount=NULL, needs_amount=0 WHERE id=? AND user=?",
+        r = c.execute("UPDATE bets SET result=?, manual=?, settled_at=NULL, leg_results=NULL, settle_note=NULL WHERE id=? AND user=?",
                       (body["result"], 0 if body["result"] == "open" else 1, bid, user)); c.commit()
         if r.rowcount == 0: raise HTTPException(404, "Not your bet")
     return {"ok": True}

@@ -1,8 +1,8 @@
-"""Automatic win / lose marking for logged bets, from the final scores and box scores.
+"""Score predictions from final scores and box scores. No bookmaker payment rules.
 
-A leg ends as: 'won', 'lost', 'push' (finished exactly level on a whole-number line), 'void' (player did not play) or None (game not finished,
-or its box score is not in yet). A bet is lost as soon as any leg is lost; it is won when every leg is finished and all won. If any leg finished
-level or was cancelled, the app does NOT work out the payment: it asks the person to enter the money Sportsbet actually returned."""
+Only completed picks with a clear outcome count as won or lost. A player who did
+not play, or an exact tie on the line, is left out of the accuracy count.
+"""
 
 from levels import as_over_line
 
@@ -40,10 +40,9 @@ def leg_result(leg, game, player):
     return _cmp(val, float(leg["line"]), side)
 
 def settle_bet(legs, results):
-    """results: one leg result per leg. Returns 'open' | 'won' | 'lost' | 'review'.
-    'review' = the games are finished, nothing lost, but at least one leg finished level or was cancelled: what Sportsbet actually paid back
-    can only be known from Sportsbet, so the person enters it (the app never works it out or guesses it)."""
-    if "lost" in results: return "lost"
+    """Keep incomplete picks pending and unscorable picks out of the win/loss count."""
+    if not results: return "void"
     if any(r is None for r in results): return "open"
-    if any(r in ("push", "void") for r in results): return "review"
+    if any(r in ("push", "void") for r in results): return "void"
+    if "lost" in results: return "lost"
     return "won"

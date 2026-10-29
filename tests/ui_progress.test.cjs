@@ -51,7 +51,7 @@ test('under wording says the bet can still be lost, and shows when it already ha
   assert.match(calc({stat:'pra',line:30.5,side:'under'},box).txt,/must stay under/);
   assert.match(calc({stat:'pra',line:20.5,side:'under'},box).txt,/already over the line, this under has lost/);
 });
-test('exactly on a whole-number line is level, not a win or a loss, and the app says Sportsbet decides', () => {
+test('exactly on a whole-number line is left out of the win/loss count', () => {
   for (const side of ['over','under']) {
     const r=calc({stat:'pra',line:24,side},box);
     assert.equal(r.level,true); assert.equal(r.hit,false); assert.match(r.txt,/level/); assert.doesNotMatch(r.txt,/refund/i);

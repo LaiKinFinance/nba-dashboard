@@ -41,7 +41,7 @@ def test_invalid_saved_data_rejected(api_module, monkeypatch):
     leg = dict(game_id='g', player_id='p', stat='pts', line=20.5, side='over')
     bad = dict(leg, line='<img src=x onerror=alert(1)>')
     assert client.post('/api/picks', json={'legs': [bad]}, headers={'X-User': 'Audit'}).status_code == 422
-    assert client.post('/api/bets', json={'legs': [leg], 'stake': -10, 'odds': 2}, headers={'X-User': 'Audit'}).status_code == 422
+    assert client.post('/api/bets', json={'legs': [leg], 'model_prob': -0.1}, headers={'X-User': 'Audit'}).status_code == 422
     assert client.post('/api/picks', json={'legs': [leg], 'odds': '<img>'}, headers={'X-User': 'Audit'}).status_code == 422
 
 
@@ -49,7 +49,7 @@ def test_numeric_inputs_are_finite():
     from pydantic import ValidationError
     from inputs import BetInput
     with pytest.raises(ValidationError):
-        BetInput(legs=[dict(game_id='g', player_id='p', stat='pts')], odds=2, stake=float('inf'))
+        BetInput(legs=[dict(game_id='g', player_id='p', stat='pts')], model_prob=float('inf'))
 
 
 @pytest.mark.parametrize('leg', [dict(game_id='g', stat='pts'), dict(game_id='g', stat='ml', side='over'),

@@ -48,6 +48,5 @@ class PickInput(ParlayInput):
 
 
 class BetInput(ParlayInput):
-    odds: FiniteFloat = Field(gt=1, le=1000000)
-    stake: FiniteFloat = Field(gt=0, le=1000000)
+    """A personal pick. The old route name is kept so saved history still works."""
     model_prob: FiniteFloat | None = Field(default=None, ge=0, le=1)

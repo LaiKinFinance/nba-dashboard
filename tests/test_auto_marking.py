@@ -1,4 +1,4 @@
-"""My bets are marked won / lost / refunded by the app from real results, with no clicking."""
+"""Personal picks are scored from game results. No money is entered or calculated."""
 import json, sqlite3
 import pytest
 from fastapi.testclient import TestClient
@@ -37,8 +37,8 @@ def test_player_who_did_not_play_is_cancelled_not_lost():
     assert settle.leg_result(L("pts", 10.5), GAME, "missing") == "void"
 
 @pytest.mark.parametrize("results,expect", [
-    (["won", "won"], "won"), (["won", "lost"], "lost"), (["won", None], "open"), (["lost", None], "lost"),     # one lost leg decides it at once
-    (["won", "push"], "review"), (["push", "void"], "review"), (["void"], "review"), (["push", None], "open"), (["lost", "push"], "lost"),
+    (["won", "won"], "won"), (["won", "lost"], "lost"), (["won", None], "open"), (["lost", None], "open"),     # wait for the complete pick before scoring it
+    (["won", "push"], "void"), (["push", "void"], "void"), (["void"], "void"), (["push", None], "open"), (["lost", "push"], "void"),
 ])
 def test_whole_bet(results, expect):
     assert settle.settle_bet([{}] * len(results), results) == expect
@@ -63,65 +63,110 @@ def db(tmp_path, monkeypatch):
     c.execute("INSERT INTO games VALUES('g',112,106)"); c.execute("INSERT INTO player_games VALUES('g','p',27,8,5,3,1,0)")
     c.execute("INSERT INTO player_games VALUES('g','q',10,2,2,0,0,0)"); c.commit(); return c
 
-def _bet(c, legs, odds=3.0, stake=10.0, **kw):
-    c.execute("INSERT INTO bets(user,created,legs,stake,odds,model_prob) VALUES('mark','t',?,?,?,0.3)", (json.dumps(legs), stake, odds)); c.commit()
+def _bet(c, legs):
+    c.execute("INSERT INTO bets(user,created,legs,model_prob) VALUES('mark','t',?,0.3)", (json.dumps(legs),)); c.commit()
     return c.execute("SELECT max(id) FROM bets").fetchone()[0]
 
-def _row(c, i): return dict(zip([d[0] for d in c.execute("SELECT * FROM bets LIMIT 0").description], c.execute("SELECT * FROM bets WHERE id=?", (i,)).fetchone()))
 
-def test_open_bets_are_marked_by_the_app(db):
+def _row(c, i):
+    c.row_factory = sqlite3.Row
+    return dict(c.execute("SELECT * FROM bets WHERE id=?", (i,)).fetchone())
+
+
+def test_open_picks_are_scored_from_game_results(db):
     won = _bet(db, [L("pts", 24.5), dict(game_id="g", stat="ml", side="home")]); lost = _bet(db, [L("pts", 30.5)])
-    not_played = _bet(db, [dict(game_id="g", player_id="zzz", stat="pts", line=10.5, side="over")])
+    absent = _bet(db, [dict(game_id="g", player_id="zzz", stat="pts", line=10.5, side="over")])
     pending = _bet(db, [dict(game_id="future", player_id="p", stat="pts", line=10.5, side="over")])
     assert app.grade_bets()["graded"] == 3
-    assert _row(db, won)["result"] == "won" and _row(db, lost)["result"] == "lost" and _row(db, pending)["result"] == "open"
+    assert _row(db, won)["result"] == "won" and _row(db, lost)["result"] == "lost"
+    assert _row(db, absent)["result"] == "void" and _row(db, pending)["result"] == "open"
     assert json.loads(_row(db, won)["leg_results"]) == ["won", "won"]
-    r = _row(db, not_played); assert r["result"] == "open" and r["needs_amount"] == 1 and "Enter the amount" in r["settle_note"]      # not guessed
 
-def test_one_lost_leg_settles_the_bet_before_the_other_game_finishes(db):
+
+def test_incomplete_combination_waits_even_if_one_pick_is_wrong(db):
     b = _bet(db, [L("pts", 30.5), dict(game_id="future", player_id="p", stat="pts", line=10.5, side="over")])
-    app.grade_bets(); assert _row(db, b)["result"] == "lost"
+    app.grade_bets(); assert _row(db, b)["result"] == "open"
 
-def test_a_level_leg_waits_for_the_amount_sportsbet_returned(db):
-    b = _bet(db, [dict(L("pts", 24.5), price=1.5), L("pts", 27)], odds=3.0, stake=10.0)
-    app.grade_bets(); r = _row(db, b)
-    assert r["result"] == "open" and r["needs_amount"] == 1 and r["payout_odds"] is None and json.loads(r["leg_results"]) == ["won", "push"]
-    assert app.grade_bets()["graded"] == 0                                                       # not re-processed, not guessed later either
 
-def test_entering_the_amount_decides_the_result_and_the_profit(db):
-    c = TestClient(app.app); H = {"X-User": "mark"}
-    a = _bet(db, [L("pts", 24.5), L("pts", 27)], stake=10.0); b = _bet(db, [L("pts", 24.5), L("pts", 27)], stake=10.0); d = _bet(db, [L("pts", 24.5), L("pts", 27)], stake=10.0)
+@pytest.mark.parametrize("legs", [
+    [L("pts", 24.5), L("pts", 27)],
+    [L("pts", 30.5), dict(game_id="g", player_id="absent", stat="reb", line=4.5, side="over")],
+])
+def test_unscorable_picks_are_left_out_of_win_loss_count(db, legs):
+    b = _bet(db, legs); app.grade_bets()
+    assert _row(db, b)["result"] == "void"
+    me = TestClient(app.app).get("/api/scorecard").json()["users"][0]
+    assert me["not_counted"] == 1 and me["settled"] == 0 and me["hit_rate"] is None
+    assert app.grade_bets()["graded"] == 0
+
+
+def test_saving_a_pick_needs_no_money_or_bookmaker_price(db):
+    client = TestClient(app.app)
+    r = client.post("/api/bets", json={"legs": [L("reb", 7.5)], "model_prob": .4}, headers={"X-User": "mark"})
+    assert r.status_code == 200
+    saved = _row(db, 1)
+    assert saved["stake"] is None and saved["odds"] is None and saved["model_prob"] == .4
+    score = client.get("/api/scorecard").json()
+    assert score["users"][0]["wins"] == 1
+    for financial in ("profit", "roi", "returned", "staked", "returned_amount", "payout_odds", "stake", "needs_amount"):
+        assert financial not in score["users"][0] and financial not in score["bets"][0]
+
+
+def test_recording_money_is_no_longer_a_route(db):
+    client = TestClient(app.app)
+    assert "/api/bets/{bid}/returned" not in client.get("/openapi.json").json()["paths"]
+    b = _bet(db, [L("pts", 24.5)])
+    assert client.post(f"/api/bets/{b}/returned", json={"amount": 15}, headers={"X-User":"mark"}).status_code in (404, 405)
+
+
+def test_existing_money_fields_and_records_are_preserved_but_unused(db):
+    # Simulate a database upgraded by the old release, with its retired fields.
+    for name, kind in (("payout_odds", "REAL"), ("returned_amount", "REAL"), ("needs_amount", "INT")):
+        db.execute(f"ALTER TABLE bets ADD COLUMN {name} {kind}")
+    db.execute("INSERT INTO bets(user,created,legs,stake,odds,model_prob,result,payout_odds,returned_amount,needs_amount,manual) VALUES('mark','old','[]',10,3,.3,'won',1.5,15,0,1)"); db.commit()
+    before = _row(db, 1)
+    app.init(); app.init()
+    client = TestClient(app.app); score = client.get("/api/scorecard").json()
+    assert _row(db, 1) == before
+    assert score["users"][0]["wins"] == 1
+    assert client.post('/api/bets/1/result', json={"result":"lost"}, headers={"X-User":"mark"}).status_code == 200
+    after = _row(db, 1)
+    for col in ("stake", "odds", "payout_odds", "returned_amount", "needs_amount"):
+        assert after[col] == before[col]
+
+
+def test_old_pending_records_do_not_wait_for_money(db):
+    db.execute("ALTER TABLE bets ADD COLUMN needs_amount INT")
+    b = _bet(db, [L("pts", 27)]); db.execute("UPDATE bets SET needs_amount=1 WHERE id=?",(b,)); db.commit()
     app.grade_bets()
-    assert c.post(f"/api/bets/{a}/returned", json={"amount": 18.5}, headers=H).json()["result"] == "won"
-    assert c.post(f"/api/bets/{b}/returned", json={"amount": 10}, headers=H).json()["result"] == "void"
-    assert c.post(f"/api/bets/{d}/returned", json={"amount": 0}, headers=H).json()["result"] == "lost"
-    me = next(u for u in c.get("/api/scorecard").json()["users"] if u["user"] == "mark")
-    assert me["profit"] == pytest.approx((18.5 - 10) + 0 + (0 - 10)) and me["awaiting_amount"] == 0           # only the amounts he typed in
+    assert _row(db,b)["result"] == "void"
 
-def test_bets_waiting_for_an_amount_are_left_out_of_profit_and_counted(db):
-    _bet(db, [L("pts", 24.5), L("pts", 27)], stake=10.0); app.grade_bets()
-    me = next(u for u in TestClient(app.app).get("/api/scorecard").json()["users"] if u["user"] == "mark")
-    assert me["profit"] == 0 and me["settled"] == 0 and me["awaiting_amount"] == 1
 
-@pytest.mark.parametrize("bad", ["abc", -1, "nan", "inf", None])
-def test_bad_amounts_are_refused(db, bad):
-    b = _bet(db, [L("pts", 24.5)])
-    r = TestClient(app.app, raise_server_exceptions=False).post(f"/api/bets/{b}/returned", json={"amount": bad}, headers={"X-User": "mark"}); assert r.status_code in (400, 422)
+def test_results_page_does_not_need_a_prediction_model(db, monkeypatch):
+    monkeypatch.setattr(app, "model_status", lambda *args: (_ for _ in ()).throw(AssertionError("No model needed to read results")))
+    assert TestClient(app.app).get('/api/scorecard').status_code == 200
 
-def test_someone_elses_bet_cannot_be_given_an_amount(db):
-    b = _bet(db, [L("pts", 24.5)])
-    assert TestClient(app.app).post(f"/api/bets/{b}/returned", json={"amount": 5}, headers={"X-User": "other"}).status_code == 404
 
-def test_old_records_with_refund_columns_still_load(db):
-    db.execute("INSERT INTO bets(user,created,legs,stake,odds,model_prob,result,leg_results,settle_note,payout_odds,manual) VALUES('mark','2026-01-01T00:00Z','[]',10,3,.3,'won','[\"won\",\"push\"]','old note',1.5,0)"); db.commit()
-    s = TestClient(app.app).get("/api/scorecard").json(); assert any(b["payout_odds"] == 1.5 for b in s["bets"]); assert app.grade_bets()["graded"] == 0
+def test_won_and_lost_counts_ignore_unscored_picks(db):
+    for legs in ([L("pts",24.5)], [L("pts",30.5)], [L("pts",27)], [dict(game_id="future",player_id="p",stat="reb",line=3.5,side="over")]):
+        _bet(db, legs)
+    user = TestClient(app.app).get('/api/scorecard').json()["users"][0]
+    assert user == dict(user="mark",bets=4,settled=2,wins=1,losses=1,open=1,not_counted=1,hit_rate=.5)
 
-def test_bets_marked_by_hand_are_left_alone_and_undo_hands_back(db):
-    b = _bet(db, [L("pts", 30.5)]); c = TestClient(app.app)
-    assert c.post(f"/api/bets/{b}/result", json={"result": "won"}, headers={"X-User": "mark"}).status_code == 200
-    app.grade_bets(); r = _row(db, b); assert r["result"] == "won" and r["manual"] == 1                     # the app did not override him
-    c.post(f"/api/bets/{b}/result", json={"result": "open"}, headers={"X-User": "mark"}); app.grade_bets()
+
+def test_manual_results_and_undo_are_kept(db):
+    b = _bet(db, [L("pts", 30.5)]); client = TestClient(app.app)
+    assert client.post(f"/api/bets/{b}/result", json={"result": "won"}, headers={"X-User": "mark"}).status_code == 200
+    app.grade_bets(); assert _row(db, b)["result"] == "won" and _row(db, b)["manual"] == 1
+    client.post(f"/api/bets/{b}/result", json={"result": "open"}, headers={"X-User": "mark"}); app.grade_bets()
     assert _row(db, b)["result"] == "lost" and _row(db, b)["manual"] == 0
 
+
+def test_only_the_owner_can_change_a_result(db):
+    b = _bet(db, [L("pts", 24.5)])
+    assert TestClient(app.app).post(f'/api/bets/{b}/result',json={"result":"lost"},headers={"X-User":"other"}).status_code == 404
+
+
 def test_grading_twice_changes_nothing(db):
-    b = _bet(db, [L("pts", 24.5)]); app.grade_bets(); first = _row(db, b); assert app.grade_bets()["graded"] == 0 and _row(db, b) == first
+    b = _bet(db, [L("pts", 24.5)]); app.grade_bets(); first = _row(db, b)
+    assert app.grade_bets()["graded"] == 0 and _row(db, b) == first

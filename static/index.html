@@ -166,10 +166,10 @@ table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk 
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["best","Best picks"],["today","Games"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
+const TABS=[["best","Best picks"],["today","Games"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My picks"],["players","Players"]];
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
 let tab="best";   // the app always opens on Best picks (the home tab)
-let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,oddsManual=false,snaps={},alerts=[],live={};
+let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,snaps={},alerts=[],live={};
 const hdr=()=>({"Content-Type":"application/json","X-User":localStorage.user||"","X-Code":localStorage.code||""});
 async function api(p,o={}){const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});
   if(r.status==401){showLogin("That access code isn't right. Try again.");throw"auth"}
@@ -192,7 +192,6 @@ const dayKey=s=>{const d=new Date(s),t=new Date(),tm=new Date(t.getTime()+864e5)
 const statName={pts:"PTS",reb:"REB",ast:"AST",fg3m:"3PM",stl:"STL",blk:"BLK",pra:"Pts+Reb+Ast",pr:"Pts+Reb",pa:"Pts+Ast",dd:"Double-double",td:"Triple-double"};
 const BK={sportsbet:"SB",tab:"TAB",ladbrokes_au:"LAD",ladbrokes:"LAD",neds:"NEDS",pointsbet_au:"PB",pointsbet:"PB",betfair_ex_au:"BF",unibet:"UNI",bet365_au:"B365",playup:"PLAY",betr_au:"BETR",boombet:"BOOM",dabble_au:"DAB",tabtouch:"TT"};
 const bk=b=>BK[b]||String(b||"").slice(0,4).toUpperCase();
-const money=x=>(x<0?"-":"")+"$"+Math.abs(x).toFixed(2);
 const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 
 function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
@@ -214,48 +213,35 @@ function addLeg(l,quiet){const i=legs.findIndex(x=>key(x)==key(l));
     legs=legs.filter(x=>grp(l.stat)?!(x.game_id==l.game_id&&grp(x.stat)==grp(l.stat)):!(x.game_id==l.game_id&&x.player_id==l.player_id&&x.stat==l.stat));
     legs.push(l);if(legs.length>6)legs.shift();
     const p=l.player_id&&findP(l.game_id,l.player_id);if(p)snaps[l.player_id]={starting:p.starting,injury:(p.injury&&p.injury.status)||null}}}
-function pickTeam(g,stat,side,line,price,book,prob,text,team,lo,hi){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob,team:team||undefined,lo:lo||undefined,hi:hi||undefined});oddsManual=false;calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
+function pickTeam(g,stat,side,line,price,book,prob,text,team,lo,hi){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob,team:team||undefined,lo:lo||undefined,hi:hi||undefined});calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
 function pick(g,pid,stat,line,price,book,prob,hit,n){const p=findP(g,pid);addLeg({game_id:g,player_id:pid,stat,line,side:"over",text:p?p.player:pid,price:price||null,book:book||null,p:prob,hit,n});
-  oddsManual=false;calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
+  calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
 function paintSel(){const on=new Set(legs.map(key));document.querySelectorAll(".od[data-k]").forEach(b=>b.classList.toggle("on",on.has(b.dataset.k)))}
-function estOdds(){return legs.length&&legs.every(l=>l.price)?legs.reduce((a,l)=>a*l.price,1):null}
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
-  const e=estOdds(),inp=$("#podds");let o=oddsManual&&inp&&inp.value!==""?parseFloat(inp.value):(e||null);
-  try{const r=await post("parlay",{legs:legs.map(({game_id,player_id,stat,line,side,team,lo,hi,price})=>({game_id,player_id,stat,line,side,team,lo,hi,price:price||undefined})),odds:o||null});calc={r,o:o||null};drawSlip()}catch(x){}},250)}
+  try{const r=await post("parlay",{legs:legsPayload()});calc={r};drawSlip()}catch(x){}},250)}
 const SLIPTABS=["today","best"];
 function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHTML="";return}
-  const fid=document.activeElement&&document.activeElement.id;
-  const keep=($("#podds")||{}).value,stake=($("#stake")||{}).value||"",note=($("#note")||{}).value||"";const r=calc&&calc.r,e=estOdds();
-  const oddsVal=oddsManual&&keep!==undefined&&keep!==""?keep:(e?e.toFixed(2):"");
+  const fid=document.activeElement&&document.activeElement.id,note=($("#note")||{}).value||"",r=calc&&calc.r;
   const mine=alerts.filter(a=>legs.some(l=>l.player_id==a.pid));
-  w.innerHTML=`<div class="slip ${slipMin?"min":""}"><h2 onclick="slipMin=!slipMin;drawSlip()"><span>Bet slip <span class="badge">${legs.length}</span></span><span class="mute" style="font-weight:400">${r&&legs.length?pct(r.joint)+" win chance · "+(slipMin?"tap to open":"tap to close"):""}</span></h2><div class="sb">
+  w.innerHTML=`<div class="slip ${slipMin?"min":""}"><h2 onclick="slipMin=!slipMin;drawSlip()"><span>Pick list <span class="badge">${legs.length}</span></span><span class="mute" style="font-weight:400">${r&&r.joint!=null&&legs.length?pct(r.joint)+" estimated chance · "+(slipMin?"tap to open":"tap to close"):""}</span></h2><div class="sb">
   ${mine.map(a=>`<div class="alert"><span>⚠ ${esc(a.msg)}</span><a onclick="alerts=alerts.filter(x=>x!==alerts[${alerts.indexOf(a)}]);drawSlip()">dismiss</a></div>`).join("")}
-  ${legs.length>1?`<div style="text-align:right;margin:2px 0 6px"><button class="btn" onclick="clearSlip()">Clear bet slip</button></div>`:""}
-  ${legs.length?legs.map((l,i)=>`<div class="lg"><div>${esc(l.text)}<small>${legDesc(l)}${l.price?` · ${l.price.toFixed(2)} ${bkName(l.book)}`:""}${r&&r.legs[i]?` · model ${pct(r.legs[i].p)}`:""}</small></div><a onclick="legs.splice(${i},1);calc=null;paintSel();drawSlip();recalc()">×</a></div>`).join(""):'<p class="mute">Tap any price to add a leg. Aim for 2–3 legs.</p>'}
+  ${legs.length>1?`<div style="text-align:right;margin:2px 0 6px"><button class="btn" onclick="clearSlip()">Clear picks</button></div>`:""}
+  ${legs.length?legs.map((l,i)=>`<div class="lg"><div>${esc(l.text)}<small>${legDesc(l)}${r&&r.legs[i]&&r.legs[i].p!=null?` · model ${pct(r.legs[i].p)}`:""}</small></div><a onclick="legs.splice(${i},1);calc=null;paintSel();drawSlip();recalc()">×</a></div>`).join(""):'<p class="mute">Choose player or team picks to see their chances and track the results.</p>'}
   ${legs.length&&r&&r.unsupported?`<div class="note" style="margin:10px 0"><b>No advice for this slip.</b> ${esc(r.explanation)}<br><span class="mute">Lines affected: ${r.level_legs.map(x=>esc(x.text||x.stat)+" "+legDesc(x)).join("; ")}</span></div>`:""}
-  ${legs.length&&!(r&&r.unsupported)?`<div style="margin:10px 0"><div class="mute">Chance all legs win</div><div class="big">${r?pct(r.joint):"…"}</div>
-   <div class="kv"><span class="mute">Fair odds</span><b>${r&&r.fair_odds?r.fair_odds.toFixed(2):"–"}</b></div>
-   ${r&&legs.length>1?`<div class="kv"><span class="mute">If legs were unrelated</span><span>${pct(r.independent)}</span></div>`:""}</div>
-   ${legs.length&&r&&r.unsupported?"":""}<label class="mute">Odds for this multi (decimal)${e&&!oddsManual?` — estimated from leg prices, check Sportsbet's real multi price`:""}</label><input class="inp" id="podds" type="number" step="0.01" min="1.01" placeholder="e.g. 3.60" value="${esc(oddsVal)}" oninput="oddsManual=true;recalc()" style="margin-top:4px">
+  ${legs.length&&!(r&&r.unsupported)?`<div style="margin:10px 0"><div class="mute">Estimated chance all picks are right</div><div class="big">${r?pct(r.joint):"…"}</div>
+   ${r&&legs.length>1?`<div class="kv"><span class="mute">If picks were unrelated</span><span>${pct(r.independent)}</span></div>`:""}</div>
    ${r&&r.points_warning?`<div class="note" style="margin:8px 0">${esc(r.points_warning)}</div>`:""}
-   ${r&&r.value?`<div class="edge ${r.value.edge>0?"g":"b"}"><b>${r.value.edge>0?"+":""}${(r.value.edge*100).toFixed(1)} pts edge</b> · EV ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)} per $1<br><span class="mute">${r.value.edge>0?"The model rates this higher than the price implies.":"The price is better than the model thinks. Consider skipping."}</span></div>`:""}
-   ${r&&r.warning?`<div class="note" style="margin:8px 0">${esc(r.warning)}</div>`:""}
-   <input class="inp" id="note" placeholder="Note for friends (optional)" style="margin:6px 0" value="${esc(note)}">
-   <div style="display:flex;gap:6px"><input class="inp" id="stake" type="number" placeholder="Stake $" style="width:95px" value="${esc(stake)}"><button class="btn" style="flex:1" onclick="share()">Share pick</button><button class="btn p" style="flex:1" onclick="logBet()">Log bet</button></div>
-   ${stakeGuide(r)}
-   <p class="mute" style="margin:8px 0 0">Model edges are small. Log bets to see how it really performs.</p>`:""}
+   ${r&&r.warning?`<div class="note" style="margin:8px 0">${esc(r.warning)}</div>`:""}`:""}
+  ${legs.length?`<input class="inp" id="note" placeholder="Note for friends (optional)" style="margin:6px 0" value="${esc(note)}">
+   <div style="display:flex;gap:6px"><button class="btn" style="flex:1" onclick="share()">Share pick</button><button class="btn p" style="flex:1" onclick="logBet()">Save pick</button></div>
+   <p class="mute" style="margin:8px 0 0">These are estimates. Save picks to see how often they are right.</p>`:""}
   </div></div>`;
   if(fid&&$("#"+fid)){const el=$("#"+fid);el.focus();try{el.setSelectionRange(el.value.length,el.value.length)}catch(x){}}}
-/* stake guide: never more than 1% of bankroll; with a positive edge, a quarter of the Kelly stake (capped at 2%) */
-const POINTS_STATS=["pts","pra","pr","pa"];
-function stakeGuide(r){if((typeof legs!=="undefined"?legs:[]).some(l=>POINTS_STATS.includes(l.stat))||(r&&r.no_advice))return "";let bank=0;try{bank=parseFloat(localStorage.bankroll)||0}catch(e){}
-  const o=calc&&calc.o,ev=r&&r.value,f=ev&&ev.edge>0&&o>1?Math.min(0.02,0.25*ev.edge/(o-1)):0.01,share=Math.max(0.0025,Math.min(f,0.01*(ev&&ev.edge>0?2:1)));
-  return `<div class="note" style="margin:8px 0"><b>Stake guide:</b> ${bank?`about $${(bank*share).toFixed(2)} (${(share*100).toFixed(1)}% of your $${bank} bankroll)`:`keep it to ${(share*100).toFixed(1)}% of your bankroll`}${ev&&ev.edge<=0?". The price is no better than the model's estimate, so consider skipping.":"."} Multis lose most of the time even with an edge, so only use money you can afford to lose.<br><label class="mute">Your betting bankroll $ <input class="inp" type="number" min="0" value="${bank||""}" style="width:90px;display:inline-block" onchange="try{localStorage.bankroll=this.value}catch(e){};drawSlip()"></label></div>`}
-function clearSlip(){legs=[];calc=null;oddsManual=false;paintSel();drawSlip()}
-const legsPayload=()=>legs.map(l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:l.side,team:l.team,lo:l.lo,hi:l.hi,text:l.text,price:l.price||undefined}));
-async function share(){if(!needName()||!calc)return;await post("picks",{legs:legsPayload(),note:$("#note").value,odds:calc.o,model_prob:calc.r.unsupported?undefined:calc.r.joint});legs=[];calc=null;go("picks")}
-async function logBet(){if(!needName())return;const s=parseFloat($("#stake").value);if(!s||!calc||!calc.o){alert("Enter the odds and your stake first");return}
-  await post("bets",{legs:legsPayload(),stake:s,odds:calc.o,model_prob:calc.r.unsupported?undefined:calc.r.joint});legs=[];calc=null;go("bets")}
+function clearSlip(){legs=[];calc=null;paintSel();drawSlip()}
+const legsPayload=()=>legs.map(l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:l.side,team:l.team,lo:l.lo,hi:l.hi,kind:l.kind,text:l.text,price:l.price||undefined}));
+async function share(){if(!needName()||!calc)return;await post("picks",{legs:legsPayload(),note:$("#note").value,model_prob:calc.r.unsupported?undefined:calc.r.joint});legs=[];calc=null;go("picks")}
+async function logBet(){if(!needName()||!calc)return;
+  await post("bets",{legs:legsPayload(),model_prob:calc.r.unsupported?undefined:calc.r.joint});legs=[];calc=null;go("bets")}
 
 /* ---------- live lineup/injury alerts ---------- */
 async function pollStatus(){if(!legs.length)return;try{live=await api("status")}catch(e){return}
@@ -389,8 +375,8 @@ function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.comb
    ${best.legs.length>c.legs.length?`<details><summary>More safe legs (${best.legs.length})</summary><div class="pillrow">${best.legs.map((l,i)=>`<button class="sl" onclick="addBestLeg(${i})"><b>${esc(l.player)}</b><small>Over ${l.line} ${statName[l.stat]} · ${pct(l.p)} · ${l.hit}/${l.n}</small></button>`).join("")}</div></details>`:""}
    <details><summary>How are these picked?</summary><p class="mute">The model looks for legs it rates between about 62% and 86% likely, where the player also cleared that line in at least 7 of the last 10 games. It takes the highest such line (best payout), then combines legs from different players and games until the fair odds reach about 2.0 or there are 3 legs.</p></details></div>`}
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
-function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));oddsManual=false;calc=null;slipMin=false;paintSel();drawSlip();recalc()}
-function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);oddsManual=false;calc=null;slipMin=false;paintSel();drawSlip();recalc()}
+function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;slipMin=false;paintSel();drawSlip();recalc()}
+function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 async function today(a){await loadSlate();
   if(!slate.length){a.innerHTML=(meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. The numbers will appear in a few minutes.</div>`:"")+'<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
   const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
@@ -434,7 +420,7 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
      <div class="card"><h2>What this tells us</h2><p style="margin:0">${verdict}</p>
       ${t.calibration.length?`<table class="t" style="margin-top:8px"><tr><th style="text-align:left">When the model said</th><th>Picks</th><th>Hit</th></tr>${t.calibration.map(b=>`<tr><td style="text-align:left">${pc0(b.lo)}–${pc0(b.hi)} (avg ${pc0(b.predicted)})</td><td>${b.n}</td><td>${pc0(b.actual)}</td></tr>`).join("")}</table>`:""}
       ${Object.keys(t.by_stat).length?`<h3>By market</h3><div class="pillrow" style="flex-wrap:wrap">${Object.entries(t.by_stat).map(([k,v])=>`<span class="pill">${statName[k]||k}: ${v.won}/${v.n}</span>`).join("")}</div>`:""}
-      ${V.n?`<h3>Value bets</h3><p class="mute" style="margin:0">${V.won} of ${V.n} won (model expected ${pc0(V.avg_p)})${t.value_roi!=null?` · return on flat stakes ${(t.value_roi*100>=0?"+":"")+(t.value_roi*100).toFixed(0)}%`:""}</p>`:""}
+      ${V.n?`<h3>Value bets</h3><p class="mute" style="margin:0">${V.won} of ${V.n} won (model expected ${pc0(V.avg_p)})</p>`:""}
       ${t.closing&&t.closing.n?`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">On ${t.closing.n} value picks the price we showed was ${t.closing.avg_clv>=0?"better":"worse"} than the last price seen before tip-off by ${Math.abs(t.closing.avg_clv*100).toFixed(1)}% on average, and better on ${pc0(t.closing.share_beat)} of them. Consistently beating the closing price over hundreds of picks is the best sign of a real edge; wins and losses alone prove little. (Our last price check was on average ${Math.round(t.closing.avg_mins_before_tip)} min before tip-off.)</p>`:`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">Collecting data: bookmaker prices are now saved every time they are fetched, and compared with each pick once its game has started.</p>`}
       ${t.earlier_versions&&(t.earlier_versions.legs.n||t.earlier_versions.value.n)?`<p class="mute" style="margin:8px 0 0">Picks made by earlier versions of the model (${t.earlier_versions.legs.n+t.earlier_versions.value.n} graded) are kept but not counted above, because they came from a different model.</p>`:""}
       <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></div>
@@ -449,33 +435,27 @@ async function picks(a){const ps=await api("picks");
    <div class="mute" style="margin:6px 0">${p.odds?`Odds ${esc(p.odds)} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
    <button class="btn" onclick="vote(${p.id},1)">👍</button> <button class="btn" onclick="vote(${p.id},-1)">👎</button> <b>${p.score}</b> <span class="mute">(${p.voters} votes)</span>
    ${p.comments.map(c=>`<div class="mute" style="margin-top:4px"><b style="color:var(--ink)">${esc(c.user)}:</b> ${esc(c.body)}</div>`).join("")}
-   <div style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="c${p.id}" placeholder="Comment"><button class="btn" onclick="cmt(${p.id})">Post</button></div></div>`).join(""):'<div class="card empty">Nothing shared yet.<br>On the Games tab, tap prices to build a bet slip, then press “Share pick”.</div>'}
+   <div style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="c${p.id}" placeholder="Comment"><button class="btn" onclick="cmt(${p.id})">Post</button></div></div>`).join(""):'<div class="card empty">Nothing shared yet.<br>On the Games tab, choose picks, then press “Share pick”.</div>'}
 async function vote(id,v){if(!needName())return;await post(`picks/${id}/vote`,{v});render()}
 async function cmt(id){if(!needName())return;const b=$("#c"+id).value.trim();if(b){await post(`picks/${id}/comment`,{body:b});render()}}
 
-/* ---------- my bets (simple) ---------- */
+/* ---------- personal pick results ---------- */
 const legLine=l=>`${esc(l.text||"")} – ${legDesc(l)}`;
-async function bets(a){const s=await api("scorecard"),m=s.model.stats,me=localStorage.user;
+async function bets(a){const s=await api("scorecard"),me=localStorage.user;
   const mine=s.bets.filter(b=>b.user==me),open=mine.filter(b=>b.result=="open"),done=mine.filter(b=>b.result!="open");
-  const u=s.users.find(x=>x.user==me)||{settled:0,wins:0,profit:0};
-  a.innerHTML=`<div class="note">This page tracks real bets so you can see, over time, whether the picks actually make money. To add a bet, build a slip on the <a href="#" onclick="go('today');return false" style="color:var(--gold)">Games</a> tab, type the odds and your stake, and press “Log bet”.</div>
-  <div class="tiles"><div class="tile"><div class="v">${mine.length}</div><div class="k">Bets logged</div></div><div class="tile"><div class="v ${u.profit>0?"good":u.profit<0?"bad":""}">${money(u.profit||0)}</div><div class="k">Profit / loss</div></div><div class="tile"><div class="v">${u.settled?pct(u.wins/u.settled):"–"}</div><div class="k">Bets won</div></div></div>
-  ${open.filter(b=>b.needs_amount).length?`<div class="card"><h2>Tell us what Sportsbet paid back</h2><p class="mute" style="margin:0 0 6px">These bets have a part that finished exactly level or was cancelled. The app does not guess what Sportsbet returned: type the amount from your Sportsbet account (type 0 if nothing came back).</p>${open.filter(b=>b.needs_amount).map(b=>{const l=JSON.parse(b.legs),lr=b.leg_results?JSON.parse(b.leg_results):[];return `<div class="bet">${l.map((x,i)=>`<div>${lr[i]=="push"?"= ":lr[i]=="void"?"↩ ":lr[i]=="won"?"✔ ":lr[i]=="lost"?"✖ ":""}${legLine(x)}${lr[i]=="push"?' <span class="mute">(finished level)</span>':lr[i]=="void"?' <span class="mute">(did not play)</span>':""}</div>`).join("")}<div class="mute">Stake $${b.stake} at odds ${b.odds}</div><div style="display:flex;gap:6px;margin-top:6px"><input class="inp" id="ret${b.id}" type="number" min="0" step="0.01" placeholder="Money Sportsbet returned $" style="flex:1"><button class="btn p" onclick="sendReturned(${b.id})">Save</button></div></div>`}).join("")}</div>`:""}
-  ${open.filter(b=>!b.needs_amount).length?`<div class="card"><h2>Waiting for the games to finish</h2>${open.filter(b=>!b.needs_amount).map(b=>{const l=JSON.parse(b.legs);return `<div class="bet">${l.map(x=>`<div>${legLine(x)}</div>`).join("")}<div class="mute" style="margin:4px 0 8px">$${b.stake} at odds ${b.odds}${b.model_prob!=null?` · model chance ${pct(b.model_prob)}`:""}</div><div class="mute">Marked automatically once the games finish. <a href="#" style="color:var(--acc)" onclick="manualMark(${b.id});return false">Mark it myself</a></div></div>`}).join("")}</div>`:""}
-  <div class="card"><h2>Leaderboard</h2>${s.users.length?`<table class="t"><tr><th>#</th><th style="text-align:left">Name</th><th>Profit</th><th>Won</th><th>Bets</th></tr>${s.users.map((x,i)=>`<tr><td>${i+1}</td><td style="text-align:left">${esc(x.user)}</td><td class="${x.profit>0?"good":x.profit<0?"bad":""}">${money(x.profit)}</td><td>${x.settled?pct(x.wins/x.settled):"–"}</td><td>${x.bets}</td></tr>`).join("")}</table>
-   <details><summary>Safe picks vs risky picks</summary><p class="mute">Average model chance of each person's bets. A higher number means safer, more likely picks; a lower number means longer shots.</p><table class="t"><tr><th style="text-align:left">Name</th><th>Avg model chance</th></tr>${s.users.map(x=>`<tr><td style="text-align:left">${esc(x.user)}</td><td>${pct(x.avg_model_prob)}</td></tr>`).join("")}</table></details>`:'<p class="mute">Nobody has logged a bet yet.</p>'}</div>
-  ${done.length?`<div class="card"><h2>Past bets</h2>${done.map(b=>{const l=JSON.parse(b.legs),lr=b.leg_results?JSON.parse(b.leg_results):[],ic={won:"✔",lost:"✖",push:"↩",void:"↩"};return `<div class="bet">${l.map((x,i)=>`<div>${lr[i]?ic[lr[i]]+" ":""}${legLine(x)}${lr[i]=="push"?' <span class="mute">(tie on the line: refunded)</span>':lr[i]=="void"?' <span class="mute">(did not play: cancelled)</span>':""}</div>`).join("")}<div class="mute">$${b.stake} at ${b.odds} · <b class="${b.result=="won"?"good":b.result=="lost"?"bad":""}">${b.returned_amount!=null?(b.returned_amount>b.stake?"Won ":b.returned_amount<b.stake?"Lost ":"Stake returned ")+money(b.returned_amount-b.stake):b.result=="won"?"Won "+money(b.stake*b.odds-b.stake):b.result=="lost"?"Lost "+money(b.stake):"Refunded"}</b> <span class="mute">${b.returned_amount!=null?"Sportsbet returned $"+b.returned_amount+" (you entered this)":b.manual?"marked by you":"marked automatically"}</span> <a href="#" style="color:var(--acc)" onclick="res(${b.id},'open');return false">${b.manual?"let the app mark it":"re-check"}</a> · <a href="#" style="color:var(--acc)" onclick="manualMark(${b.id});return false">change</a>${b.settle_note?`<div class="note" style="margin-top:4px">${esc(b.settle_note)}</div>`:""}</div></div>`}).join("")}</div>`:""}
-  <div class="card"><h2>How good is the model?</h2><p>It beats a plain recent average by a small amount, which is normal for sports. Single games are very random, so don't expect it to be right every time. The real test is the leaderboard above, over many bets.</p>
-   <details><summary>See the numbers</summary>
-   <p class="mute">Test: the model learned from games before ${s.model.cut}, then predicted ${s.model.n_test.toLocaleString()} later games it had not seen. “Off by” is the average miss (lower is better).</p>
-   <table class="t"><tr><th style="text-align:left"></th><th>Model is off by</th><th>Plain 10-game average is off by</th></tr>${["pts","reb","ast"].map(k=>`<tr><td style="text-align:left">${{pts:"Points",reb:"Rebounds",ast:"Assists"}[k]}</td><td>${m[k].mae_model.toFixed(1)}</td><td>${m[k].mae_10game_avg.toFixed(1)}</td></tr>`).join("")}</table>
-   ${["dd","td"].map(k=>`<h3>${k=="dd"?"Double-doubles":"Triple-doubles"}: when the model said…</h3><table class="t"><tr><th style="text-align:left">It said</th><th>Games</th><th>It happened</th></tr>${m[k].calibration.map(c=>`<tr><td style="text-align:left">about ${pct(c.pred)}</td><td>${c.n}</td><td>${pct(c.actual)}</td></tr>`).join("")}</table>`).join("")}
-   ${s.model.absence?`<h3>Teammates out: does it help?</h3><p class="mute">On ${s.model.absence.n_high.toLocaleString()} test games where 15+ points per game of teammates were missing, a version without absence information under-predicted points by ${s.model.absence.pts.bias_without.toFixed(1)} on average; with it, the miss is ${s.model.absence.pts.bias_with.toFixed(1)}. Overall points error moved from ${s.model.absence.pts.mae_without.toFixed(2)} to ${s.model.absence.pts.mae_with.toFixed(2)}. Rebounds and assists barely changed (${s.model.absence.reb.mae_without.toFixed(2)} → ${s.model.absence.reb.mae_with.toFixed(2)} and ${s.model.absence.ast.mae_without.toFixed(2)} → ${s.model.absence.ast.mae_with.toFixed(2)}). So the effect is real but modest.</p>`:""}
-   ${s.model.team&&s.model.team.market?`<h3>Whole-game predictions</h3><p class="mute">On ${s.model.team.market.n} games the model had not seen: the betting market's margin was off by ${s.model.team.market.margin_mae.toFixed(1)} points vs ${s.model.team.market.margin_mae_elo.toFixed(1)} for our own team-rating model, and its total points by ${s.model.team.market.total_mae.toFixed(1)} vs ${s.model.team.market.total_mae_form.toFixed(1)}. The market also picked winners better. So match winner, handicap and total lines are built on the market, and we do not claim an edge on them; we only flag where Sportsbet's price is out of line with it.</p>`:""}
-   <p class="mute">If “it said” and “it happened” are close, the model's percentages can be trusted. Triple-doubles are rare, so those rows are less certain.</p></details></div>`}
+  const u=s.users.find(x=>x.user==me)||{bets:0,settled:0,wins:0,losses:0};
+  const card=b=>{const ls=JSON.parse(b.legs),label=b.result=="won"?"Won":b.result=="lost"?"Lost":b.result=="open"?"Waiting for the games":"Not counted";
+    return `<div class="bet">${ls.map(l=>`<div>${legLine(l)}</div>`).join("")}<div class="mute" style="margin:6px 0">${esc(new Date(b.created).toLocaleString())}${b.model_prob!=null?` · estimated chance ${pct(b.model_prob)}`:""}</div>
+      <b class="${b.result=="won"?"good":b.result=="lost"?"bad":""}">${label}</b> <span class="mute">${b.manual?"marked by you":b.result=="open"?"marked when the games finish":"from the game results"}</span>
+      ${!["won","lost","open"].includes(b.result)?'<div class="mute">A tied result or a player who did not play stays out of the win/loss count.</div>':""}
+      <div style="display:flex;gap:6px;margin-top:8px"><button class="btn" onclick="res(${b.id},'won')">Mark won</button><button class="btn" onclick="res(${b.id},'lost')">Mark lost</button>${b.manual?`<button class="btn" onclick="res(${b.id},'open')">Use game results</button>`:""}</div></div>`};
+  a.innerHTML=`<div class="note">Save a pick from Games or Best picks. This page shows whether it was right. Only completed picks with a clear result count.</div>
+    <div class="tiles"><div class="tile"><div class="v">${u.bets}</div><div class="k">Picks saved</div></div><div class="tile"><div class="v">${u.wins}</div><div class="k">Won</div></div><div class="tile"><div class="v">${u.losses}</div><div class="k">Lost</div></div></div>
+    ${open.length?`<div class="card"><h2>Waiting for the games</h2>${open.map(card).join("")}</div>`:""}
+    <div class="card"><h2>Pick results</h2>${s.users.length?`<table class="t"><tr><th style="text-align:left">Name</th><th>Won</th><th>Lost</th><th>Right</th></tr>${s.users.map(x=>`<tr><td style="text-align:left">${esc(x.user)}</td><td>${x.wins}</td><td>${x.losses}</td><td>${x.settled?pct(x.hit_rate):"–"}</td></tr>`).join("")}</table><p class="mute">Counted picks only. Results marked by hand are included.</p>`:'<p class="mute">Nobody has saved a pick yet.</p>'}</div>
+    ${done.length?`<div class="card"><h2>Past picks</h2>${done.map(card).join("")}</div>`:""}
+    ${!mine.length?'<div class="card empty">Your saved picks will appear here.</div>':""}`}
 async function res(id,r){await post(`bets/${id}/result`,{result:r});render()}
-async function sendReturned(id){const v=parseFloat((document.getElementById("ret"+id)||{}).value);if(!(v>=0)){alert("Type the amount Sportsbet returned (0 if nothing)");return}await post(`bets/${id}/returned`,{amount:v});render()}
-function manualMark(id){const r=prompt("Type won, lost or refunded to mark this bet yourself (for example after a cash-out):");const m={won:"won",lost:"lost",refunded:"void",void:"void"}[(r||"").trim().toLowerCase()];if(m)res(id,m)}
 
 /* ---------- players ---------- */
 let pstat="pts",pline={},pdata=null;
@@ -551,7 +531,7 @@ function playerLegProgress(l,r){
     if(!Number.isFinite(line)||parts.some(k=>!Number.isFinite(r[k])))return null;
     const nm=statName[l.stat]||l.stat;cur=parts.reduce((sum,k)=>sum+r[k],0);tgt=atleast?line:under?Math.ceil(line)-1:Math.floor(line)+1;
     hit=atleast?cur>=line:under?cur<line:cur>line;level=!atleast&&Number.isInteger(line)&&cur===line;
-    if(level)txt=`${cur} ${nm} – exactly on the line (level); Sportsbet decides what is paid`;
+    if(level)txt=`${cur} ${nm} – exactly on the line (level); not counted`;
     else if(atleast)txt=hit?`${cur} ${nm} – ${line} or more reached`:`${cur} ${nm} – needs ${line-cur} more`;
     else if(under)txt=hit?`${cur} ${nm} – under the line so far; it must stay under`:`${cur} ${nm} – already over the line, this under has lost`;
     else txt=hit?`${cur} ${nm} – cleared`:`${cur} ${nm} – needs ${tgt-cur} more`;
@@ -570,7 +550,7 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${verdict}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div></div>`}
 function myHTML(){const blocks=[];
   if(legs.length)blocks.push(`<div class="card"><h2>Your bet slip</h2>${legs.map(legProg).join("")}</div>`);
-  myOpen.forEach(b=>{const l=JSON.parse(b.legs);blocks.push(`<div class="card"><h2>Your bet · $${b.stake} at ${b.odds}</h2>${l.map(legProg).join("")}</div>`)});
+  myOpen.forEach(b=>{const l=JSON.parse(b.legs);blocks.push(`<div class="card"><h2>Your pick</h2>${l.map(legProg).join("")}</div>`)});
   return blocks.length?`<h3 style="margin-top:0">Your bets in play</h3>${blocks.join("")}`:""}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;

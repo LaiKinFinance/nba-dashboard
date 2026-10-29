@@ -1,14 +1,14 @@
 """Bets that could finish level.
 
-A whole-number line (over/under 20, handicap -4, total 220) can finish exactly on the line. Sportsbet then usually refunds that bet, but the
-app does NOT work out chances, fair prices, value or stake advice for those lines; it says so instead.
+A whole-number line (over/under 20, handicap -4, total 220) can finish exactly on the line.
+The app leaves those lines out of its advice rather than inventing a win or loss.
 
 Half-point lines (over 20.5) cannot finish level, and "20 or more" ("at least 20") cannot either: it wins on 20 and loses on 19.
 These are different from "over 20", which is a level-possible bet."""
 
 PLAYER_STATS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa")
-EXPLANATION = ("This line is a whole number, so the result can finish exactly level. Sportsbet usually refunds a level bet, and this app "
-               "does not work out chances, value or stake advice for it. Choose a half-point line (such as 20.5) or a \"20 or more\" bet to see numbers.")
+EXPLANATION = ("This whole-number line can finish exactly level, so this app does not give advice for it. "
+               "Choose a half-point line (such as 20.5) or a \"20 or more\" pick to see an estimated chance.")
 
 def is_whole(x):
     return float(x).is_integer()

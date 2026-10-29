@@ -25,7 +25,7 @@ def post(client, legs, **body): return client.post("/api/parlay", json=dict(legs
                                   [leg("dd", 0)], [leg("reb", 6.5), team("ml")]])
 def test_ordinary_bets_get_chances_and_value(client, legs):
     r = post(client, legs, odds=3.0)
-    assert not r.get("unsupported") and 0 < r["joint"] < 1 and r["fair_odds"] and (r["value"] is not None) and "explanation" not in r
+    assert not r.get("unsupported") and 0 < r["joint"] < 1 and r["fair_odds"] and r["value"] is None and "explanation" not in r
 
 # ---- level-possible bets get an explanation instead of numbers -------------------------------------------------------------------------------------
 LEVEL = [leg("reb", 6), leg("reb", 6, "under"), leg("pra", 30), leg("pr", 20), leg("pa", 20), leg("fg3m", 2), leg("stl", 1), leg("blk", 1.0),
@@ -58,7 +58,7 @@ def test_over_twenty_is_a_different_bet_and_is_not_calculated(client):
     assert post(client, [leg("pts", 20, kind="atleast")])["leg_probs"][0] > post(client, [leg("pts", 20.5)])["leg_probs"][0]     # 20+ is easier than over 20.5
 
 def test_twenty_or_more_inside_a_combined_bet(client):
-    r = post(client, [leg("reb", 7, kind="atleast"), leg("ast", 4.5)], odds=3.0); assert not r.get("unsupported") and r["value"]["ev"] is not None
+    r = post(client, [leg("reb", 7, kind="atleast"), leg("ast", 4.5)], odds=3.0); assert not r.get("unsupported") and 0 < r["joint"] < 1 and r["value"] is None
 
 @pytest.mark.parametrize("bad", [leg("pts", 20.5, kind="atleast"), leg("pts", 20, "under", kind="atleast"), leg("dd", 0, kind="atleast"), leg("pts", 0, kind="atleast")])
 def test_badly_formed_or_more_bets_are_refused(client, bad):
