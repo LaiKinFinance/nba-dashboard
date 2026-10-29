@@ -197,6 +197,15 @@ def load_lines(con):
     return out
 
 
+def fetch_times(con):
+    """{game_id: ISO time a real player price was last stored}. The page uses this to re-check price age as time passes."""
+    try: return {g: t for g, t in con.execute("SELECT game_id, max(fetched_at) FROM book_odds GROUP BY game_id").fetchall() if t}
+    except sqlite3.OperationalError: return {}
+
+def line_times(con):
+    try: return {g: t for g, t in con.execute("SELECT game_id, max(fetched_at) FROM book_lines GROUP BY game_id").fetchall() if t}
+    except sqlite3.OperationalError: return {}
+
 def fetch_ages(con):
     """{game_id: hours since a real price was last stored for it}. Taken from the stored prices themselves, so a fetch that
     came back empty (old prices kept) does not make them look fresh."""

@@ -190,7 +190,9 @@ async def limits(request: Request, call_next):
         while q and now - q[0] > RATE[1]: q.popleft()
         if len(q) >= RATE[0]: return JSONResponse({"detail": "Too many requests, slow down"}, status_code=429)
         q.append(now)
-    return await call_next(request)
+    resp = await call_next(request)
+    if request.url.path.startswith("/api/"): resp.headers["Cache-Control"] = "no-store"        # a browser must never reuse an old answer
+    return resp
 
 app.add_middleware(BodyLimit, limit=MAX_BODY)
 app.add_middleware(GZipMiddleware, minimum_size=1000)      # the page and the slate are large text: sending them compressed is several times smaller
@@ -304,13 +306,10 @@ def guarded_projections():
 _enr = dict(key=None, val=None, at=0.0); _enr_lock = threading.Lock()
 
 def _enriched_key():
-    """Cheap fingerprint of everything enriched() depends on: projections, prices, the saved model, and the current minute (game start times)."""
-    with closing(con()) as c:
-        q = lambda sql: _safe(lambda: c.execute(sql).fetchone()[0])
-        parts = (q("SELECT max(made_at) FROM projections"), q("SELECT max(fetched_at) FROM book_odds"), q("SELECT max(fetched_at) FROM book_lines"))
-    try: mt = os.path.getmtime(predict.MODELS)
-    except OSError: mt = None
-    return (parts, mt, int(time.time() // 60))
+    """Fingerprint of everything enriched() depends on. Any write to the database (new box scores, projections, prices, lineups) changes the
+    file's stamp, as does a new saved model; and the current minute is included so price ages and 'game has started' are re-checked as time passes."""
+    st = lambda f: (lambda x: (x.st_mtime_ns, x.st_size))(os.stat(f)) if os.path.exists(f) else None
+    return (st(DB), st(DB + "-wal"), st(predict.MODELS), int(time.time() // 60))
 
 def enriched():
     """Same as _enriched_build(), but computed once per change of data (or per minute) and shared, because every tab asks for it.
@@ -332,7 +331,7 @@ def _enriched_build():
             for r in c.execute(f"SELECT player_id,date,opp,home,min,pts,reb,ast,fg3m,stl,blk FROM player_games WHERE player_id IN ({q}) ORDER BY date DESC", ids):
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
-        book = odds.load(c); ages = odds.fetch_ages(c)
+        book = odds.load(c); ages = odds.fetch_ages(c); times = odds.fetch_times(c)
     # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
     hist = {}
     if ids:
@@ -355,7 +354,7 @@ def _enriched_build():
             for l in p["ladders"][s]: l["hit"] = sum(1 for r in l10 if r[s] > l["line"]); l["n"] = n
         p["dd_hit"] = dict(k=sum(_dd(r) for r in l10), n=n); p["td_hit"] = dict(k=h["td"], n=h["games"])
         b = book.get((p["game_id"], p["player_id"]), {}); p["book"] = {}; p["strip"] = {}
-        p["odds_age_h"] = ages.get(p["game_id"])
+        p["odds_age_h"] = ages.get(p["game_id"]); p["odds_at"] = times.get(p["game_id"])
         for s in STRIPS:
             combo = s in COMBO_PARTS
             mu = None if combo else p["proj"].get(s)
@@ -437,12 +436,12 @@ def _alt(sides, side):
     cur, best = sides.get(side), sides.get(side + "_best")
     return [best[0], best[1]] if cur and best and best[1] != cur[1] and best[0] >= cur[0] * 1.03 else None
 
-def match_payload(gp, bl, age_h=None):
+def match_payload(gp, bl, age_h=None, prices_at=None):
     """Market-based prices for winner/handicap/total/team totals/margin bands, with bookmaker prices merged in where the Odds API supplied them."""
     if not gp: return None
     m = {k: gp[k] for k in ("home", "away", "margin", "total", "home_pts", "away_pts", "p_home", "p_away", "handicaps", "totals", "team_totals", "bands") if k in gp}
     m["source"] = gp.get("source", "model")
-    m["price_age_h"] = age_h; m["stale_prices"] = is_stale(age_h)      # winner/handicap/total prices: shown with their age, never as VALUE once old
+    m["price_age_h"] = age_h; m["prices_at"] = prices_at; m["stale_prices"] = is_stale(age_h)      # winner/handicap/total prices: shown with their age, never as VALUE once old
     bl = bl or {}
     h2 = bl.get("h2h", {}); m["book_h2h"] = {s: list(h2[s]) for s in ("home", "away") if s in h2}
     m["alt_h2h"] = {s: _alt(h2, s) for s in ("home", "away") if _alt(h2, s)}
@@ -477,11 +476,11 @@ def get_slate(x_code: str = Header("")):
     check(x_code)
     import odds
     games = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
-    with with_c as c: bl = odds.load_lines(c); lage = odds.line_ages(c)
+    with with_c as c: bl = odds.load_lines(c); lage = odds.line_ages(c); ltime = odds.line_times(c)
     for p in enriched():
         g = games.get(p["game_id"])
         if g is None:      # build each game's block once (it used to be rebuilt for every player, 78 times instead of 13)
-            g = games[p["game_id"]] = dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"])),
+            g = games[p["game_id"]] = dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"]), ltime.get(p["game_id"])),
                                            insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"]))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
