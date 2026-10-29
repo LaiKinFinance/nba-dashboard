@@ -44,7 +44,10 @@ def train(report=True):
     corr = residual_corr(full, m_eval, alphas)
     m = fit(full); alphas = {t: dispersion(m[t], full[feats_for(t)], full[t]) for t in ALL}
     from model import evaluate
-    pickle.dump(dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report())), open(MODELS, "wb"))
+    bundle = dict(models=m, alphas=alphas, corr=corr, trained_through=str(full.date.max()), report=dict(evaluate(full), team=_team_report()))
+    tmp = MODELS + ".tmp"                                   # write beside the live file, then swap: a crash never leaves a half-written model
+    with open(tmp, "wb") as f: pickle.dump(bundle, f)
+    os.replace(tmp, MODELS)
     return m, alphas, corr
 
 def load_models():
