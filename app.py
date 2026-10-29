@@ -292,7 +292,7 @@ def enriched():
                 if po is None: continue
                 price, bk = sides["over"]; best = sides.get("over_best"); alt = None
                 if best and best[1] != bk and best[0] >= price * 1.03: alt = [best[0], best[1]]
-                bl[line] = dict(line=line, price=price, book=bk, p_over=po, edge=po - 1 / price, hit=sum(1 for r in l10 if val(r) > line), n=n,
+                bl[line] = dict(line=line, price=price, book=bk, p_over=po, edge=(None if _whole(line) else po - 1 / price), refund=_whole(line), hit=sum(1 for r in l10 if val(r) > line), n=n,
                                 under=(sides.get("under") or [None])[0], alt=alt)
             if bl: p["book"][s] = list(bl.values())
             lines = {}
@@ -317,7 +317,8 @@ def enriched():
                                   fade=(lines[L] - float(nb_over(pb, alphas[s], L))) if pb is not None else 0.0,
                                   price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
                                   alt=(bl[L]["alt"] if L in bl else None),
-                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl else None)) for L in ordered]
+                                  refund=(L in bl and bl[L].get("refund", False)),
+                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl and not _whole(L) else None)) for L in ordered]
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
@@ -366,6 +367,9 @@ def match_payload(gp, bl, age_h=None):
     for line, sides in (bl.get("spread") or {}).items():
         e = hand.setdefault(line, dict(line=line, p_home=float(stats_norm_cdf((gp["margin"] + line) / gp["sigma_margin"]))))
         e["p_away"] = 1 - e["p_home"]
+        if _whole(line):                      # a tie refunds: split the chance honestly and make no VALUE claim
+            w, pu = team_leg_outcome(dict(stat="spread", line=line, side="home"), gp)[0], team_leg_outcome(dict(stat="spread", line=line, side="home"), gp)[1]
+            e["p_home"], e["p_away"], e["push"], e["refund"] = w, 1 - w - pu, pu, True
         for s in ("home", "away"):
             if s in sides: e[f"price_{s}"] = sides[s][0]; e[f"book_{s}"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
     m["handicaps"] = [hand[k] for k in sorted(hand)]
@@ -373,6 +377,9 @@ def match_payload(gp, bl, age_h=None):
     for line, sides in (bl.get("total") or {}).items():
         e = tot.setdefault(line, dict(line=line, p_over=float(stats_norm_cdf((gp["total"] - line) / gp["sigma_total"]))))
         e["p_under"] = 1 - e["p_over"]
+        if _whole(line):
+            w, pu = team_leg_outcome(dict(stat="total", line=line, side="over"), gp)
+            e["p_over"], e["p_under"], e["push"], e["refund"] = w, 1 - w - pu, pu, True
         for s in ("over", "under"):
             if s in sides: e[f"price_{s}"] = sides[s][0]; e[f"book_{s}"] = sides[s][1]; e[f"alt_{s}"] = _alt(sides, s)
     m["totals"] = [tot[k] for k in sorted(tot)]
@@ -558,7 +565,7 @@ def compute_value():
         if is_stale(p.get("odds_age_h")): continue      # an old price is not a reliable "value"
         for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
             for l in p["strip"].get(s, []):
-                if not l["price"]: continue
+                if not l["price"] or l.get("refund"): continue       # whole-number lines can refund: no value claim without the refund rules
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
                 if edge < min_edge(p) or l["n"] < 5: continue
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
@@ -734,19 +741,34 @@ TEAM_STATS = ("ml", "spread", "total", "tt", "band")
 PLAYER_STATS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa", "dd", "td")
 SIDE_GROUP, TOTAL_GROUP = ("ml", "spread", "band"), ("total", "tt")
 
-def team_leg_prob(l, gp):
-    k = l["stat"]
-    if k == "ml": return gp["p_home"] if l["side"] == "home" else gp["p_away"]
+def _whole(x):
+    return float(x).is_integer()
+
+def team_leg_outcome(l, gp):
+    """(chance to win, chance of a tie that refunds the stake) for a team bet. Scores are whole numbers, so a whole-number line can tie;
+    the smooth bell curve is adjusted by half a point on each side to price that properly."""
+    k = l["stat"]; Phi = stats_norm_cdf
+    if k == "ml": return (gp["p_home"] if l["side"] == "home" else gp["p_away"]), 0.0
     if k == "spread":
-        q = float(stats_norm_cdf((gp["margin"] + l["line"]) / gp["sigma_margin"])); return q if l["side"] == "home" else 1 - q
-    if k == "total":
-        q = float(stats_norm_cdf((gp["total"] - l["line"]) / gp["sigma_total"])); return q if l["side"] == "over" else 1 - q
-    if k == "tt":
-        mu = gp["home_pts"] if l["team"] == "home" else gp["away_pts"]; sg = float(np.sqrt((gp["sigma_total"] ** 2 + gp["sigma_margin"] ** 2) / 4))
-        q = float(1 - stats_norm_cdf((l["line"] - mu) / sg)); return q if l["side"] == "over" else 1 - q
+        mu, sg, L = gp["margin"], gp["sigma_margin"], l["line"]          # home covers when margin + L > 0
+        if _whole(L):
+            win_home = float(Phi((mu + L - 0.5) / sg)); push = float(Phi((mu + L + 0.5) / sg) - Phi((mu + L - 0.5) / sg))
+            return (win_home if l["side"] == "home" else 1 - win_home - push), push
+        q = float(Phi((mu + L) / sg)); return (q if l["side"] == "home" else 1 - q), 0.0
+    if k in ("total", "tt"):
+        if k == "total": mu, sg = gp["total"], gp["sigma_total"]
+        else: mu = gp["home_pts"] if l["team"] == "home" else gp["away_pts"]; sg = float(np.sqrt((gp["sigma_total"] ** 2 + gp["sigma_margin"] ** 2) / 4))
+        L = l["line"]
+        if _whole(L):
+            over = float(1 - Phi((L + 0.5 - mu) / sg)); push = float(Phi((L + 0.5 - mu) / sg) - Phi((L - 0.5 - mu) / sg))
+            return (over if l["side"] == "over" else 1 - over - push), push
+        q = float(1 - Phi((L - mu) / sg)); return (q if l["side"] == "over" else 1 - q), 0.0
     b = next((x for x in gp["bands"] if x["team"] == l["team"] and x["lo"] == l["lo"] and x["hi"] == l.get("hi")), None)
     if not b: raise HTTPException(400, "Unknown margin band")
-    return float(b["p"])
+    return float(b["p"]), 0.0
+
+def team_leg_prob(l, gp):
+    return team_leg_outcome(l, gp)[0]
 
 @app.post("/api/parlay")
 def parlay_calc(body: ParlayInput, x_code: str = Header("")):
@@ -766,17 +788,30 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     tot_games = [l["game_id"] for l in tm_legs if l["stat"] in TOTAL_GROUP]
     if len(tot_games) != len(set(tot_games)): raise HTTPException(400, "Pick only one game total or team total per game")
     b = require_current_model(list(preds.values()))
-    rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
-    tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
+    tout = [team_leg_outcome(l, gps[l["game_id"]]) for l in tm_legs]
+    tp = [o[0] for o in tout]
+    pl_prices = [l.get("price") for l in pl_legs]
+    rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], prices=pl_prices, team_extra=[(o[0], o[1], l.get("price")) for o, l in zip(tout, tm_legs)]) \
+        if pl_legs else dict(leg_probs=[], push_probs=[], independent=1.0, joint=1.0)
     pi, ti = iter(rp["leg_probs"]), iter(tp)
+    pui, tui = iter(rp.get("push_probs", [])), iter(o[1] for o in tout)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
+    pushes = [next(tui) if l["stat"] in TEAM_STATS else next(pui) for l in legs]
     joint = rp["joint"] * float(np.prod(tp) if tp else 1.0); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
-    r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None))
+    r = dict(leg_probs=probs, push_probs=pushes, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None))
     mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
     r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
                     "so this combined chance is approximate.") if mixed else None
-    odds = body.get("odds")
-    if odds: r["value"] = pl.value(r["joint"], float(odds))
+    odds = body.get("odds"); can_refund = any(p > 1e-9 for p in pushes)
+    if can_refund:
+        r["fair_odds"] = None
+        r["refund_note"] = "A tie on a whole-number line refunds that part of the bet, so the chances shown are chances of winning outright and a single fair price does not apply."
+        ev = rp.get("ev") if pl_legs else pl.refund_ev([], [], [], [(o[0], o[1], l.get("price")) for o, l in zip(tout, tm_legs)])
+        if ev is not None:
+            r["value"] = dict(ev=ev, edge=ev, implied=None, kelly=0.0, assumption="Assumes the bet pays the product of each leg's own price, with a refunded leg counted as price 1.00.")
+        else:
+            r["value"] = None; r["value_note"] = "Value is not shown: this bet can be refunded on a tie, and the price of each leg is needed to work it out."
+    elif odds: r["value"] = pl.value(r["joint"], float(odds))
     r["legs"] = [dict(l, p=p) for l, p in zip(legs, probs)]
     return r
 

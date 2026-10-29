@@ -14,6 +14,7 @@ class Leg(BaseModel):
     lo: int | None = Field(default=None, ge=1, le=1000)
     hi: int | None = Field(default=None, ge=1, le=1000)
     text: str = Field(default='', max_length=200)
+    price: FiniteFloat | None = Field(default=None, gt=1, le=1000)    # this leg's own decimal price, needed to value bets that can be refunded
 
     @model_validator(mode='after')
     def market_fields(self):

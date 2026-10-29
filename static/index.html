@@ -221,7 +221,7 @@ function paintSel(){const on=new Set(legs.map(key));document.querySelectorAll(".
 function estOdds(){return legs.length&&legs.every(l=>l.price)?legs.reduce((a,l)=>a*l.price,1):null}
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
   const e=estOdds(),inp=$("#podds");let o=oddsManual&&inp&&inp.value!==""?parseFloat(inp.value):(e||null);
-  try{const r=await post("parlay",{legs:legs.map(({game_id,player_id,stat,line,side,team,lo,hi})=>({game_id,player_id,stat,line,side,team,lo,hi})),odds:o||null});calc={r,o:o||null};drawSlip()}catch(x){}},250)}
+  try{const r=await post("parlay",{legs:legs.map(({game_id,player_id,stat,line,side,team,lo,hi,price})=>({game_id,player_id,stat,line,side,team,lo,hi,price:price||undefined})),odds:o||null});calc={r,o:o||null};drawSlip()}catch(x){}},250)}
 const SLIPTABS=["today","best"];
 function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHTML="";return}
   const fid=document.activeElement&&document.activeElement.id;
@@ -236,7 +236,9 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
    <div class="kv"><span class="mute">Fair odds</span><b>${r&&r.fair_odds?r.fair_odds.toFixed(2):"–"}</b></div>
    ${r&&legs.length>1?`<div class="kv"><span class="mute">If legs were unrelated</span><span>${pct(r.independent)}</span></div>`:""}</div>
    <label class="mute">Odds for this multi (decimal)${e&&!oddsManual?` — estimated from leg prices, check Sportsbet's real multi price`:""}</label><input class="inp" id="podds" type="number" step="0.01" min="1.01" placeholder="e.g. 3.60" value="${esc(oddsVal)}" oninput="oddsManual=true;recalc()" style="margin-top:4px">
-   ${r&&r.value?`<div class="edge ${r.value.edge>0?"g":"b"}"><b>${r.value.edge>0?"+":""}${(r.value.edge*100).toFixed(1)} pts edge</b> · EV ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)} per $1<br><span class="mute">${r.value.edge>0?"The model rates this higher than the price implies.":"The price is better than the model thinks. Consider skipping."}</span></div>`:""}
+   ${r&&r.refund_note?`<div class="note" style="margin:8px 0">${esc(r.refund_note)}</div>`:""}${r&&r.value_note?`<div class="note" style="margin:8px 0">${esc(r.value_note)}</div>`:""}
+   ${r&&r.value&&r.value.assumption?`<div class="edge ${r.value.ev>0?"g":"b"}"><b>Expected profit ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)} per $1</b><br><span class="mute">${esc(r.value.assumption)}</span></div>`:""}
+   ${r&&r.value&&!r.value.assumption?`<div class="edge ${r.value.edge>0?"g":"b"}"><b>${r.value.edge>0?"+":""}${(r.value.edge*100).toFixed(1)} pts edge</b> · EV ${r.value.ev>=0?"+":""}${r.value.ev.toFixed(2)} per $1<br><span class="mute">${r.value.edge>0?"The model rates this higher than the price implies.":"The price is better than the model thinks. Consider skipping."}</span></div>`:""}
    ${r&&r.warning?`<div class="note" style="margin:8px 0">${esc(r.warning)}</div>`:""}
    <input class="inp" id="note" placeholder="Note for friends (optional)" style="margin:6px 0" value="${esc(note)}">
    <div style="display:flex;gap:6px"><input class="inp" id="stake" type="number" placeholder="Stake $" style="width:95px" value="${esc(stake)}"><button class="btn" style="flex:1" onclick="share()">Share pick</button><button class="btn p" style="flex:1" onclick="logBet()">Log bet</button></div>
@@ -301,7 +303,7 @@ function playerHTML(p){
    <div class="l5"><table><tr><th></th><th>PTS</th><th>REB</th><th>AST</th><th>MIN</th></tr>${l5.map(g=>`<tr><td>${g.home?"vs":"@"} ${g.opp}</td><td class="${g.pts>p.proj.pts+3?"hi":g.pts<p.proj.pts-5?"lo":""}">${g.pts}</td><td class="${g.reb>p.proj.reb+2?"hi":g.reb<p.proj.reb-2?"lo":""}">${g.reb}</td><td class="${g.ast>p.proj.ast+2?"hi":g.ast<p.proj.ast-2?"lo":""}">${g.ast}</td><td>${Math.round(g.min)}</td></tr>`).join("")}</table><div class="mute" style="font-size:11px">Green = well above today's projection, red = well below.</div></div>`:""}</div>`}
 const gtab={};let gameIdx={};
 const nm=t=>NAMES[t]||t;
-function tbtn(g,stat,side,line,o){const val=o.price&&!((gameIdx[g]||{}).match||{}).stale_prices&&o.edge>=0.04,k=key({game_id:g,stat,line,side,team:o.team,lo:o.lo});
+function tbtn(g,stat,side,line,o){const val=o.price&&!o.refund&&!((gameIdx[g]||{}).match||{}).stale_prices&&o.edge>=0.04,k=key({game_id:g,stat,line,side,team:o.team,lo:o.lo});
   return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pickTeam('${g}','${stat}','${side}',${line},${o.price||0},'${o.book||""}',${o.prob},'${esc(o.text)}','${o.team||""}',${o.lo||0},${o.hi==null?"null":o.hi})">${val?'<span class="vt">VALUE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}${o.nolabel?"":`<div class="l">${esc(o.label)}${o.price?" · "+bk(o.book):""}</div>`}<div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)}${o.nolabel&&o.price?" · "+bk(o.book):""}</div></button>`}
 const stripH=h=>`<div class="stw"><div class="strip">${h}</div></div>`;
 const mb={},MBD={hand:"home",tot:"over",ttT:"home",ttO:"over"};
@@ -314,9 +316,9 @@ function topHTML(g){const x=_mx(g);if(!x)return'<p class="mute" style="margin:6p
   const win=(side,t,p)=>tbtn(id,"ml",side,0,{label:`${nm(t)} to win`,nolabel:true,prob:p,price:bh[side]&&bh[side][0],book:bh[side]&&bh[side][1],alt:ah[side],edge:ed(p,bh[side]),text:`${nm(t)} to win`});
   const hd=mbg(id,"hand"),to=mbg(id,"tot");
   const hs=(hd=="home"?m.handicaps:[...m.handicaps].reverse()).map(l=>{const home=hd=="home",tm=home?H:A,ln=home?l.line:-l.line,p=home?l.p_home:l.p_away,pr=home?l.price_home:l.price_away,al=home?l.alt_home:l.alt_away;
-    return tbtn(id,"spread",hd,l.line,{label:`${nm(tm)} ${sgn(ln)}`,prob:p,price:pr,book:home?l.book_home:l.book_away,alt:al,edge:pr?p-1/pr:null,text:`${nm(tm)} ${sgn(ln)}`})}).join("");
+    return tbtn(id,"spread",hd,l.line,{label:`${nm(tm)} ${sgn(ln)}`,prob:p,refund:l.refund,price:pr,book:home?l.book_home:l.book_away,alt:al,edge:pr?p-1/pr:null,text:`${nm(tm)} ${sgn(ln)}`})}).join("");
   const ts=m.totals.map(l=>{const o=to=="over",p=o?l.p_over:l.p_under,pr=o?l.price_over:l.price_under,al=o?l.alt_over:l.alt_under;
-    return tbtn(id,"total",to,l.line,{label:`${o?"Over":"Under"} ${l.line}`,prob:p,price:pr,book:o?l.book_over:l.book_under,alt:al,edge:pr?p-1/pr:null,text:`${o?"Over":"Under"} ${l.line} total points`})}).join("");
+    return tbtn(id,"total",to,l.line,{label:`${o?"Over":"Under"} ${l.line}`,prob:p,refund:l.refund,price:pr,book:o?l.book_over:l.book_under,alt:al,edge:pr?p-1/pr:null,text:`${o?"Over":"Under"} ${l.line} total points`})}).join("");
   return `<div class="sumln" style="margin:0 0 6px">Expected score${m.source=="market"?" (from the betting market)":" (our model)"}: <b>${nm(A)} ${m.away_pts.toFixed(0)}</b> – <b>${nm(H)} ${m.home_pts.toFixed(0)}</b> · total <b>${m.total.toFixed(0)}</b> · ${m.margin>0?nm(H):nm(A)} by <b>${Math.abs(m.margin).toFixed(0)}</b></div>
    <div class="sbt">Match Betting</div><div class="wn big"><div class="wc">${formBadges(g,A)}<div class="wl">${nm(A)}</div>${win("away",A,m.p_away)}</div><div class="wc">${formBadges(g,H)}<div class="wl">${nm(H)}</div>${win("home",H,m.p_home)}</div></div>
    <div class="mhd"><div class="sbt" style="margin:0">Handicap Betting</div>${segc(id,"hand",[["away",nm(A)],["home",nm(H)]])}</div>${stripH(hs)}
