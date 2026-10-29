@@ -22,6 +22,10 @@ def ensure_columns(con):
     have = {r[1] for r in con.execute("PRAGMA table_info(games)")}
     for c, t in LINE_COLS.items():
         if c not in have: con.execute(f"ALTER TABLE games ADD COLUMN {c} {t}")
+    for table, cols in (("games", {"date_utc": "TEXT", "tip_utc": "TEXT"}), ("player_games", {"date_utc": "TEXT"})):
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        for c, t in cols.items():
+            if c not in have: con.execute(f"ALTER TABLE {table} ADD COLUMN {c} {t}")
 
 def market_lines(js):
     """ESPN's pickcenter (DraftKings): total, home spread (negative = home favoured), moneylines. Empty dict if absent."""
@@ -45,17 +49,24 @@ def get(url, params, tries=4):
 # the 30 real NBA teams (ESPN abbreviations); All-Star weekend games use teams like STARS/STRIPES/WORLD and must be ignored
 REAL_TEAMS = {"ATL","BOS","BKN","CHA","CHI","CLE","DAL","DEN","DET","GS","HOU","IND","LAC","LAL","MEM","MIA","MIL","MIN","NO","NY","OKC","ORL","PHI","PHX","POR","SAC","SA","TOR","UTAH","WSH"}
 
+from zoneinfo import ZoneInfo
+ET = ZoneInfo("America/New_York")
+
+def et_date(tip_utc):
+    """Game day as US schedules count it: the Eastern date of the tip-off (ESPN's own timestamps are UTC)."""
+    return dt.datetime.fromisoformat(tip_utc.replace("Z", "+00:00")).astimezone(ET).date().isoformat()
+
 def day_games(d):
     js = get(SB, {"dates": f"{d:%Y%m%d}", "limit": 100})
     out = []
     for e in js["events"]:
-        if e["status"]["type"]["name"] != "STATUS_FINAL":
+        if e["status"]["type"]["name"] != "STATUS_FINAL" or e["season"]["type"] == 1:   # unfinished, or preseason (never part of our data)
             continue
         c = e["competitions"][0]["competitors"]
         home = next(x for x in c if x["homeAway"] == "home")
         away = next(x for x in c if x["homeAway"] == "away")
-        if home["team"]["abbreviation"] not in REAL_TEAMS or away["team"]["abbreviation"] not in REAL_TEAMS: continue
-        out.append(dict(game_id=e["id"], date=e["date"][:10], season=str(e["season"]["year"]),
+        if home["team"].get("abbreviation") not in REAL_TEAMS or away["team"].get("abbreviation") not in REAL_TEAMS: continue
+        out.append(dict(game_id=e["id"], date=et_date(e["date"]), date_utc=e["date"][:10], tip_utc=e["date"], season=str(e["season"]["year"]),
                         season_type=e["season"]["type"], home_id=home["team"]["id"], home=home["team"]["abbreviation"],
                         away_id=away["team"]["id"], away=away["team"]["abbreviation"],
                         home_pts=int(home["score"]), away_pts=int(away["score"])))
@@ -103,19 +114,24 @@ def run(start, end):
     print(f"{len(todo)} new games {start}..{end}", flush=True)
     def work(g):
         try: return g, parse_box(g)
-        except Exception as ex: print("fail", g["game_id"], ex, flush=True); return g, None
+        except Exception as ex:
+            print("fail", g["game_id"], ex, flush=True)
+            return g, str(ex)[:200]
     done = 0
     with ThreadPoolExecutor(6) as ex:
         for g, res in ex.map(work, todo):
-            if res is None: continue
+            if isinstance(res, str):                          # failed fetch: remember it so it is visible, not silent
+                con.execute("CREATE TABLE IF NOT EXISTS ingest_issues(game_id TEXT PRIMARY KEY, error TEXT, at TEXT)")
+                con.execute("INSERT OR REPLACE INTO ingest_issues VALUES(?,?,?)", (g["game_id"], res, dt.datetime.now(dt.timezone.utc).isoformat())); continue
             rows, lines = res
             # name the columns: the table has grown (market lines, referee/foul totals), and an upsert keeps those extra columns intact
-            con.execute("""INSERT INTO games(game_id,date,season,season_type,home_id,home,away_id,away,home_pts,away_pts)
-                           VALUES(:game_id,:date,:season,:season_type,:home_id,:home,:away_id,:away,:home_pts,:away_pts)
-                           ON CONFLICT(game_id) DO UPDATE SET date=excluded.date, season=excluded.season, season_type=excluded.season_type,
+            con.execute("""INSERT INTO games(game_id,date,date_utc,tip_utc,season,season_type,home_id,home,away_id,away,home_pts,away_pts)
+                           VALUES(:game_id,:date,:date_utc,:tip_utc,:season,:season_type,:home_id,:home,:away_id,:away,:home_pts,:away_pts)
+                           ON CONFLICT(game_id) DO UPDATE SET date=excluded.date, date_utc=excluded.date_utc, tip_utc=excluded.tip_utc, season=excluded.season, season_type=excluded.season_type,
                              home_id=excluded.home_id, home=excluded.home, away_id=excluded.away_id, away=excluded.away,
                              home_pts=excluded.home_pts, away_pts=excluded.away_pts""", g)
-            con.executemany("INSERT OR REPLACE INTO player_games VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            con.executemany("INSERT OR REPLACE INTO player_games(game_id,player_id,player,team_id,team,opp,home,date,season,starter,min,pts,reb,ast,stl,blk,tov,fg3m,plusminus) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            con.execute("UPDATE player_games SET date_utc=? WHERE game_id=?", (g["date_utc"], g["game_id"]))
             if lines: con.execute("UPDATE games SET ou=:ou, spread_home=:spread_home, ml_home=:ml_home, ml_away=:ml_away WHERE game_id=:gid", dict(lines, gid=g["game_id"]))
             done += 1
             if done % 100 == 0: con.commit(); print(done, flush=True)
