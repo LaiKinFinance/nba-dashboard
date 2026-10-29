@@ -59,7 +59,25 @@ def evaluate(df, cut="2026-02-01"):
         rep["stats"][t] = dict(base_rate=float(y.mean()), events=int(y.sum()), brier=float(brier_score_loss(y, p)),
                                brier_constant=float(brier_score_loss(y, np.full(len(y), y.mean()))),
                                calibration=[dict(bin=str(r.b), n=int(r.n), pred=float(r.pred), actual=float(r.actual)) for r in cal.itertuples()])
+    rep["absence"] = absence_report(df, cut)
     return rep
+
+def absence_report(df, cut):
+    """Does knowing which teammates are missing help? Same models with and without the absence features, scored on later games."""
+    import absence, model as me
+    tr, te = df[df.date < cut], df[df.date >= cut]; hi = (te.abs_pts >= 15).values
+    full = list(FEATURES); base = [f for f in full if f not in absence.ABS]; out = dict(n_high=int(hi.sum()))
+    res = {}
+    try:
+        for name, feats in (("without", base), ("with", full)):
+            me.FEATURES = feats; mm = fit(tr); res[name] = {t: mm[t].predict(te[feats]) for t in TARGETS}
+    finally:
+        me.FEATURES = full
+    for t in TARGETS:
+        y = te[t].values
+        out[t] = dict(mae_without=float(mean_absolute_error(y, res["without"][t])), mae_with=float(mean_absolute_error(y, res["with"][t])),
+                      bias_without=float(np.mean(y[hi] - res["without"][t][hi])), bias_with=float(np.mean(y[hi] - res["with"][t][hi])))
+    return out
 
 if __name__ == "__main__":
     df = build(); df = rotation(df).dropna(subset=["min_m10", "pts_m10"])

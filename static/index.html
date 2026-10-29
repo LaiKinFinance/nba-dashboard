@@ -61,6 +61,7 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .od .o{font-weight:800;font-size:14.5px;color:var(--gold)}.od.on .o{color:#fff}
 .od .p{font-size:10.5px;color:var(--mute)}.od.on .p{color:#d8e6ff}.od .p .hg{color:var(--good);font-weight:700}.od .p .hb{color:var(--bad);font-weight:700}.od.on .p .hg,.od.on .p .hb{color:#fff}
 .od.val{border-color:var(--good)}.od .vt{position:absolute;top:-7px;right:4px;background:var(--good);color:#04130c;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}
+.od .bt,.od .ft{position:absolute;bottom:-7px;left:4px;font-size:9px;font-weight:800;border-radius:3px;padding:0 4px;letter-spacing:.4px}.od .bt{background:#a56bff;color:#fff}.od .ft{background:#ff9a3d;color:#1a0d00}.od.bst{border-color:#a56bff}.od.fad{border-color:#ff9a3d}
 .od .bk{font-size:9px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px}
 .mk2{display:flex;gap:5px;margin-top:5px;min-width:0}.mk2 .od{flex:1;display:flex;justify-content:space-between;padding:6px 10px;align-items:center;text-align:left;gap:6px}.mk2 .od .p{display:block}
 .l5t{background:none;border:0;color:var(--acc);font-size:12px;padding:6px 0 0}.l5{display:none;margin-top:4px}.l5.open{display:block}
@@ -98,7 +99,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .mkr{display:flex;align-items:center;gap:6px;margin-top:6px}.mkr .lb{width:34px;flex:none;font-size:11.5px;font-weight:700;color:var(--mute)}
 .stw{position:relative;flex:1;min-width:0}.stw::before,.stw::after{content:"";position:absolute;top:0;bottom:0;width:18px;z-index:2;pointer-events:none}
 .stw::before{left:0;background:linear-gradient(90deg,var(--bg2),transparent)}.stw::after{right:0;background:linear-gradient(270deg,var(--bg2),transparent)}
-.strip{display:flex;gap:5px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none;padding:9px 14px 2px;cursor:grab;-webkit-overflow-scrolling:touch;user-select:none}
+.strip{display:flex;gap:5px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none;padding:9px 14px 9px;cursor:grab;-webkit-overflow-scrolling:touch;user-select:none}
 .strip::-webkit-scrollbar{display:none}.strip .od{flex:0 0 80px;scroll-snap-align:center}.strip:active{cursor:grabbing}
 .seg{display:flex;gap:4px;margin:8px 0 2px}.seg button{flex:1;background:var(--btn);border:1px solid var(--line);color:var(--mute);border-radius:8px;padding:7px;font-weight:600}.seg button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 .mt{margin:10px 0 2px;font-size:12px;color:var(--mute);font-weight:700;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px}.mt img{width:18px;height:18px}
@@ -108,6 +109,9 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .lp{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}.lp:last-child{border:0}.lp .pos{width:26px;font-size:11px;font-weight:800;color:var(--mute);text-align:center;flex:none}
 .lp .nm2{flex:1;min-width:0;font-weight:600;cursor:pointer}.lp .nm2:hover{text-decoration:underline}.lp .dot{width:8px;height:8px;border-radius:50%;flex:none}
 .stc{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:800;text-transform:uppercase}.stc.out{background:#4a1a1a;color:var(--bad)}.stc.q{background:#4a2c10;color:var(--gold)}.stc.ok{background:#123d2e;color:var(--good)}.stc.ex{background:var(--btn);color:var(--mute)}
+.chip.b{background:#2d1f4d;color:#c8a6ff}.chip.f{background:#4a2c10;color:#ffb36b}
+.vb{border-color:#2f6d4a;background:linear-gradient(180deg,#10281d,var(--card) 70%)}.conf{display:inline-block;border-radius:4px;padding:1px 7px;font-size:10.5px;font-weight:800;text-transform:uppercase}.conf.Strong{background:#123d2e;color:var(--good)}.conf.Medium{background:#4a3a10;color:var(--gold)}.conf.Speculative{background:var(--btn);color:var(--mute)}
+.why{font-size:12.5px;color:var(--mute);margin:6px 0 0;padding-left:18px}.why li{margin:2px 0}.why b{color:var(--ink)}
 .newb{background:var(--acc);color:#fff;border-radius:4px;padding:0 5px;font-size:9.5px;font-weight:800;margin-left:4px}
 .mnp{margin-top:8px;font-size:11px;font-weight:800;color:var(--mute);text-transform:uppercase;letter-spacing:.6px}
 .lv{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
@@ -230,20 +234,29 @@ setInterval(pollStatus,180000);
 async function loadSlate(){slate=await api("slate")}
 function hitTxt(h,n){if(!n)return"";const c=h/n>=.8?"hg":h/n<=.3?"hb":"";return `<span class="${c}">${h}/${n}</span>`}
 function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
-  const val=o.price&&o.edge>=0.04;const k=[p.game_id,p.player_id,s,o.line,"over"].join("|");
-  return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}
+  const val=o.price&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=[p.game_id,p.player_id,s,o.line,"over"].join("|");
+  return `<button class="od ${val?"val":""} ${bst?"bst":""} ${fad?"fad":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}${bst?'<span class="bt">BOOST</span>':fad?'<span class="ft">FADE</span>':""}
    <div class="l">O ${o.line}${o.price?" · SB":""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
+function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return"";
+  const full=p.proj_full||{},d=k=>(p.proj[k]-(full[k]??p.proj[k]));const dtxt=["pts","reb","ast"].map(k=>`${d(k)>=0?"+":""}${d(k).toFixed(1)} ${k}`).join(", ");
+  return `<details class="why-d"><summary style="font-size:12px;color:#c8a6ff">Why the change? ${ab.length} teammate${ab.length>1?"s":""} out</summary><ul class="why">`+
+   ab.map(a=>`<li><b>${esc(a.name)}</b> (${a.pts.toFixed(1)} pts, ${a.reb.toFixed(1)} reb, ${a.ast.toFixed(1)} ast) – ${a.weight>=0.85?"out":"questionable"}</li>`).join("")+
+   `<li>Model effect vs a full-strength roster: <b>${dtxt}</b></li>`+
+   ev.map(e=>`<li>Without ${esc(e.who)}: <b>${e.without.pts.toFixed(1)}</b> pts / ${e.without.reb.toFixed(1)} reb / ${e.without.ast.toFixed(1)} ast in ${e.without.n} games, vs ${e.with_.pts.toFixed(1)} / ${e.with_.reb.toFixed(1)} / ${e.with_.ast.toFixed(1)} in ${e.with_.n} with him</li>`).join("")+
+   (ev.length?"":`<li>Not enough games with and without this teammate for a direct comparison; the estimate comes from how all players on all teams responded to similar absences.</li>`)+`</ul></details>`}
 function playerHTML(p){
   const mk=["pts","reb","ast"].map(st=>{const L=(p.strip&&p.strip[st])||[];
-    return `<div class="mkr"><div class="lb">${st.toUpperCase()}</div><div class="stw"><div class="strip">${L.map(o=>btn(p,st,{line:o.line,prob:o.p_over,price:o.price,book:o.book,edge:o.edge,hit:o.hit,n:o.n})).join("")}</div></div></div>`}).join("");
+    const thr={pts:1,reb:.6,ast:.6}[st],effB=p.proj[st]-((p.proj_full||p.proj)[st]),effF=p.proj[st]-((p.proj_base||p.proj)[st]);   // BOOST/FADE only when the stat-level effect is meaningful
+    return `<div class="mkr"><div class="lb">${st.toUpperCase()}</div><div class="stw"><div class="strip">${L.map(o=>{const rel=o.p_over>=.3&&o.p_over<=.75;return btn(p,st,{line:o.line,prob:o.p_over,price:o.price,book:o.book,edge:o.edge,hit:o.hit,n:o.n,boost:(rel&&effB>=thr)?o.boost:0,fade:(rel&&effF<=-thr)?o.fade:0})}).join("")}</div></div></div>`}).join("");
   const dd=p.book&&p.book.dd,td=p.book&&p.book.td;
-  const sp=(s,prob,b,h)=>{const val=b&&b.edge>=0.04;const k=[p.game_id,p.player_id,s,0,"over"].join("|");
-    return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',0,${b?b.price:0},'${b?b.book:""}',${prob},${h.k},${h.n})">${val?'<span class="vt">VALUE</span>':""}<span class="l" style="text-align:left">${statName[s]}</span><span><span class="o">${b?b.price.toFixed(2):dec(prob)}</span><span class="p">${pct(prob)} · ${hitTxt(h.k,h.n)}</span></span></button>`};
+  const sp=(s,prob,b,h)=>{const val=b&&b.edge>=0.04;const k=[p.game_id,p.player_id,s,0,"over"].join("|"),hist=p.dd_td_hist||{};
+    const note=s=="td"?`${hist.td||0} in ${hist.games||0} games`:`${hist.dd20||0} in last 20`;
+    return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',0,${b?b.price:0},'${b?b.book:""}',${prob},${h.k},${h.n})">${val?'<span class="vt">VALUE</span>':""}<span class="l" style="text-align:left">${statName[s]}</span><span><span class="o">${b?b.price.toFixed(2):dec(prob)}</span><span class="p">${pct(prob)} · ${note}</span></span></button>`};
   const l10=p.last10||[],l5=l10.slice(0,5),av=k=>l5.length?(l5.reduce((a,x)=>a+x[k],0)/l5.length).toFixed(1):"–";
   const inj=p.injury&&p.injury.status&&p.injury.status!="Active"?`<span class="chip i">${esc(p.injury.status)}</span>`:"";
-  return `<div class="pl"><div class="pt">${photo(p.player_id,p.player,"l")}<div style="min-width:0"><span class="pn" onclick="go('players','${p.player_id}')">${esc(p.player)}</span>${p.starting?'<span class="chip s">Starting</span>':'<span class="chip q">Bench / TBC</span>'}${inj}
+  return `<div class="pl"><div class="pt">${photo(p.player_id,p.player,"l")}<div style="min-width:0"><span class="pn" onclick="go('players','${p.player_id}')">${esc(p.player)}</span>${p.starting?'<span class="chip s">Starting</span>':'<span class="chip q">Bench / TBC</span>'}${inj}${(p.absent||[]).length?(((p.proj.pts-(p.proj_full||p.proj).pts)>=1||(p.proj.reb-(p.proj_full||p.proj).reb)>=.6||(p.proj.ast-(p.proj_full||p.proj).ast)>=.6)?'<span class="chip b">▲ Teammate out</span>':'<span class="chip q">Teammate out</span>'):""}
    <div class="proj"><span>Proj <b>${p.proj.pts.toFixed(1)}</b> pts · <b>${p.proj.reb.toFixed(1)}</b> reb · <b>${p.proj.ast.toFixed(1)}</b> ast</span></div></div></div>
-   ${mk}<div class="mk2">${sp("dd",p.p_dd,dd,p.dd_hit)}${sp("td",p.p_td,td,p.td_hit)}</div>
+   ${whyHTML(p)}${mk}${(p.show_dd||p.show_td)?`<div class="mk2">${p.show_dd?sp("dd",p.p_dd,dd,p.dd_hit):""}${p.show_td?sp("td",p.p_td,td,p.td_hit):""}</div>`:""}
    ${l5.length?`<button class="l5t" onclick="const t=this.nextElementSibling;t.classList.toggle('open');this.textContent=t.classList.contains('open')?'Hide last 5 ▴':this.dataset.o" data-o="Last 5 · avg ${av("pts")} / ${av("reb")} / ${av("ast")} ▾">Last 5 · avg ${av("pts")} / ${av("reb")} / ${av("ast")} ▾</button>
    <div class="l5"><table><tr><th></th><th>PTS</th><th>REB</th><th>AST</th><th>MIN</th></tr>${l5.map(g=>`<tr><td>${g.home?"vs":"@"} ${g.opp}</td><td class="${g.pts>p.proj.pts+3?"hi":g.pts<p.proj.pts-5?"lo":""}">${g.pts}</td><td class="${g.reb>p.proj.reb+2?"hi":g.reb<p.proj.reb-2?"lo":""}">${g.reb}</td><td class="${g.ast>p.proj.ast+2?"hi":g.ast<p.proj.ast-2?"lo":""}">${g.ast}</td><td>${Math.round(g.min)}</td></tr>`).join("")}</table><div class="mute" style="font-size:11px">Green = well above today's projection, red = well below.</div></div>`:""}</div>`}
 const gtab={};let gameIdx={};
@@ -303,15 +316,30 @@ function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.comb
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
 function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));oddsManual=false;calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);oddsManual=false;calc=null;slipMin=false;paintSel();drawSlip();recalc()}
-async function today(a){await loadSlate();api("best").then(b=>{best=b;const el=$("#bestbox");if(el)el.innerHTML=bestHTML()}).catch(()=>{});
+async function today(a){await loadSlate();api("best").then(b=>{best=b;const el=$("#bestbox");if(el)el.innerHTML=bestHTML()}).catch(()=>{});api("value").then(v=>{VAL=v;const el=$("#valbox");if(el)el.innerHTML=valueHTML()}).catch(()=>{});
   if(!slate.length){a.innerHTML='<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
   const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
-  a.innerHTML=`<div id="bestbox">${bestHTML()}</div><div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
+  a.innerHTML=`<div id="bestbox">${bestHTML()}</div><div id="valbox">${valueHTML()}</div><div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
    <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div>
-   <div class="note"><b>How to read a button:</b> the line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. ${oddsNote}</div><div id="glist"></div>`;drawGames();pollStatus()}
+   <div class="note"><b>How to read a button:</b> the line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:#c8a6ff">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#ff9a3d">FADE</b> means a teammate returning lowers it. ${oddsNote}</div><div id="glist"></div>`;drawGames();pollStatus()}
+
+/* ---------- value bets with evidence ---------- */
+let VAL=null;
+function valueHTML(){if(!VAL)return"";
+  if(!VAL.odds_connected)return `<div class="card vb"><h2>💎 Value bets</h2><p class="mute" style="margin:0">Value bets compare the model with real bookmaker prices, so they need the Odds API connected. Until then, use the "best picks" above and the green <b style="color:var(--good)">VALUE</b> tags (they appear on any price the app has).</p></div>`;
+  if(!VAL.picks.length)return `<div class="card vb"><h2>💎 Value bets</h2><p class="mute" style="margin:0">No leg currently beats the price by a clear margin (6+ points) with enough history. That is normal on many nights; bookmakers are usually close to right.</p></div>`;
+  return `<div class="card vb"><h2>💎 Value bets <span class="mute" style="font-weight:400">model vs Sportsbet price, with the evidence</span></h2>
+   <p class="mute" style="margin:0 0 6px">Ranked by edge after leaning 30% toward the market, to avoid over-trusting the model. Confidence counts: recent hit rate, projection vs line, stable minutes, injury evidence, edge size.</p>
+   ${VAL.picks.map((o,i)=>`<div class="bl" style="align-items:flex-start">${o.kind=="player"?photo(o.player_id,o.player):'<span class="ph"></span>'}<div class="x"><b>${esc(o.kind=="player"?o.player:o.text)}</b><span class="mute">${o.kind=="player"?legDesc(o)+" · "+(NAMES[o.team]||o.team):"Match winner"}</span>
+     <div style="margin-top:3px"><span class="conf ${o.confidence}">${o.confidence}</span> <span class="mute">hit ${o.n?o.hit+"/"+o.n:"–"}</span></div>
+     <details><summary style="font-size:12px">Evidence</summary><ul class="why">${o.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details></div>
+     <div style="text-align:right"><div class="good" style="font-weight:800">${o.edge>0?"+":""}${(o.edge*100).toFixed(0)} pts</div><div class="mute">${o.price.toFixed(2)} ${bkName(o.book)}</div><button class="btn p" style="margin-top:4px;padding:4px 10px" onclick="addValue(${i})">Add</button></div></div>`).join("")}
+   <p class="mute" style="margin:8px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check, and track results on the My bets tab.</p></div>`}
+function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o.stat,o.side,o.line,o.price,o.book,o.p,o.text);
+  else pick(o.game_id,o.player_id,o.stat,o.line,o.price,o.book,o.p,o.hit,o.n)}
 
 /* ---------- friends' picks ---------- */
 async function picks(a){const ps=await api("picks");
@@ -340,6 +368,7 @@ async function bets(a){const s=await api("scorecard"),m=s.model.stats,me=localSt
    <p class="mute">Test: the model learned from games before ${s.model.cut}, then predicted ${s.model.n_test.toLocaleString()} later games it had not seen. “Off by” is the average miss (lower is better).</p>
    <table class="t"><tr><th style="text-align:left"></th><th>Model is off by</th><th>Plain 10-game average is off by</th></tr>${["pts","reb","ast"].map(k=>`<tr><td style="text-align:left">${{pts:"Points",reb:"Rebounds",ast:"Assists"}[k]}</td><td>${m[k].mae_model.toFixed(1)}</td><td>${m[k].mae_10game_avg.toFixed(1)}</td></tr>`).join("")}</table>
    ${["dd","td"].map(k=>`<h3>${k=="dd"?"Double-doubles":"Triple-doubles"}: when the model said…</h3><table class="t"><tr><th style="text-align:left">It said</th><th>Games</th><th>It happened</th></tr>${m[k].calibration.map(c=>`<tr><td style="text-align:left">about ${pct(c.pred)}</td><td>${c.n}</td><td>${pct(c.actual)}</td></tr>`).join("")}</table>`).join("")}
+   ${s.model.absence?`<h3>Teammates out: does it help?</h3><p class="mute">On ${s.model.absence.n_high.toLocaleString()} test games where 15+ points per game of teammates were missing, a version without absence information under-predicted points by ${s.model.absence.pts.bias_without.toFixed(1)} on average; with it, the miss is ${s.model.absence.pts.bias_with.toFixed(1)}. Overall points error moved from ${s.model.absence.pts.mae_without.toFixed(2)} to ${s.model.absence.pts.mae_with.toFixed(2)}. Rebounds and assists barely changed (${s.model.absence.reb.mae_without.toFixed(2)} → ${s.model.absence.reb.mae_with.toFixed(2)} and ${s.model.absence.ast.mae_without.toFixed(2)} → ${s.model.absence.ast.mae_with.toFixed(2)}). So the effect is real but modest.</p>`:""}
    <p class="mute">If “it said” and “it happened” are close, the model's percentages can be trusted. Triple-doubles are rare, so those rows are less certain.</p></details></div>`}
 async function res(id,r){await post(`bets/${id}/result`,{result:r});render()}
 

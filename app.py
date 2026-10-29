@@ -101,12 +101,26 @@ def enriched():
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
         book = odds.load(c)
     alphas = predict.load_models()["alphas"]
+    # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
+    hist = {}
+    if ids:
+        with closing(con()) as c:
+            q = ",".join("?" * len(ids))
+            full = pd.read_sql(f"SELECT player_id, date, pts, reb, ast FROM player_games WHERE player_id IN ({q}) ORDER BY date DESC", c, params=ids)
+        for pid, d in full.groupby("player_id"):
+            cats = (d.pts >= 10).astype(int) + (d.reb >= 10).astype(int) + (d.ast >= 10).astype(int)
+            top3 = d[["pts", "reb", "ast"]].apply(lambda r: sorted(r, reverse=True), axis=1)
+            near = [(c >= 3) or (c == 2 and t[2] >= 7) for c, t in zip(cats, top3)]
+            hist[pid] = dict(games=len(d), td=int((cats >= 3).sum()), dd=int((cats >= 2).sum()), dd20=int((cats.head(20) >= 2).sum()), near20=int(sum(near[:20])))
     for p in preds:
+        h = hist.get(p["player_id"], dict(games=0, td=0, dd=0, dd20=0, near20=0)); p["dd_td_hist"] = h
+        p["show_td"] = bool(h["td"] >= 1 or h["near20"] >= 2 or p["p_td"] >= 0.03)
+        p["show_dd"] = bool(h["dd20"] >= 2 or p["p_dd"] >= 0.15)
         g = rows.get(p["player_id"], []); l10 = g[:10]; n = len(l10)
         p["last10"] = l10
         for s in ("pts", "reb", "ast"):
             for l in p["ladders"][s]: l["hit"] = sum(1 for r in l10 if r[s] > l["line"]); l["n"] = n
-        p["dd_hit"] = dict(k=sum(_dd(r) for r in l10), n=n); p["td_hit"] = dict(k=sum(_td(r) for r in g), n=len(g))
+        p["dd_hit"] = dict(k=sum(_dd(r) for r in l10), n=n); p["td_hit"] = dict(k=h["td"], n=h["games"])
         b = book.get((p["game_id"], p["player_id"]), {}); p["book"] = {}
         for s in ("pts", "reb", "ast"):
             out = []
@@ -130,7 +144,10 @@ def enriched():
             ordered = sorted(lines)
             if len(ordered) > 16:  # keep the 16 lines closest to a coin flip
                 ordered = sorted(sorted(ordered, key=lambda L: abs(lines[L] - 0.5))[:16])
+            pf, pb = p.get("proj_full", {}).get(s), p.get("proj_base", {}).get(s)
             p["strip"][s] = [dict(line=L, p_over=lines[L], hit=sum(1 for r in l10 if r[s] > L), n=n,
+                                  boost=(lines[L] - float(nb_over(pf, alphas[s], L))) if pf is not None and p.get("absent") else 0.0,
+                                  fade=(lines[L] - float(nb_over(pb, alphas[s], L))) if pb is not None else 0.0,
                                   price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
                                   edge=((lines[L] - 1 / bl[L]["price"]) if L in bl else None)) for L in ordered]
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
@@ -177,6 +194,82 @@ def get_slate(x_code: str = Header("")):
         g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]))))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
+
+def _conf(p, s, line, hit, n, edge, with_evidence):
+    """Simple, transparent confidence points (each one is shown to the user as evidence)."""
+    sd = (p.get("sd") or {}).get(s); m = p.get("min"); pts = 0; why = []
+    if n and hit / n >= 0.7: pts += 1
+    if sd and abs(p["proj"][s] - line) >= 0.6 * sd: pts += 1
+    if p["starting"] and m and m >= 28 and ((p.get("sd") or {}).get("min") or 9) <= 5: pts += 1
+    if with_evidence: pts += 1
+    if (p.get("injury") or {}).get("status") in ("Questionable", "Day-To-Day", "Doubtful"): pts -= 1
+    if edge >= 0.10: pts += 1
+    return "Strong" if pts >= 4 else "Medium" if pts >= 3 else "Speculative"
+
+def _evidence(p, s, line, prob, price, edge, adj):
+    ev = [f"Model chance {prob*100:.0f}% vs price implies {100/price:.0f}% (edge {edge*100:+.0f} pts; {adj*100:.0f}% after leaning 30% toward the market to stay cautious)"]
+    if s in ("pts", "reb", "ast"):
+        ev.append(f"Projection {p['proj'][s]:.1f} vs line {line}")
+        l10 = [r[s] for r in p.get("last10", [])]
+        if l10: ev.append(f"Cleared {line} in {sum(1 for v in l10 if v > line)} of his last {len(l10)} games (avg {sum(l10)/len(l10):.1f})")
+        if p.get("min"): ev.append(f"Averaging {p['min']:.0f} minutes" + (", starting tonight" if p["starting"] else ", not a confirmed starter"))
+        of = (p.get("opp_factor") or {}).get(s)
+        if of and abs(of - 1) >= 0.03: ev.append(f"{p['opp']} has allowed {'more' if of > 1 else 'less'} {s} than average lately ({(of-1)*100:+.0f}%)")
+    for a in (p.get("absent") or [])[:3]:
+        ev.append(f"Teammate {a['name']} ({a['pts']:.1f} ppg) is {'out' if a['weight'] >= 0.85 else 'questionable'}")
+    for e in (p.get("evidence") or [])[:2]:
+        if s in ("pts", "reb", "ast"):
+            ev.append(f"Without {e['who']}: {e['without'][s]:.1f} {s} in {e['without']['n']} games vs {e['with_'][s]:.1f} in {e['with_']['n']} with him")
+    inj = (p.get("injury") or {}).get("status")
+    if inj and inj != "Active": ev.append(f"Caution: listed {inj}")
+    return ev
+
+@app.get("/api/value")
+def value_picks(x_code: str = Header("")):
+    """Legs where the model's chance clearly beats the bookmaker's price, each with the evidence behind it. Needs bookmaker prices."""
+    check(x_code)
+    preds = enriched(); out = []
+    for p in preds:
+        if (p.get("injury") or {}).get("status") in ("Out",): continue
+        for s in ("pts", "reb", "ast"):
+            for l in p["strip"].get(s, []):
+                if not l["price"]: continue
+                edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
+                if edge < 0.06 or l["n"] < 5: continue
+                evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
+                out.append(dict(kind="player", game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
+                                price=l["price"], book=l["book"], p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
+                                confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
+        for s, pk in (("dd", "p_dd"), ("td", "p_td")):
+            b = p["book"].get(s)
+            if not b or not p.get("show_" + s): continue
+            edge = p[pk] - 1 / b["price"]; adj = 0.7 * p[pk] + 0.3 / b["price"]
+            if edge < 0.06: continue
+            hk = p[f"{s}_hit"]
+            out.append(dict(kind="player", game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
+                            p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0,
+                            confidence="Medium" if edge >= 0.1 and hk["k"] / max(hk["n"], 1) >= 0.25 else "Speculative",
+                            evidence=[f"Model chance {p[pk]*100:.1f}% vs price implies {100/b['price']:.1f}%", f"Did it in {hk['k']} of his last {hk['n']} games"] +
+                                     [f"Teammate {a['name']} ({a['pts']:.1f} ppg) is out" for a in (p.get('absent') or [])[:2]]))
+    # one best line per player/stat, ranked by cautious edge
+    best = {}
+    for o in out:
+        k = (o["player_id"], o["stat"])
+        if k not in best or o["adj_edge"] > best[k]["adj_edge"]: best[k] = o
+    ranked = sorted(best.values(), key=lambda o: -o["adj_edge"])[:12]
+    # team markets from bookmaker prices
+    gp = game_preds(); import odds as _o
+    with closing(con()) as c: bl = _o.load_lines(c)
+    for gid, g in gp.items():
+        b = bl.get(gid) or {}
+        for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
+            pr = (b.get("h2h") or {}).get(side)
+            if pr and g[pk] - 1 / pr[0] >= 0.06:
+                ranked.append(dict(kind="team", game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
+                                   adj_edge=0.7 * g[pk] + 0.3 / pr[0] - 1 / pr[0], confidence="Medium" if g[pk] - 1 / pr[0] >= 0.1 else "Speculative",
+                                   evidence=[f"Model chance {g[pk]*100:.0f}% vs price implies {100/pr[0]:.0f}%", f"Model score {g['away']} {g['away_pts']:.0f} – {g['home']} {g['home_pts']:.0f}", "Team model backtest: picks winners ~73% of the time; margin error ≈ 12 pts"]))
+    ranked.sort(key=lambda o: -o["adj_edge"])
+    return dict(picks=ranked[:10], odds_connected=bool(_o.available()))
 
 @app.get("/api/best")
 def best(x_code: str = Header("")):

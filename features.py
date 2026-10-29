@@ -1,6 +1,7 @@
 """Leak-free per-player-game features: everything is computed from games strictly before the row's game."""
 import numpy as np, pandas as pd
 from top3 import load
+import absence
 
 STATS = ["min", "pts", "reb", "ast"]
 
@@ -37,8 +38,12 @@ def build(df=None):
         dfn[f"opp_allow_{c}"] = (1 + 0.5 * (ratio - 1)).clip(0.93, 1.07)
     dfn = dfn[["game_id", "def_team", "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"]]
     df = df.merge(dfn, left_on=["game_id", "opp"], right_on=["game_id", "def_team"], how="left").drop(columns="def_team")
+    # teammate absences (computed on real games only; tonight's rows are filled in by the caller from the injury/lineup feeds)
+    real = df[df["_upcoming"] == 0] if "_upcoming" in df else df
+    af, _ = absence.track(real)
+    df = df.merge(af.reset_index(), on=["game_id", "team"], how="left")
     return df
 
 FEATURES = [f"{c}_{s}" for c in ["min", "pts", "reb", "ast", "pra", "dd", "td", "starter"] for s in ("m5", "m10", "m20", "exp")] \
     + ["pts_sd10", "reb_sd10", "ast_sd10", "min_sd10", "td_m40", "home", "rest", "b2b", "prior_games",
-       "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"]
+       "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"] + absence.ABS

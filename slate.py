@@ -44,15 +44,17 @@ def lineups():
         abbrs = [ALIAS.get(a.get_text(strip=True), a.get_text(strip=True)) for a in b.select(".lineup__abbr")]
         for ab, ul in zip(abbrs, b.select("ul.lineup__list")):
             st = ul.select_one(".lineup__status")
-            starters, out = [], []
+            starters, out, out_status = [], [], []
             for li in ul.select("li.lineup__player"):
                 a = li.select_one("a"); name = (a.get("title") or a.get_text(" ", strip=True)) if a else li.get_text(" ", strip=True)
                 inj = li.select_one(".lineup__inj")
                 if "has-injury-status" in li.get("class", []):
-                    out.append((name, inj.get_text(strip=True) if inj else "Out"))
+                    t = inj.get_text(strip=True) if inj else "Out"
+                    out.append((name, t))
+                    out_status.append((name, {"Ques": "Questionable", "GTD": "Game-time decision", "Prob": "Probable", "Doubt": "Doubtful"}.get(t, t)))
                 else:
                     starters.append(name)
-            res[ab] = dict(status=(st.get_text(strip=True) if st else ""), starters=starters, out=out)
+            res[ab] = dict(status=(st.get_text(strip=True) if st else ""), starters=starters, out=out, out_status=out_status)
     return res
 
 def norm(n):

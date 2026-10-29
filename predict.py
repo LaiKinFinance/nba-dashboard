@@ -7,6 +7,7 @@ from model import rotation, fit, dispersion, nb_over, TARGETS
 from top3 import top3
 import slate as sl
 import team_model
+import absence
 
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db"); MODELS = os.path.join(os.environ.get("DATA_DIR", "data"), "models.pkl")
 
@@ -62,6 +63,35 @@ def top3_candidates(raw, team, window=15):
     g = g[g.games >= 2]; g["score"] = g.pra + 0.5 * g["min"]
     return g.sort_values("score", ascending=False)
 
+STATUS_W = {"out": 1.0, "ofs": 1.0, "doubtful": 0.85, "questionable": 0.5, "game-time decision": 0.5, "day-to-day": 0.5, "probable": 0.1}
+
+def status_weight(s):
+    return STATUS_W.get((s or "").strip().lower(), 0.5 if s else 1.0)
+
+def tonight_absent(team, lu, inj, state):
+    """Regulars of `team` who are out/doubtful/questionable tonight, weighted by how likely they are to miss, and the summed absence features."""
+    entries = [(n, status_weight(s)) for n, s in lu.get(team, {}).get("out_status", [])] + \
+              [(n, status_weight(v["status"])) for n, v in inj.items() if v["team"] == team]
+    found, feats = [], dict(abs_min=0.0, abs_pts=0.0, abs_reb=0.0, abs_ast=0.0, abs_n=0.0)
+    for pid, s in absence.regulars(state.get(team, {})).items():
+        w = max([wt for n, wt in entries if sl.name_match(s["name"], n)] or [0.0])
+        if w < 0.3: continue
+        found.append(dict(player_id=pid, name=s["name"], weight=w, min=s["min"], pts=s["pts"], reb=s["reb"], ast=s["ast"]))
+        for c in absence.COLS: feats["abs_" + c] += w * s[c]
+        feats["abs_n"] += w
+    found.sort(key=lambda x: -x["pts"] * x["weight"])
+    return feats, found
+
+def with_without(real, team, pid, apid):
+    """This player's own stats in games the teammate played vs games he missed (while still on the team that season)."""
+    mine = real[(real.team == team) & (real.player_id == pid)]
+    t = real[(real.team == team)]
+    in_game = t[t.player_id == apid].game_id
+    seasons = set(t[t.player_id == apid].season)
+    has = mine.game_id.isin(set(in_game)); without = (~has) & mine.season.isin(seasons)
+    def agg(x): return dict(n=int(len(x)), pts=float(x.pts.mean()), reb=float(x.reb.mean()), ast=float(x.ast.mean()), min=float(x["min"].mean())) if len(x) else None
+    return agg(mine[has]), agg(mine[without])
+
 def project(days=2):
     bundle = load_models(); m, alphas = bundle["models"], bundle["alphas"]
     games = [g for g in sl.upcoming(days) if g["status"] == "STATUS_SCHEDULED"]
@@ -69,11 +99,15 @@ def project(days=2):
     raw = pd.read_sql("SELECT * FROM player_games", sqlite3.connect(DB))
     latest_team = raw.sort_values("date").groupby("player_id").tail(1)[["player_id", "team"]]
     raw = raw.merge(latest_team.rename(columns={"team": "cur_team"}), on="player_id")
-    rows, meta = [], []
+    real = raw.drop(columns=["cur_team"])
+    af, state = absence.track(real)
+    recent = {t: af.xs(t, level="team").tail(10).mean() for t in set(af.index.get_level_values("team"))}
+    absmap, rows, meta = {}, [], []
     for g in games:
         for team, opp, home in ((g["home"], g["away"], 1), (g["away"], g["home"], 0)):
-            outs = [n for n, s in (lu.get(team, {}).get("out", []))] + \
-                   [n for n, v in inj.items() if v["team"] == team and v["status"] in ("Out", "Doubtful")]
+            outs = [n for n, s in lu.get(team, {}).get("out_status", []) if status_weight(s) >= 0.85] + \
+                   [n for n, v in inj.items() if v["team"] == team and status_weight(v["status"]) >= 0.85]  # questionable players stay in, flagged
+            absmap[(g["game_id"], team)] = tonight_absent(team, lu, inj, state)
             picks = pick_top3(raw, team, outs, lu.get(team, {}).get("starters", []))
             for r in picks:
                 pg = raw[raw.player_id == r.player_id].iloc[-1]
@@ -101,8 +135,20 @@ def project(days=2):
         pass
     # align metadata by (game, player)
     mk = {(x["game"]["game_id"], x["player_id"]): x for x in meta}
+    feats = feats.copy(); Xb_rows = []
+    for idx, f in feats.iterrows():
+        a = absmap[(f.game_id, f.team)][0]; r = recent.get(f.team)
+        for c in absence.ABS: feats.at[idx, c] = a[c]
     X = feats[FEATURES]
+    Xb = X.copy()   # "recent norm" counterfactual: the absence level that was already baked into his last 10 games
+    for idx, f in feats.iterrows():
+        r = recent.get(f.team)
+        for c in absence.ABS: Xb.at[idx, c] = float(r[c]) if r is not None else 0.0
+    Xf = X.copy()   # "full strength" counterfactual: nobody missing
+    for c in absence.ABS: Xf[c] = 0.0
     mus = {t: m[t].predict(X) for t in TARGETS}
+    mus_base = {t: m[t].predict(Xb) for t in TARGETS}
+    mus_full = {t: m[t].predict(Xf) for t in TARGETS}
     pdd = m["dd"].predict_proba(X)[:, 1]; ptd = m["td"].predict_proba(feats)
     for k, (_, f) in enumerate(feats.iterrows()):
         mt = mk[(f.game_id, f.player_id)]; g = mt["game"]
@@ -110,6 +156,17 @@ def project(days=2):
                    home=int(f.home), starting=bool(mt["starting"]), lineup_status=mt["lineup_status"], injury=mt["injury"],
                    min=float(f.min_m10) if pd.notna(f.min_m10) else None, rest=float(f.rest) if pd.notna(f.rest) else None,
                    p_dd=float(pdd[k]), p_td=float(min(ptd[k], pdd[k])), proj={}, ladders={})
+        absent = absmap[(f.game_id, f.team)][1]
+        rec["absent"] = [dict(a, weight=float(a["weight"])) for a in absent]
+        rec["proj_base"] = {t: float(mus_base[t][k]) for t in TARGETS}
+        rec["proj_full"] = {t: float(mus_full[t][k]) for t in TARGETS}
+        rec["opp_factor"] = {t: (float(f[f"opp_allow_{t}"]) if pd.notna(f[f"opp_allow_{t}"]) else 1.0) for t in TARGETS}
+        rec["sd"] = {t: (float(f[f"{t}_sd10"]) if pd.notna(f[f"{t}_sd10"]) else None) for t in ("pts", "reb", "ast", "min")}
+        rec["evidence"] = []
+        for a in absent[:4]:
+            if a["player_id"] == f.player_id: continue
+            w, wo = with_without(real, f.team, f.player_id, a["player_id"])
+            if wo and wo["n"] >= 3 and w and w["n"] >= 3: rec["evidence"].append(dict(who=a["name"], who_pts=a["pts"], weight=a["weight"], with_=w, without=wo))
         for t in TARGETS:
             mu = float(mus[t][k]); rec["proj"][t] = mu
             lines = sorted({max(0.5, np.floor(mu) + d + 0.5) for d in range(-6 if t == "pts" else -4, 7 if t == "pts" else 5)})
