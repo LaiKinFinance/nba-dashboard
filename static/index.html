@@ -208,7 +208,7 @@ const allPlayers=()=>slate.flatMap(g=>Object.values(g.teams).flatMap(t=>t.player
 const key=l=>[l.game_id,l.player_id||"",l.stat,l.line,l.side,l.team||"",l.lo||""].join("|");
 const grp=x=>x=="ml"||x=="spread"||x=="band"?"side":x=="total"||x=="tt"?"total":null;
 const sgn=x=>x>0?"+"+x:""+x;
-const legDesc=l=>l.stat=="ml"?"To win":l.stat=="spread"?`Handicap ${sgn(l.side=="home"?l.line:-l.line)}`:l.stat=="total"?`${l.side=="over"?"Over":"Under"} ${l.line} total points`:l.stat=="tt"?`Team total ${l.side} ${l.line}`:l.stat=="band"?`Win by ${l.hi?l.lo+"–"+l.hi:l.lo+"+"}`:["dd","td"].includes(l.stat)?statName[l.stat]:`Over ${l.line} ${statName[l.stat]}`;
+const legDesc=l=>esc(l.stat=="ml"?"To win":l.stat=="spread"?`Handicap ${sgn(l.side=="home"?l.line:-l.line)}`:l.stat=="total"?`${l.side=="over"?"Over":"Under"} ${l.line} total points`:l.stat=="tt"?`Team total ${l.side} ${l.line}`:l.stat=="band"?`Win by ${l.hi?l.lo+"–"+l.hi:l.lo+"+"}`:["dd","td"].includes(l.stat)?statName[l.stat]:`Over ${l.line} ${statName[l.stat]}`);
 function addLeg(l,quiet){const i=legs.findIndex(x=>key(x)==key(l));
   if(i>=0){if(!quiet)legs.splice(i,1)}else{
     legs=legs.filter(x=>grp(l.stat)?!(x.game_id==l.game_id&&grp(x.stat)==grp(l.stat)):!(x.game_id==l.game_id&&x.player_id==l.player_id&&x.stat==l.stat));
@@ -433,7 +433,7 @@ async function bestTab(a){await loadSlate();
 async function picks(a){const ps=await api("picks");
   a.innerHTML=ps.length?ps.map(p=>`<div class="card"><b>${esc(p.user)}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span>
    ${p.legs.map(l=>`<div class="lg"><div>${esc(l.text||"")}<small>${legDesc(l)}</small></div></div>`).join("")}
-   <div class="mute" style="margin:6px 0">${p.odds?`Odds ${p.odds} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
+   <div class="mute" style="margin:6px 0">${p.odds?`Odds ${esc(p.odds)} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
    <button class="btn" onclick="vote(${p.id},1)">👍</button> <button class="btn" onclick="vote(${p.id},-1)">👎</button> <b>${p.score}</b> <span class="mute">(${p.voters} votes)</span>
    ${p.comments.map(c=>`<div class="mute" style="margin-top:4px"><b style="color:var(--ink)">${esc(c.user)}:</b> ${esc(c.body)}</div>`).join("")}
    <div style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="c${p.id}" placeholder="Comment"><button class="btn" onclick="cmt(${p.id})">Post</button></div></div>`).join(""):'<div class="card empty">Nothing shared yet.<br>On the Games tab, tap prices to build a bet slip, then press “Share pick”.</div>'}
@@ -515,9 +515,9 @@ function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=esc(l.text||"
   const hm=g.home.score-g.away.score,tot=g.home.score+g.away.score;let hit,txt,frac;
   if(l.stat=="ml"){const m=l.side=="home"?hm:-hm;hit=m>0;txt=m==0?"Tied":`${m>0?"Leading":"Trailing"} by ${Math.abs(m)}`;frac=.5+m/40}
   else if(l.stat=="spread"){const m=(l.side=="home"?hm:-hm)+(l.side=="home"?l.line:-l.line);hit=m>0;txt=`${m>0?"Covering by":"Behind the line by"} ${Math.abs(m)}`;frac=.5+m/40}
-  else if(l.stat=="tt"){const pts=l.team=="home"?g.home.score:g.away.score;hit=l.side=="over"?pts>l.line:pts<l.line;txt=`${pts} points so far (line ${l.line})`;frac=l.side=="over"?pts/l.line:1-(pts-l.line*.5)/(l.line*.5)}
+  else if(l.stat=="tt"){const pts=l.team=="home"?g.home.score:g.away.score;hit=l.side=="over"?pts>l.line:pts<l.line;txt=`${pts} points so far (line ${Number(l.line)})`;frac=l.side=="over"?pts/l.line:1-(pts-l.line*.5)/(l.line*.5)}
   else if(l.stat=="band"){const m=l.team=="home"?hm:-hm;hit=m>=l.lo&&(l.hi==null||m<=l.hi);txt=m>0?`Leading by ${m}`:m<0?`Trailing by ${-m}`:"Tied";frac=hit?1:.15}
-  else{hit=l.side=="over"?tot>l.line:tot<l.line;txt=`${tot} points so far (line ${l.line})`;frac=l.side=="over"?tot/l.line:1-(tot-l.line*.5)/(l.line*.5)}
+  else{hit=l.side=="over"?tot>l.line:tot<l.line;txt=`${tot} points so far (line ${Number(l.line)})`;frac=l.side=="over"?tot/l.line:1-(tot-l.line*.5)/(l.line*.5)}
   const done=g.state=="post",v=done?(hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span><b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${txt}${v}</span></div><div class="pbar ${hit?"hit":""}"><i style="width:${Math.max(2,Math.min(100,frac*100))}%"></i></div></div>`}
 function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");

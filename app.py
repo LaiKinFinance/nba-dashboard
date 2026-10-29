@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Header, Body
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import predict, parlay as pl, slate as sl
+from inputs import BetInput, PickInput, ParlayInput
 
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
 ACCESS_CODE = os.environ.get("APP_ACCESS_CODE", "")  # shared secret for friends; empty = open
@@ -668,8 +669,9 @@ def team_leg_prob(l, gp):
     return float(b["p"])
 
 @app.post("/api/parlay")
-def parlay_calc(body: dict = Body(...), x_code: str = Header("")):
+def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     check(x_code)
+    body = body.model_dump(exclude_none=True)
     preds = {(p["game_id"], p["player_id"]): p for p in projections()}
     gps = game_preds(); legs = body["legs"]
     if not 1 <= len(legs) <= 6: raise HTTPException(400, "1-6 legs")
@@ -719,8 +721,9 @@ def scorecard(x_code: str = Header("")):
     return dict(model=rep, users=sorted(users.values(), key=lambda u: -(u["profit"])), bets=bets[:100])
 
 @app.post("/api/bets")
-def add_bet(body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
+def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
+    body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
         c.execute("INSERT INTO bets(user,created,legs,stake,odds,model_prob) VALUES(?,?,?,?,?,?)",
                   (user, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(body["legs"]), float(body["stake"]), float(body["odds"]), body.get("model_prob")))
@@ -748,8 +751,9 @@ def picks(x_code: str = Header("")):
     return ps
 
 @app.post("/api/picks")
-def add_pick(body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
+def add_pick(body: PickInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
+    body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
         c.execute("INSERT INTO picks(user,created,game_id,legs,note,odds,model_prob) VALUES(?,?,?,?,?,?,?)",
                   (user, dt.datetime.now(dt.timezone.utc).isoformat(), "", json.dumps(body["legs"]), body.get("note", "")[:500], body.get("odds"), body.get("model_prob"))); c.commit()
