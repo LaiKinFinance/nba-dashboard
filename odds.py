@@ -191,11 +191,12 @@ def load_lines(con):
 
 
 def fetch_ages(con):
-    """{game_id: hours since its player prices were last fetched}, so the app can say how old a price is."""
+    """{game_id: hours since a real price was last stored for it}. Taken from the stored prices themselves, so a fetch that
+    came back empty (old prices kept) does not make them look fresh."""
     now = dt.datetime.now(dt.timezone.utc)
-    try: rows = con.execute("SELECT game_id, fetched_at FROM odds_fetch").fetchall()
+    try: rows = con.execute("SELECT game_id, max(fetched_at) FROM book_odds GROUP BY game_id").fetchall()
     except sqlite3.OperationalError: return {}
-    return {g: (now - dt.datetime.fromisoformat(t)).total_seconds() / 3600 for g, t in rows}
+    return {g: (now - dt.datetime.fromisoformat(t)).total_seconds() / 3600 for g, t in rows if t}
 
 def closing_price(con, game_id, player_id, stat, line, side, book, tip_utc):
     """Last archived price for this exact bet before tip-off: (price, book, minutes_before_tip) or None.
