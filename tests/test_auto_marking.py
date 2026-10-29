@@ -168,3 +168,15 @@ def test_a_lost_leg_is_not_hidden_by_a_cancelled_leg(db):
     assert _row(db, b)["result"] == "lost"
     me = TestClient(app.app).get("/api/scorecard").json()["users"][0]
     assert me["losses"] == 1 and me["not_counted"] == 0
+
+
+def test_one_time_clean_start_clears_saved_picks_once_and_keeps_a_copy(db):
+    import os
+    db.execute("DELETE FROM one_time_jobs"); b = _bet(db, [L("pts", 24.5)])
+    db.execute("INSERT INTO picks(user,created,game_id,legs) VALUES('mark','x','g','[]')"); db.commit()
+    app.one_time_reset()
+    assert db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 0 and db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+    kept = os.path.join(os.path.dirname(app.DB), "backups", "before-reset-" + app.RESET_ID + ".sqlite")
+    assert os.path.exists(kept)
+    _bet(db, [L("pts", 24.5)]); app.one_time_reset()
+    assert db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 1

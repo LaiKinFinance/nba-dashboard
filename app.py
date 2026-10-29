@@ -236,7 +236,21 @@ def init():
         chave = {r[1] for r in c.execute("PRAGMA table_info(combo_log)")}
         if "model_id" not in chave: c.execute("ALTER TABLE combo_log ADD COLUMN model_id TEXT")
         c.commit()
-init()
+    one_time_reset()
+
+RESET_ID = "2026-10-29-clear-saved-picks"
+
+def one_time_reset():
+    """Mark asked for a clean start (2026-10-29): clears saved picks, bets, comments and votes ONCE. A private copy of the database is kept in
+    the data volume first. The app's own prediction record (pick_log, combo_log, prediction_log) and all game data are not touched."""
+    with closing(con()) as c:
+        c.execute("CREATE TABLE IF NOT EXISTS one_time_jobs(id TEXT PRIMARY KEY, done_at TEXT)")
+        if c.execute("SELECT 1 FROM one_time_jobs WHERE id=?", (RESET_ID,)).fetchone(): return
+        if any(c.execute(f"SELECT 1 FROM {t} LIMIT 1").fetchone() for t in ("picks", "comments", "votes", "bets")):
+            d = os.path.join(os.path.dirname(DB), "backups"); os.makedirs(d, exist_ok=True)
+            with closing(sqlite3.connect(os.path.join(d, "before-reset-" + RESET_ID + ".sqlite"))) as dst: c.backup(dst)
+            for t in ("comments", "votes", "picks", "bets"): c.execute(f"DELETE FROM {t}")
+        c.execute("INSERT INTO one_time_jobs VALUES(?,?)", (RESET_ID, dt.datetime.now(dt.timezone.utc).isoformat())); c.commit()
 
 def who(x_user, x_code):
     check(x_code)
