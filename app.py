@@ -1036,6 +1036,38 @@ def refresh_status(x_code: str = Header("")):
         except sqlite3.OperationalError: st = {}
     return dict(job=dict(_job), stages=st)
 
+BACKUP_CODE = os.environ.get("BACKUP_CODE", "")     # separate secret: lets the owner download a copy of the data; unset = the download is switched off
+_last_backup_download = [0.0]
+
+def _backup_allowed(code):
+    import hmac
+    if not BACKUP_CODE: raise HTTPException(404, "Not found")
+    if not hmac.compare_digest((code or "").encode(), BACKUP_CODE.encode()): raise HTTPException(401, "Wrong backup code")
+    if time.time() - _last_backup_download[0] < 30: raise HTTPException(429, "Too soon")
+    _last_backup_download[0] = time.time()
+
+@app.get("/api/backup")
+def download_backup(x_backup_code: str = Header("")):
+    """A consistent copy of the whole database (gzip), for the owner to keep OUTSIDE the server. Needs the separate BACKUP_CODE secret."""
+    import gzip, hashlib, tempfile
+    from fastapi.responses import Response
+    _backup_allowed(x_backup_code)
+    with tempfile.TemporaryDirectory() as d:
+        tmp = os.path.join(d, "copy.db")
+        with closing(sqlite3.connect(DB)) as src, closing(sqlite3.connect(tmp)) as dst: src.backup(dst)
+        raw = open(tmp, "rb").read()
+    body = gzip.compress(raw, 6)
+    return Response(body, media_type="application/gzip", headers={"X-SHA256-Of-Database": hashlib.sha256(raw).hexdigest(), "Content-Disposition": f"attachment; filename=nba-{dt.date.today():%Y%m%d}.db.gz"})
+
+@app.get("/api/backup/model")
+def download_model_backup(x_backup_code: str = Header("")):
+    import hashlib
+    from fastapi.responses import Response
+    _backup_allowed(x_backup_code)
+    try: raw = open(predict.MODELS, "rb").read()
+    except OSError: raise HTTPException(404, "No saved model")
+    return Response(raw, media_type="application/octet-stream", headers={"X-SHA256": hashlib.sha256(raw).hexdigest(), "Content-Disposition": "attachment; filename=models.pkl"})
+
 ESSENTIAL = ("repair", "ingest", "project")
 
 def _safe(fn, default=None):
