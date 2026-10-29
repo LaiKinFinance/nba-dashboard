@@ -23,3 +23,13 @@ def test_track_record_counts_every_published_pick(client):
     c.commit(); t = client.get("/api/track").json()
     assert t["legs"]["n"] == 14 and t["legs"]["won"] == 2
     assert "earlier_versions" not in t
+
+
+def test_each_day_carries_the_first_start_time_so_the_page_can_use_the_phone_clock(client):
+    import sqlite3, json
+    c = sqlite3.connect(app.DB)
+    c.execute("CREATE TABLE IF NOT EXISTS projections(game_id TEXT, player_id TEXT, payload TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id))")
+    c.execute("INSERT INTO projections VALUES('g','x',?,?)", (json.dumps({"start": "2026-10-30T00:00Z"}), "t"))
+    _pick(c, "NEW", None); c.commit()
+    day = client.get("/api/track").json()["days"][0]
+    assert day["day"] == "2026-10-28" and day["start"] == "2026-10-30T00:00Z"

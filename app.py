@@ -682,6 +682,20 @@ def track_record(x_code: str = Header("")):
         d = days.setdefault(r["day"], dict(day=r["day"], combo=None, legs=[], value=[]))
         (d["legs"] if r["kind"] == "leg" else d["value"]).append(dict(player=r["player"], team=r["team"], stat=r["stat"], line=r["line"], side=r["side"], p=r["model_p"], price=r["price"],
                                                                       result=r["result"], actual=r["actual"], in_combo=bool(r["in_combo"])))
+    starts = {}
+    with closing(con()) as c:
+        try: starts.update({r[0]: r[1] for r in c.execute("SELECT game_id, tip_utc FROM games WHERE tip_utc IS NOT NULL")})
+        except sqlite3.OperationalError: pass
+        try:
+            for r in c.execute("SELECT game_id, payload FROM projections"):
+                if r[0] not in starts: starts[r[0]] = (_safe(lambda: json.loads(r[1]).get("start")) or None)
+        except sqlite3.OperationalError: pass
+    gid = {}
+    for r in legs: gid.setdefault(r["day"], set()).add(r["game_id"])
+    for x in combos: gid.setdefault(x["day"], set()).update(l["game_id"] for l in json.loads(x["legs"]) if l.get("game_id"))
+    for day, d in days.items():
+        known = [starts[g] for g in gid.get(day, ()) if starts.get(g)]
+        d["start"] = min(known) if known else None       # the page shows this day by the viewer's own clock
     out["days"] = sorted(days.values(), key=lambda d: d["day"], reverse=True)[:21]
     return out
 
