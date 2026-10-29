@@ -81,3 +81,30 @@ def test_player_search_treats_sql_payload_as_a_value(api_module, monkeypatch):
     client = TestClient(api_module.app)
     assert client.get('/api/players', params={'q': 'Bane'}).json()[0]['player_id'] == 'p'
     assert client.get('/api/players', params={'q': "x%' OR 1=1 --"}).json() == []
+
+
+@pytest.mark.parametrize('method,path', [('GET', '/api/meta'), ('POST', '/api/refresh')])
+def test_incompatible_model_returns_clear_unavailable_response(api_module, monkeypatch, method, path):
+    from fastapi.testclient import TestClient
+    from model_schema import ModelSchemaError
+    import ingest
+    monkeypatch.setattr(api_module, 'ACCESS_CODE', '')
+    def incompatible():
+        raise ModelSchemaError('Complete Phase 1 data repair and offline validation first.')
+    monkeypatch.setattr(api_module.predict, 'load_models', incompatible)
+    monkeypatch.setattr(ingest, 'run', lambda *args: pytest.fail('Must reject before any ingestion'))
+    response = TestClient(api_module.app).request(method, path)
+    assert response.status_code == 503
+    assert 'Phase 1' in response.json()['detail']
+
+
+def test_background_refresh_stops_before_writes_when_model_is_incompatible(api_module, monkeypatch):
+    from model_schema import ModelSchemaError
+    import ingest
+    def incompatible():
+        raise ModelSchemaError('Legacy model')
+    monkeypatch.setattr(api_module.predict, 'load_models', incompatible)
+    monkeypatch.setattr(api_module.predict, 'train', lambda: pytest.fail('Must not automatically retrain a legacy model'))
+    monkeypatch.setattr(ingest, 'run', lambda *args: pytest.fail('Must reject before any ingestion'))
+    monkeypatch.setattr(api_module.time, 'sleep', lambda *args: pytest.fail('Must stop instead of retrying a legacy model'))
+    api_module._refresh_loop()

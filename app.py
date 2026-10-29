@@ -3,9 +3,10 @@ import json, os, sqlite3, datetime as dt
 from contextlib import closing
 import numpy as np, pandas as pd
 from fastapi import FastAPI, HTTPException, Header, Body
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import predict, parlay as pl, slate as sl
+from model_schema import ModelSchemaError
 from inputs import BetInput, PickInput, ParlayInput
 
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
@@ -28,17 +29,27 @@ def _refresh_loop():
     last_train = 0
     while True:
         try:
+            # Reject legacy/missing artifacts before ingestion or automatic training writes.
+            predict.load_models()
             t = dt.date.today(); ingest.run(t - dt.timedelta(days=4), t)
             if time.time() - last_train > 7 * 86400: predict.train(); last_train = time.time()
             predict.save(predict.project())
             logging.info("odds refresh: %s", refresh_odds())
             try: grade_picks(); log_picks()
             except Exception: logging.exception("pick log/grade failed")
+        except ModelSchemaError:
+            logging.error('Refresh stopped: complete Phase 1 data repair, explicit offline retraining and validation before restarting.')
+            return
         except Exception:
             logging.exception("refresh failed")
         time.sleep(4 * 3600)
 
 app = FastAPI(title="NBA Top-3 Dashboard")
+
+@app.exception_handler(ModelSchemaError)
+async def incompatible_model(request, exc):
+    return JSONResponse(status_code=503, content={'detail': str(exc)})
+
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_refresh_loop, daemon=True).start()
 
@@ -680,6 +691,7 @@ def vote(pid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str
 @app.post("/api/refresh")
 def refresh(x_code: str = Header("")):
     check(x_code)
+    predict.load_models()
     import ingest
     ingest.run(dt.date.today() - dt.timedelta(days=4), dt.date.today())
     preds = predict.project(); predict.save(preds)
