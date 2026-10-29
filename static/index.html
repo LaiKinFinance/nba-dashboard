@@ -208,7 +208,7 @@ const allPlayers=()=>slate.flatMap(g=>Object.values(g.teams).flatMap(t=>t.player
 const key=l=>[l.game_id,l.player_id||"",l.stat,l.line,l.side,l.team||"",l.lo||""].join("|");
 const grp=x=>x=="ml"||x=="spread"||x=="band"?"side":x=="total"||x=="tt"?"total":null;
 const sgn=x=>x>0?"+"+x:""+x;
-const legDesc=l=>esc(l.stat=="ml"?"To win":l.stat=="spread"?`Handicap ${sgn(l.side=="home"?l.line:-l.line)}`:l.stat=="total"?`${l.side=="over"?"Over":"Under"} ${l.line} total points`:l.stat=="tt"?`Team total ${l.side} ${l.line}`:l.stat=="band"?`Win by ${l.hi?l.lo+"–"+l.hi:l.lo+"+"}`:["dd","td"].includes(l.stat)?statName[l.stat]:`Over ${l.line} ${statName[l.stat]}`);
+const legDesc=l=>esc(l.stat=="ml"?"To win":l.stat=="spread"?`Handicap ${sgn(l.side=="home"?l.line:-l.line)}`:l.stat=="total"?`${l.side=="over"?"Over":"Under"} ${l.line} total points`:l.stat=="tt"?`Team total ${l.side} ${l.line}`:l.stat=="band"?`Win by ${l.hi?l.lo+"–"+l.hi:l.lo+"+"}`:["dd","td"].includes(l.stat)?(l.side=="under"?"No ":"")+statName[l.stat]:`${l.side=="under"?"Under":"Over"} ${l.line} ${statName[l.stat]}`);
 function addLeg(l,quiet){const i=legs.findIndex(x=>key(x)==key(l));
   if(i>=0){if(!quiet)legs.splice(i,1)}else{
     legs=legs.filter(x=>grp(l.stat)?!(x.game_id==l.game_id&&grp(x.stat)==grp(l.stat)):!(x.game_id==l.game_id&&x.player_id==l.player_id&&x.stat==l.stat));
