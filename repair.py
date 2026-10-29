@@ -83,10 +83,18 @@ def refresh_rosters(con):
     con.commit(); return len(cur)
 
 def missing_games(con, since=None):
-    """Final games ESPN lists that are not stored. Only counts; ingest.run stores them."""
+    """Finished games ESPN lists that we have NOT stored and have NOT recorded as 'no box score available'. These are the unexplained gaps."""
     since = since or dt.date.fromisoformat(con.execute("SELECT min(date_utc) FROM games").fetchone()[0])
     have = {r[0] for r in con.execute("SELECT game_id FROM games")}
-    return [g["game_id"] for g in ingest.final_games(since, dt.date.today()) if g["game_id"] not in have]
+    known = {r[0] for r in con.execute("SELECT game_id FROM unavailable_games WHERE resolved_at IS NULL")}
+    return [g["game_id"] for g in ingest.final_games(since, dt.date.today()) if g["game_id"] not in have and g["game_id"] not in known]
+
+def missing_games_report(con, since=None):
+    """Full picture, for people: stored games, games known to have no box score on ESPN (listed), and unexplained gaps (should be none)."""
+    unexplained = missing_games(con, since)
+    known = [dict(zip(("game_id", "date", "home", "away", "home_pts", "away_pts", "reason", "last_checked"), r)) for r in
+             con.execute("SELECT game_id,date,home,away,home_pts,away_pts,reason,last_checked FROM unavailable_games WHERE resolved_at IS NULL ORDER BY date")]
+    return dict(stored=con.execute("SELECT count(*) FROM games").fetchone()[0], no_box_score_on_espn=known, unexplained_missing=unexplained)
 
 def run_all(full_reconcile=False):
     con = sqlite3.connect(ingest.DB, timeout=30); ensure_schema(con)
@@ -95,15 +103,14 @@ def run_all(full_reconcile=False):
     out["dates_changed"] = apply_et_dates(con)
     out["roster_players"] = refresh_rosters(con)
     if full_reconcile:
-        miss = missing_games(con)
-        out["missing_before"] = len(miss)
-        if miss:
-            ingest.run(dt.date.fromisoformat(con.execute('SELECT min(date_utc) FROM games').fetchone()[0]), dt.date.today())
-            out["missing_after"] = len(missing_games(con))
+        since = dt.date.fromisoformat(con.execute('SELECT min(date_utc) FROM games').fetchone()[0])
+        ingest.run(since, dt.date.today())               # re-tries every game not stored, including those previously recorded as having no box score
+        rep = missing_games_report(con, since)
+        out["missing_after"] = len(rep["unexplained_missing"]); out["no_box_score_on_espn"] = len(rep["no_box_score_on_espn"])
     problems = []
     if out["tips_missing"]: problems.append(f"{out['tips_missing']} games have no tip-off time")
     if not out["roster_players"]: problems.append("current rosters could not be refreshed (the last good list is kept)")
-    if out.get("missing_after"): problems.append(f"{out['missing_after']} finished games are still missing")
+    if out.get("missing_after"): problems.append(f"{out['missing_after']} finished games are missing and unexplained")
     out["problem"] = "; ".join(problems) or None
     return out
 

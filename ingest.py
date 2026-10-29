@@ -16,9 +16,13 @@ CREATE TABLE IF NOT EXISTS player_games(game_id TEXT, player_id TEXT, player TEX
   tov INT, fg3m INT, plusminus INT, PRIMARY KEY(game_id, player_id));
 """
 
+UNAVAILABLE = """CREATE TABLE IF NOT EXISTS unavailable_games(game_id TEXT PRIMARY KEY, date TEXT, home TEXT, away TEXT, home_pts INT, away_pts INT, reason TEXT,
+  first_seen TEXT, last_checked TEXT, attempts INT DEFAULT 1, resolved_at TEXT)"""
+
 LINE_COLS = {"ou": "REAL", "spread_home": "REAL", "ml_home": "REAL", "ml_away": "REAL"}
 
 def ensure_columns(con):
+    con.execute(UNAVAILABLE)
     have = {r[1] for r in con.execute("PRAGMA table_info(games)")}
     for c, t in LINE_COLS.items():
         if c not in have: con.execute(f"ALTER TABLE games ADD COLUMN {c} {t}")
@@ -116,13 +120,24 @@ def run(start, end):
         try: return g, parse_box(g)
         except Exception as ex:
             print("fail", g["game_id"], ex, flush=True)
-            return g, str(ex)[:200]
-    done = failed = 0
+            code = getattr(getattr(ex, "response", None), "status_code", None)
+            return g, ("no_box_score" if code == 404 else "error", str(ex)[:200])
+    done = failed = unavailable = 0
+    now_s = dt.datetime.now(dt.timezone.utc).isoformat()
     with ThreadPoolExecutor(6) as ex:
         for g, res in ex.map(work, todo):
-            if isinstance(res, str):                          # failed fetch: remember it so it is visible, not silent
+            if isinstance(res, tuple) and res and res[0] in ("no_box_score", "error"):
+                kind, msg = res
+                if kind == "no_box_score":
+                    # ESPN lists the game as finished (with a score) but publishes no box score. Remember that fact, openly, in its own table:
+                    # nothing is invented and nothing is added to `games` or `player_games` (they would be missing every player).
+                    con.execute("""INSERT INTO unavailable_games(game_id,date,home,away,home_pts,away_pts,reason,first_seen,last_checked) VALUES(?,?,?,?,?,?,?,?,?)
+                                   ON CONFLICT(game_id) DO UPDATE SET last_checked=excluded.last_checked, attempts=attempts+1""",
+                                (g["game_id"], g["date"], g["home"], g["away"], g["home_pts"], g["away_pts"], "ESPN lists the game as final but its box score page returns 404", now_s, now_s))
+                    unavailable += 1; continue
                 con.execute("CREATE TABLE IF NOT EXISTS ingest_issues(game_id TEXT PRIMARY KEY, error TEXT, at TEXT)")
-                con.execute("INSERT OR REPLACE INTO ingest_issues VALUES(?,?,?)", (g["game_id"], res, dt.datetime.now(dt.timezone.utc).isoformat())); failed += 1; continue
+                con.execute("INSERT OR REPLACE INTO ingest_issues VALUES(?,?,?)", (g["game_id"], msg, now_s)); failed += 1; continue
+            con.execute("UPDATE unavailable_games SET resolved_at=? WHERE game_id=? AND resolved_at IS NULL", (now_s, g["game_id"]))   # it turned up after all
             rows, lines = res
             # name the columns: the table has grown (market lines, referee/foul totals), and an upsert keeps those extra columns intact
             con.execute("""INSERT INTO games(game_id,date,date_utc,tip_utc,season,season_type,home_id,home,away_id,away,home_pts,away_pts)
@@ -136,7 +151,7 @@ def run(start, end):
             done += 1
             if done % 100 == 0: con.commit(); print(done, flush=True)
     con.commit()
-    return dict(new=done, failed=failed, problem=(f"{failed} game(s) could not be downloaded" if failed else None))
+    return dict(new=done, failed=failed, known_unavailable=unavailable, problem=(f"{failed} game(s) could not be downloaded" if failed else None))
 
 if __name__ == "__main__":
     s = dt.date.fromisoformat(sys.argv[1]); e = dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else dt.date.today()

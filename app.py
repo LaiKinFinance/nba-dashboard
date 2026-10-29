@@ -76,6 +76,15 @@ def project_quietly():
     """Make and store the new projections in a background process (it used to run inside the web process and slowed every page)."""
     run_quietly("import predict; predict.save(predict.project())")
 
+def weekly_reconcile():
+    """Once a week, look at every finished game ESPN lists and account for each: stored, known to have no box score, or (a problem) unexplained."""
+    import repair
+    with closing(con()) as c:
+        row = _safe(lambda: c.execute("SELECT ran_at FROM refresh_status WHERE stage='reconcile'").fetchone())
+    if row and row[0] and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(row[0])).total_seconds() < 6.5 * 86400: return dict(skipped=True, problem=None)
+    out = repair.run_all(full_reconcile=True)
+    return dict(out, problem=("; ".join(x for x in [out.get("problem")] if x and "missing" in x)) or None)
+
 def _odds_on():
     import odds
     return odds.available()
@@ -87,6 +96,7 @@ def refresh_once():
     with REFRESH_LOCK:
         t = dt.date.today()
         data_ok = _stage("repair", repair.run_all) == "ok"
+        _stage("reconcile", weekly_reconcile)
         data_ok = (_stage("ingest", lambda: ingest.run(t - dt.timedelta(days=10), t)) == "ok") and data_ok
         if not data_ok:
             _status_set("train", "skipped", "data repair or download incomplete"); _status_set("project", "skipped", "data repair or download incomplete")
@@ -1047,6 +1057,7 @@ def health():
         rows = _safe(lambda: c.execute("SELECT * FROM refresh_status").fetchall(), [])
         checks = _safe(lambda: [json.loads(r[0]) for r in c.execute("SELECT payload FROM model_checks ORDER BY checked_at DESC LIMIT 6").fetchall()], [])
         ostat = _safe(lambda: odds.status(c), {})
+        nobox = _safe(lambda: [dict(game_id=r[0], date=r[1], game=f"{r[3]} at {r[2]}", score=f"{r[5]}-{r[4]}") for r in c.execute("SELECT game_id,date,home,away,home_pts,away_pts FROM unavailable_games WHERE resolved_at IS NULL ORDER BY date")], [])
     if last is None: problems.append("the game history cannot be read")
     st = {}
     for r in rows:
@@ -1078,7 +1089,7 @@ def health():
     if backups is None: problems.append("the backup folder cannot be read")
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
-                prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None),
+                finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None),
                 models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
