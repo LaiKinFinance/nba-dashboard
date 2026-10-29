@@ -3,6 +3,7 @@ import json, os, sqlite3, datetime as dt
 from contextlib import closing
 import numpy as np, pandas as pd
 from fastapi import FastAPI, HTTPException, Header, Body
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import predict, parlay as pl, slate as sl
@@ -58,13 +59,22 @@ def _models_age():
     try: return time.time() - os.path.getmtime(predict.MODELS)
     except OSError: return float("inf")
 
-def train_quietly():
-    """Retrain in a separate low-priority process using one core, so the website stays responsive on the small server."""
+def run_quietly(code, timeout=3600):
+    """Run heavy Python work in a separate low-priority process on one core, so the website stays responsive on the small server.
+    Returns what the code printed; raises with its last error line if it failed."""
     import subprocess, sys
     env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
-    r = subprocess.run([sys.executable, "-c", "import predict; predict.train()"], env=env, cwd=os.path.dirname(os.path.abspath(__file__)),
-                       capture_output=True, text=True, preexec_fn=lambda: os.nice(15), timeout=3600)
-    if r.returncode: raise RuntimeError(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"training exited {r.returncode}")
+    r = subprocess.run([sys.executable, "-c", code], env=env, cwd=os.path.dirname(os.path.abspath(__file__)),
+                       capture_output=True, text=True, preexec_fn=lambda: os.nice(15), timeout=timeout)
+    if r.returncode: raise RuntimeError(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"background work exited {r.returncode}")
+    return r.stdout
+
+def train_quietly():
+    run_quietly("import predict; predict.train()")
+
+def project_quietly():
+    """Make and store the new projections in a background process (it used to run inside the web process and slowed every page)."""
+    run_quietly("import predict; predict.save(predict.project())")
 
 def _odds_on():
     import odds
@@ -83,7 +93,7 @@ def refresh_once():
         else:
             if _models_age() > TRAIN_EVERY or predict.model_stale(): _stage("train", train_quietly)
             if predict.model_stale(): _status_set("project", "skipped", "saved model is out of date; waiting for a good retrain")
-            else: _stage("project", lambda: predict.save(predict.project()))
+            else: _stage("project", project_quietly)
         if _odds_on(): _stage("odds", refresh_odds)
         else: _status_set("odds", "skipped", "no Odds API key set")
         _stage("grade", grade_picks); _stage("log_picks", log_picks)
@@ -96,7 +106,8 @@ def store_served_check():
         c.execute("CREATE TABLE IF NOT EXISTS model_checks(checked_at TEXT, payload TEXT)")
         last = c.execute("SELECT max(checked_at) FROM model_checks").fetchone()[0]
         if last and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(last)).total_seconds() < 20 * 3600: return
-    results = [predict.served_check(), predict.published_check()]
+    out = run_quietly("import json, predict; print(json.dumps([predict.served_check(), predict.published_check()], default=float))", timeout=1800)
+    results = json.loads(out.strip().splitlines()[-1])
     mid = (_safe(lambda: predict.load_models(strict=False)) or {}).get("model_id")
     with closing(con()) as c:
         now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -182,6 +193,7 @@ async def limits(request: Request, call_next):
     return await call_next(request)
 
 app.add_middleware(BodyLimit, limit=MAX_BODY)
+app.add_middleware(GZipMiddleware, minimum_size=1000)      # the page and the slate are large text: sending them compressed is several times smaller
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_refresh_loop, daemon=True).start()
 
@@ -289,7 +301,26 @@ def guarded_projections():
             out.append(dict(p, frozen=not same))
     return out
 
+_enr = dict(key=None, val=None, at=0.0); _enr_lock = threading.Lock()
+
+def _enriched_key():
+    """Cheap fingerprint of everything enriched() depends on: projections, prices, the saved model, and the current minute (game start times)."""
+    with closing(con()) as c:
+        q = lambda sql: _safe(lambda: c.execute(sql).fetchone()[0])
+        parts = (q("SELECT max(made_at) FROM projections"), q("SELECT max(fetched_at) FROM book_odds"), q("SELECT max(fetched_at) FROM book_lines"))
+    try: mt = os.path.getmtime(predict.MODELS)
+    except OSError: mt = None
+    return (parts, mt, int(time.time() // 60))
+
 def enriched():
+    """Same as _enriched_build(), but computed once per change of data (or per minute) and shared, because every tab asks for it.
+    The returned list is shared: callers must not modify it."""
+    key = _enriched_key()
+    with _enr_lock:
+        if _enr["key"] == key and _enr["val"] is not None: return _enr["val"]
+        val = _enriched_build(); _enr.update(key=key, val=val, at=time.time()); return val
+
+def _enriched_build():
     """Projections + last-10 games, consistency counts per line, and bookmaker prices/edges where available."""
     import odds
     from model import over_prob
@@ -347,10 +378,8 @@ def enriched():
             if combo:
                 lines = {L: q for L, q in cm.items() if 0.10 <= q <= 0.92}
             else:
-                for k in range(-14, 15):
-                    L = float(np.floor(mu) + k + 0.5)
-                    if L < 0.5: continue
-                    q = pmodel(L)
+                Ls = np.floor(mu) + np.arange(-14, 15) + 0.5; Ls = Ls[Ls >= 0.5]       # one vectorised call instead of ~29 slow single ones
+                for L, q in zip(Ls.tolist(), np.atleast_1d(over_prob(s, mu, alphas, Ls)).tolist()):
                     if 0.10 <= q <= 0.92: lines[L] = q
             for L in bl:
                 q = pmodel(L)
@@ -360,13 +389,15 @@ def enriched():
                 ordered = sorted(sorted(ordered, key=lambda L: abs(lines[L] - 0.5))[:16])
             core = s in ("pts", "reb", "ast")
             pf, pb = (p.get("proj_full", {}).get(s), p.get("proj_base", {}).get(s)) if core else (None, None)
+            oa = np.array(ordered, float)
+            bst_arr = (np.array([lines[L] for L in ordered]) - np.atleast_1d(over_prob(s, pf, alphas, oa))) if (pf is not None and p.get("absent") and len(oa)) else np.zeros(len(oa))
+            fad_arr = (np.array([lines[L] for L in ordered]) - np.atleast_1d(over_prob(s, pb, alphas, oa))) if (pb is not None and len(oa)) else np.zeros(len(oa))
             p["strip"][s] = [dict(line=L, p_over=lines[L], hit=sum(1 for r in l10 if val(r) > L), n=n,
-                                  boost=(lines[L] - float(over_prob(s, pf, alphas, L))) if pf is not None and p.get("absent") else 0.0,
-                                  fade=(lines[L] - float(over_prob(s, pb, alphas, L))) if pb is not None else 0.0,
+                                  boost=float(bst_arr[i]), fade=float(fad_arr[i]),
                                   price=(bl[L]["price"] if L in bl else None), book=(bl[L]["book"] if L in bl else None),
                                   alt=(bl[L]["alt"] if L in bl else None),
                                   refund=(L in bl and bl[L].get("refund", False)),
-                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl and not _whole(L) else None)) for L in ordered]
+                                  edge=((lines[L] - 1 / bl[L]["price"]) if L in bl and not _whole(L) else None)) for i, L in enumerate(ordered)]
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             sides = b.get(s, {}).get(0.0, {})
             if "over" in sides: p["book"][s] = dict(price=sides["over"][0], book=sides["over"][1], edge=p[pk] - 1 / sides["over"][0])
@@ -448,8 +479,10 @@ def get_slate(x_code: str = Header("")):
     games = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
     with with_c as c: bl = odds.load_lines(c); lage = odds.line_ages(c)
     for p in enriched():
-        g = games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"])),
-                                                insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"])))
+        g = games.get(p["game_id"])
+        if g is None:      # build each game's block once (it used to be rebuilt for every player, 78 times instead of 13)
+            g = games[p["game_id"]] = dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"])),
+                                           insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"]))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
     return sorted(games.values(), key=lambda g: g["start"])
 
