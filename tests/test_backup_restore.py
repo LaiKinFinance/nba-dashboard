@@ -88,3 +88,7 @@ def test_model_download(client, monkeypatch):
 
 def test_backup_code_is_not_in_the_deploy_logs_or_page():
     assert "BACKUP_CODE" in open(".github/workflows/deploy.yml").read() and "s3cret" not in open("static/index.html").read()
+
+def test_backup_page_exists_and_never_stores_the_code():
+    html = open("static/backup.html").read()
+    assert "X-Backup-Code" in html and "localStorage" not in html and "sessionStorage" not in html and "cookie" not in html.lower()

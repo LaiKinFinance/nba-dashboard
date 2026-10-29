@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Download backup</title>
+<style>body{font:16px system-ui,sans-serif;max-width:520px;margin:24px auto;padding:0 16px;color:#1b2a41}button,input{font:inherit;padding:10px 12px;margin:6px 0;width:100%;box-sizing:border-box}button{background:#0a66b3;color:#fff;border:0;border-radius:8px}#m{margin-top:12px;color:#555}</style></head>
+<body><h1>Download a backup</h1>
+<p>This saves a copy of all the app's data (and the prediction file) to your phone or computer, so there is a copy outside the website's server. Type your backup code, then press a button. The code is never saved by this page.</p>
+<input id="c" type="password" placeholder="Backup code" autocomplete="off">
+<button onclick="go('/api/backup','nba-backup.db.gz')">Download data backup</button>
+<button onclick="go('/api/backup/model','models.pkl')">Download prediction file</button>
+<div id="m"></div>
+<script>
+async function go(url,name){const m=document.getElementById('m');m.textContent='Working…';
+  try{const r=await fetch(url,{headers:{'X-Backup-Code':document.getElementById('c').value}});
+    if(!r.ok){m.textContent=r.status==401?'Wrong code.':r.status==404?'Backups are switched off on the server.':r.status==429?'Please wait a minute and try again.':'Something went wrong ('+r.status+').';return}
+    const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(r.headers.get('Content-Disposition')||'').split('filename=')[1]||name;document.body.appendChild(a);a.click();a.remove();
+    m.textContent='Saved ('+Math.round(b.size/1024)+' KB). Keep it somewhere safe, for example your Google Drive.'}
+  catch(e){m.textContent='Could not reach the server.'}}
+</script></body></html>
