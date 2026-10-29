@@ -110,10 +110,29 @@ def backup_db(keep=7):
     for old in sorted(f for f in os.listdir(d) if f.endswith(".db"))[:-keep]: os.remove(os.path.join(d, old))
     return dest
 
+_job = dict(state="idle", source=None, queued_at=None, started_at=None, finished_at=None)
+_job_lock = threading.Lock()
+
+def request_refresh(source):
+    """Queue ONE refresh in the background and return at once. Returns False if one is already queued or running (no duplicates)."""
+    with _job_lock:
+        if _job["state"] in ("queued", "running"): return False
+        _job.update(state="queued", source=source, queued_at=dt.datetime.now(dt.timezone.utc).isoformat(), started_at=None, finished_at=None)
+    threading.Thread(target=_run_job, daemon=True).start(); return True
+
+def _run_job():
+    with _job_lock: _job.update(state="running", started_at=dt.datetime.now(dt.timezone.utc).isoformat())
+    try: refresh_once()
+    except Exception: logging.exception("refresh job failed")
+    finally:
+        with _job_lock: _job.update(state="idle", finished_at=dt.datetime.now(dt.timezone.utc).isoformat())
+
 def _refresh_loop():
-    """Background refresh every 4h: new box scores, re-project upcoming games, fetch bookmaker odds."""
+    """Every 4 hours, queue a refresh: new box scores, re-project upcoming games, fetch bookmaker odds."""
     while True:
-        refresh_once(); time.sleep(4 * 3600)
+        request_refresh("timer")
+        while _job["state"] != "idle": time.sleep(5)
+        time.sleep(4 * 3600)
 
 app = FastAPI(title="NBA Top-3 Dashboard")
 
@@ -915,13 +934,22 @@ def vote(pid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str
 
 _last_manual = [0.0]
 
-@app.post("/api/refresh")
+@app.post("/api/refresh", status_code=202)
 def refresh(x_code: str = Header("")):
+    """Ask for a refresh. Returns straight away; the work (which can include slow retraining) runs in the background. Watch /api/refresh/status."""
     check(x_code)
-    if time.time() - _last_manual[0] < 600: raise HTTPException(429, "Refreshed less than 10 minutes ago")
-    if REFRESH_LOCK.locked(): raise HTTPException(409, "A refresh is already running")
-    _last_manual[0] = time.time(); refresh_once()
-    return dict(ok=True)
+    if time.time() - _last_manual[0] < 600 and _job["state"] == "idle": raise HTTPException(429, "Refreshed less than 10 minutes ago")
+    started = request_refresh("manual")
+    if started: _last_manual[0] = time.time()
+    return dict(accepted=started, already_running=not started, state=_job["state"])
+
+@app.get("/api/refresh/status")
+def refresh_status(x_code: str = Header("")):
+    check(x_code)
+    with closing(con()) as c:
+        try: st = {r["stage"]: dict(state=r["state"], note=r["note"], ran_at=r["ran_at"]) for r in c.execute("SELECT stage, state, note, ran_at FROM refresh_status")}
+        except sqlite3.OperationalError: st = {}
+    return dict(job=dict(_job), stages=st)
 
 ESSENTIAL = ("repair", "ingest", "project")
 
