@@ -89,8 +89,9 @@ def meta(x_code: str = Header("")):
     return dict(data_through=last, projections_made=made, trained_through=b["trained_through"],
                 odds_api=__import__("odds").available(), open_access=not ACCESS_CODE, odds=__import__("odds").status(c) if False else odds_status())
 
-def _dd(r): return int((r["pts"] >= 10) + (r["reb"] >= 10) + (r["ast"] >= 10) >= 2)
-def _td(r): return int((r["pts"] >= 10) + (r["reb"] >= 10) + (r["ast"] >= 10) >= 3)
+def _cats(r): return sum(int(r[k] >= 10) for k in ("pts", "reb", "ast", "stl", "blk"))   # official double/triple-double count five categories
+def _dd(r): return int(_cats(r) >= 2)
+def _td(r): return int(_cats(r) >= 3)
 
 STRIPS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa")
 COMBO_PARTS = {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}
@@ -318,7 +319,7 @@ def grade_picks():
                 pr = c.execute("SELECT pts,reb,ast,fg3m,stl,blk FROM player_games WHERE game_id=? AND player_id=?", (r["game_id"], r["player_id"])).fetchone()
                 if not pr: res, actual = "void", None
                 elif r["stat"] in ("dd", "td"):
-                    cats = sum(1 for k in ("pts", "reb", "ast") if pr[k] >= 10); actual = float(cats); res = "won" if cats >= (2 if r["stat"] == "dd" else 3) else "lost"
+                    cats = sum(1 for k in ("pts", "reb", "ast", "stl", "blk") if pr[k] >= 10); actual = float(cats); res = "won" if cats >= (2 if r["stat"] == "dd" else 3) else "lost"
                 else:
                     actual = float(sum(pr[k] for k in COMBO_PARTS.get(r["stat"], (r["stat"],)))); res = "won" if actual > r["line"] else "lost"
             c.execute("UPDATE pick_log SET result=?, actual=?, graded_at=? WHERE id=?", (res, actual, now, r["id"]))

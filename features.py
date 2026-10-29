@@ -8,8 +8,8 @@ STATS = ["min", "pts", "reb", "ast"]
 def build(df=None):
     df = (load() if df is None else df).sort_values(["date", "game_id"]).reset_index(drop=True)
     df["pra"] = df.pts + df.reb + df.ast
-    df["td"] = ((df.pts >= 10).astype(int) + (df.reb >= 10) + (df.ast >= 10) >= 3).astype(int)
-    df["dd"] = ((df.pts >= 10).astype(int) + (df.reb >= 10) + (df.ast >= 10) >= 2).astype(int)
+    cats = (df.pts >= 10).astype(int) + (df.reb >= 10) + (df.ast >= 10) + (df.stl >= 10) + (df.blk >= 10)   # official rule: any five categories
+    df["td"] = (cats >= 3).astype(int); df["dd"] = (cats >= 2).astype(int)
     g = df.groupby("player_id", group_keys=False)
     cols = STATS + ["pra", "td", "dd", "starter", "fg3m", "stl", "blk"]
     for c in cols:
