@@ -254,6 +254,11 @@ def meta(x_code: str = Header("")):
                 odds_api=__import__("odds").available(), open_access=not ACCESS_CODE, odds=__import__("odds").status(c) if False else odds_status())
 
 def _cats(r): return sum(int(r[k] >= 10) for k in ("pts", "reb", "ast", "stl", "blk"))   # official double/triple-double count five categories
+def has_started(start_iso):
+    """True once a game's tip-off time has passed (no bet calculation or recommendation may be made for it)."""
+    try: return dt.datetime.fromisoformat(start_iso.replace("Z", "+00:00")) <= dt.datetime.now(dt.timezone.utc)
+    except Exception: return True          # an unreadable start time is treated as 'already started': never recommend on a guess
+
 def model_status(preds=None):
     """(saved model or None, reason it should not be used for bets or None). Never trains."""
     try: b = predict.load_models(strict=False)
@@ -641,7 +646,7 @@ def min_edge(p):
     return MIN_EDGE_UNSURE if unsure else MIN_EDGE
 
 def compute_value():
-    preds = [p for p in enriched() if not p.get("frozen")]; out = []
+    preds = [p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]; out = []
     _, why = model_status(preds)
     if why: return dict(picks=[], odds_connected=bool(__import__("odds").available()), notice=why)
     for p in preds:
@@ -679,6 +684,7 @@ def compute_value():
     with closing(con()) as c: bl = _o.load_lines(c); lage = _o.line_ages(c)
     for gid, g in gp.items():
         b = bl.get(gid) or {}
+        if has_started(g["start"]): continue              # no recommendation for a game that has begun
         if is_stale(lage.get(gid)): continue          # old team prices are not value
         if g.get("source") != "market": continue   # without a market line our own team model has no proven edge, so no team value claims
         for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
@@ -702,7 +708,7 @@ def best(x_code: str = Header("")):
     return res
 
 def compute_best():
-    preds = [p for p in enriched() if not p.get("frozen")]; cands = []
+    preds = [p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]; cands = []
     _, why = model_status(preds)
     if why: return dict(legs=[], combo=dict(legs=[], joint=None, fair_odds=None), notice=why)
     for p in preds:
@@ -868,9 +874,10 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     for l in pl_legs:
         if l["stat"] not in PLAYER_STATS: raise HTTPException(400, "Unknown market")
         if (l["game_id"], l["player_id"]) not in preds: raise HTTPException(400, "Unknown player/game")
-        if preds[(l["game_id"], l["player_id"])]["start"] < now_s: raise HTTPException(400, "That game has already started")
+        if has_started(preds[(l["game_id"], l["player_id"])]["start"]): raise HTTPException(400, "That game has already started")
     for l in tm_legs:
         if l["game_id"] not in gps: raise HTTPException(400, "Unknown game")
+        if has_started(gps[l["game_id"]]["start"]): raise HTTPException(400, "That game has already started")
     side_games = [l["game_id"] for l in tm_legs if l["stat"] in SIDE_GROUP]
     if len(side_games) != len(set(side_games)): raise HTTPException(400, "Pick only one winner, handicap or margin leg per game")
     tot_games = [l["game_id"] for l in tm_legs if l["stat"] in TOTAL_GROUP]
