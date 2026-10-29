@@ -47,13 +47,16 @@ def _models_age():
     except OSError: return float("inf")
 
 def refresh_once():
-    """One full cycle. Training is by saved-model age (not process start), so a deploy no longer retrains by itself."""
-    import ingest
+    """One full cycle. Data repairs run first; training happens by saved-model age or when the model predates the feature
+    definitions (never just because the process restarted); a model that fails validation is not used, and projections are skipped
+    rather than made with a stale model."""
+    import ingest, repair
     with REFRESH_LOCK:
         t = dt.date.today()
-        _stage("ingest", lambda: ingest.run(t - dt.timedelta(days=4), t))
-        if _models_age() > TRAIN_EVERY: _stage("train", predict.train)
-        _stage("project", lambda: predict.save(predict.project()))
+        _stage("repair", repair.run_all)
+        _stage("ingest", lambda: ingest.run(t - dt.timedelta(days=10), t))
+        if _models_age() > TRAIN_EVERY or predict.model_stale(): _stage("train", predict.train)
+        if not predict.model_stale(): _stage("project", lambda: predict.save(predict.project()))
         _stage("odds", lambda: logging.info("odds refresh: %s", refresh_odds()))
         _stage("grade", grade_picks); _stage("log_picks", log_picks)
         _stage("backup", backup_db)
@@ -777,6 +780,6 @@ def health():
         made = c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"]
         try: st = {r["stage"]: dict(ok_at=r["ok_at"], fail_at=r["fail_at"], error=odds.scrub(r["error"] or "") or None) for r in c.execute("SELECT * FROM refresh_status")}
         except sqlite3.OperationalError: st = {}
-    return dict(data_through=last, projections_made=made, stages=st, models_age_days=round(_models_age() / 86400, 1), backups=sorted(os.listdir(os.path.join(os.path.dirname(DB), "backups")))[-3:] if os.path.isdir(os.path.join(os.path.dirname(DB), "backups")) else [])
+    return dict(data_through=last, projections_made=made, model_current=not predict.model_stale(), stages=st, models_age_days=round(_models_age() / 86400, 1), backups=sorted(os.listdir(os.path.join(os.path.dirname(DB), "backups")))[-3:] if os.path.isdir(os.path.join(os.path.dirname(DB), "backups")) else [])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
