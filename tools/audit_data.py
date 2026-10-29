@@ -53,7 +53,8 @@ try:
 except sqlite3.OperationalError as e: chk("WARN", "projection tables missing", str(e))
 # --- model artefact
 try:
-    b = pickle.load(open(os.path.join(D, "models.pkl"), "rb")); a = b["alphas"]
+    from predict import load_models
+    b = load_models(); a = b["alphas"]
     chk("PASS" if all(v > 0 for v in a.values()) else "FAIL", "dispersion parameters positive", str({k: round(v, 3) for k, v in a.items()}))
     chk("PASS", f"model trained through {b['trained_through']}; report keys {sorted(b['report'])}")
 except Exception as e: chk("FAIL", "models.pkl loads", str(e))
