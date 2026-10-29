@@ -103,7 +103,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 @media(max-width:640px){.nm{display:none}.ab{display:inline}.lt{gap:6px}.lt img{width:30px;height:30px}.lt .sc{font-size:23px}.ls{min-width:78px}.lh{padding:10px 8px;gap:4px}}
 .lb2{display:none;border-top:1px solid var(--line);padding:6px 12px 12px;background:var(--bg2)}.lv.open .lb2{display:block}
 table.bx{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}table.bx th,table.bx td{padding:5px 4px;text-align:right;border-bottom:1px solid var(--line)}table.bx th{color:var(--mute);font-weight:500;font-size:11px}
-table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}
+table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}table.ls2 td.qw{color:#fff;font-weight:700}table.ls2 td{color:var(--mute)}table.ls2 td:last-child{color:var(--ink)}table.ls2 td:first-child{color:var(--ink)}
 .ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--gold)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:#4a2c10;color:var(--gold)}
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
@@ -327,6 +327,9 @@ const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g
 function catCount(r){return(r.pts>=10)+(r.reb>=10)+(r.ast>=10)}
 function tag(r){const c=catCount(r);if(c>=3)return'<span class="ch2 td">TD</span>';
   if(c==2&&[r.pts,r.reb,r.ast].some(v=>v>=7&&v<10))return'<span class="ch2 w">TD WATCH</span>';if(c==2)return'<span class="ch2 dd">DD</span>';return""}
+function lineScore(g){if(g.state=="pre")return"";const n=Math.max(4,g.home.lines.length,g.away.lines.length),lab=i=>i<4?String(i+1):(i==4?"OT":(i-3)+"OT");
+  const row=(t,o)=>`<tr><td><img src="${logo(t.team)}" alt="" style="width:18px;height:18px;vertical-align:middle;margin-right:6px">${t.team}</td>${Array.from({length:n},(_,i)=>{const v=t.lines[i],ov=o.lines[i];return `<td class="${v!=null&&ov!=null&&v>ov?"qw":""}">${v==null?"–":v}</td>`}).join("")}<td><b>${t.score}</b></td></tr>`;
+  return `<div style="overflow-x:auto"><table class="bx ls2"><tr><th></th>${Array.from({length:n},(_,i)=>`<th>${lab(i)}</th>`).join("")}<th>T</th></tr>${row(g.away,g.home)}${row(g.home,g.away)}</table></div>`}
 function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="mute">Game has not started. Stats appear at tip-off.</p>';
   if(!b)return'<p class="mute">Loading stats…</p>';
   const sa=showAll.has(g.game_id);
@@ -336,7 +339,7 @@ function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="
     ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td>${fullStats?`<td>${r.stl}</td><td>${r.blk}</td><td>${r.fg3m}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
 function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.score,fin=g.state!="pre";
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
-  return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?boxHTML(g):""}</div></div>`}
+  return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+boxHTML(g):""}</div></div>`}
 function legNow(l){const b=boxes[l.game_id];if(!b)return null;for(const t of b.teams){const r=t.players.find(p=>p.player_id==l.player_id);if(r)return r}return null}
 function legProg(l){const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||"");
   if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;

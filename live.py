@@ -34,7 +34,8 @@ def _scoreboard():
             seen.add(e["id"]); s = e["status"]; t = s["type"]
             c = e["competitions"][0]["competitors"]
             side = lambda x: dict(team=x["team"]["abbreviation"], score=int(x.get("score") or 0),
-                                  record=(x.get("records") or [{}])[0].get("summary"))
+                                  record=(x.get("records") or [{}])[0].get("summary"),
+                                  lines=[int(float(q.get("value") or 0)) for q in x.get("linescores", [])])
             home = side(next(x for x in c if x["homeAway"] == "home")); away = side(next(x for x in c if x["homeAway"] == "away"))
             games.append(dict(game_id=e["id"], state=t["state"], name=t["name"], detail=t.get("shortDetail", ""), period=s.get("period", 0),
                               clock=s.get("displayClock", ""), start=e["date"], home=home, away=away))
