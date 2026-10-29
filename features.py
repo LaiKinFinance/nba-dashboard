@@ -5,7 +5,7 @@ import absence, sqlite3, os
 
 # Bump whenever feature definitions or the data they read change. A saved model trained under another version is refused,
 # so old models can never be run against new feature logic.
-FEATURE_SCHEMA = "2026-10-p1:et-dates+5cat-dd+wave-placeholders"
+FEATURE_SCHEMA = "2026-10-p2:et-dates+5cat-dd+past-only-absence+past-only-defence"
 STATS = ["min", "pts", "reb", "ast"]
 
 def build(df=None):
@@ -29,18 +29,26 @@ def build(df=None):
     df["rest"] = (pd.to_datetime(df.date) - pd.to_datetime(prev_date)).dt.days.clip(upper=10)
     df["b2b"] = (df.rest == 1).astype(int)
 
-    # opponent defence: what each defending team has allowed per game (rolling 15, shifted), relative to league
-    tg = df.groupby(["game_id", "team", "opp", "date"], as_index=False)[["pts", "reb", "ast"]].sum()
+    # opponent defence: what each defending team has allowed per game (rolling 30, shifted), relative to league.
+    # Only COMPLETED games feed this: unplayed placeholder rows (all zeros) must never count as "points allowed".
+    upc = df["_upcoming"] == 1 if "_upcoming" in df else pd.Series(False, index=df.index)
+    tg = df[~upc].groupby(["game_id", "team", "opp", "date"], as_index=False)[["pts", "reb", "ast"]].sum()
     dfn = tg.rename(columns={"opp": "def_team"}).sort_values(["date", "game_id"])
-    lg = dfn.groupby("date")[["pts", "reb", "ast"]].mean()
-    lg = lg.expanding().mean().shift(1)
+    lg_all = dfn.groupby("date")[["pts", "reb", "ast"]].mean().expanding().mean()
+    lg = lg_all.shift(1)
+    nxt = {}                                                    # what the same formula gives for the NEXT game of each defender
     for c in ("pts", "reb", "ast"):
         dfn[f"opp_allow_{c}"] = dfn.groupby("def_team")[c].transform(lambda x: x.shift(1).rolling(30, min_periods=8).mean())
         ratio = dfn[f"opp_allow_{c}"] / dfn["date"].map(lg[c])
         # opponent defence is noisy: shrink toward league average and clip so trees never see wild values
         dfn[f"opp_allow_{c}"] = (1 + 0.5 * (ratio - 1)).clip(0.93, 1.07)
+        last = dfn.groupby("def_team")[c].agg(lambda x: x.tail(30).mean() if len(x) >= 8 else np.nan)
+        nxt[c] = (1 + 0.5 * (last / lg_all[c].iloc[-1] - 1)).clip(0.93, 1.07)
     dfn = dfn[["game_id", "def_team", "opp_allow_pts", "opp_allow_reb", "opp_allow_ast"]]
     df = df.merge(dfn, left_on=["game_id", "opp"], right_on=["game_id", "def_team"], how="left").drop(columns="def_team")
+    if upc.any():
+        up2 = df["_upcoming"] == 1
+        for c in ("pts", "reb", "ast"): df.loc[up2, f"opp_allow_{c}"] = df.loc[up2, "opp"].map(nxt[c])
     # market context: DraftKings total/spread via ESPN (known before tip-off). Historical rows come from the games table;
     # tonight's placeholder rows may carry their own ou/spread_home columns.
     try:
