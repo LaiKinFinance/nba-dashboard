@@ -59,3 +59,13 @@ def test_same_player_in_different_games_has_separate_marginals():
     preds = {(g, 'p'): dict(proj=dict(pts=mu), team='BOS') for g, mu in [('a', 8), ('b', 35)]}
     r = parlay.parlay(legs, preds, {'pts': .1}, {'same': np.eye(3).tolist()})
     assert abs(r['joint']-r['independent']) < .003
+
+
+def test_binary_under_and_integer_push_are_not_wins():
+    pred = dict(proj=dict(pts=20, reb=8, ast=5), p_dd=.3, p_td=.02, team='BOS')
+    leg = dict(game_id='g', player_id='p', stat='dd', line=0, side='under')
+    r = parlay.parlay([leg], {('g', 'p'): pred}, dict.fromkeys(parlay.CORE, .1), {'same': np.eye(3).tolist()})
+    assert abs(r['joint']-.7) < .01
+    under = dict(leg, stat='pts', line=20)
+    expected = stats.nbinom.cdf(19, 10, 1/3)
+    assert parlay.leg_prob_single(pred, {'pts': .1}, under) == pytest.approx(expected)
