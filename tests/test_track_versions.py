@@ -33,3 +33,9 @@ def test_each_day_carries_the_first_start_time_so_the_page_can_use_the_phone_clo
     _pick(c, "NEW", None); c.commit()
     day = client.get("/api/track").json()["days"][0]
     assert day["day"] == "2026-10-28" and day["start"] == "2026-10-30T00:00Z"
+
+
+def test_todays_picks_cover_only_the_next_game_day():
+    rows = [dict(start="2026-10-30T00:00Z", id=1), dict(start="2026-10-30T02:00Z", id=2), dict(start="2026-10-30T23:30Z", id=3), dict(start="2026-10-31T02:00Z", id=4)]
+    assert [r["id"] for r in app.next_game_day(rows)] == [1, 2]
+    assert app.next_game_day([]) == []

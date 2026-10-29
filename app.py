@@ -714,8 +714,14 @@ def min_edge(p):
     unsure = (p.get("injury") or {}).get("status") in ("Questionable", "Day-To-Day", "Doubtful", "Game Time Decision")
     return MIN_EDGE_UNSURE if unsure else MIN_EDGE
 
+def next_game_day(preds):
+    """Today's picks cover only the next day of games (the US date of the first game not yet started), not every future game."""
+    if not preds: return preds
+    day = et_day(min(p["start"] for p in preds))
+    return [p for p in preds if et_day(p["start"]) == day]
+
 def compute_value():
-    preds = [p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]; out = []
+    preds = next_game_day([p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]); out = []
     _, why = model_status(preds)
     if why: return dict(picks=[], odds_connected=bool(__import__("odds").available()), notice=why)
     for p in preds:
@@ -777,7 +783,7 @@ def best(x_code: str = Header("")):
     return res
 
 def compute_best():
-    preds = [p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]; cands = []
+    preds = next_game_day([p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]); cands = []
     _, why = model_status(preds)
     if why: return dict(legs=[], combo=dict(legs=[], joint=None, fair_odds=None), notice=why)
     for p in preds:
