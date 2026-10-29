@@ -31,6 +31,8 @@ def _refresh_loop():
             if time.time() - last_train > 7 * 86400: predict.train(); last_train = time.time()
             predict.save(predict.project())
             logging.info("odds refresh: %s", refresh_odds())
+            try: grade_picks(); log_picks()
+            except Exception: logging.exception("pick log/grade failed")
         except Exception:
             logging.exception("refresh failed")
         time.sleep(4 * 3600)
@@ -49,6 +51,9 @@ def init():
         CREATE TABLE IF NOT EXISTS comments(id INTEGER PRIMARY KEY, pick_id INTEGER, user TEXT, created TEXT, body TEXT);
         CREATE TABLE IF NOT EXISTS votes(pick_id INTEGER, user TEXT, v INTEGER, PRIMARY KEY(pick_id, user));
         CREATE TABLE IF NOT EXISTS bets(id INTEGER PRIMARY KEY, user TEXT, created TEXT, legs TEXT, stake REAL, odds REAL, model_prob REAL, result TEXT DEFAULT 'open');
+        CREATE TABLE IF NOT EXISTS pick_log(id INTEGER PRIMARY KEY, day TEXT, game_id TEXT, player_id TEXT, player TEXT, team TEXT, kind TEXT, stat TEXT, line REAL, side TEXT,
+            model_p REAL, hit INT, n INT, price REAL, book TEXT, in_combo INT, created TEXT, result TEXT, actual REAL, graded_at TEXT, UNIQUE(game_id, player_id, stat, kind));
+        CREATE TABLE IF NOT EXISTS combo_log(id INTEGER PRIMARY KEY, day TEXT UNIQUE, legs TEXT, joint REAL, fair_odds REAL, created TEXT, result TEXT, graded_at TEXT);
         CREATE TABLE IF NOT EXISTS manual_odds(game_id TEXT, player_id TEXT, stat TEXT, line REAL, side TEXT, odds REAL, PRIMARY KEY(game_id, player_id, stat, line, side));
         """); c.commit()
 init()
@@ -270,10 +275,110 @@ def _evidence(p, s, line, prob, price, edge, adj):
     if inj and inj != "Active": ev.append(f"Caution: listed {inj}")
     return ev
 
+from zoneinfo import ZoneInfo
+ET = ZoneInfo("America/New_York")
+
+def et_day(start_iso):
+    return dt.datetime.fromisoformat(start_iso.replace("Z", "+00:00")).astimezone(ET).date().isoformat()
+
+def log_picks(best=None, value=None):
+    """Lock today's published picks into the track record the first time they are generated (never edited afterwards, only graded)."""
+    now = dt.datetime.now(dt.timezone.utc); now_s = now.strftime("%Y-%m-%dT%H:%MZ")
+    best = best or compute_best(); value = value or compute_value()
+    with closing(con()) as c:
+        in_combo = {(x["game_id"], x["player_id"], x["stat"]) for x in best["combo"]["legs"]}
+        for l in best["legs"]:
+            if l["start"] <= now_s: continue   # only picks made before tip-off count
+            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (et_day(l["start"]), l["game_id"], l["player_id"], l["player"], l["team"], "leg", l["stat"], l["line"], "over", l["p"], l["hit"], l["n"], l["price"], None,
+                       int((l["game_id"], l["player_id"], l["stat"]) in in_combo), now.isoformat()))
+        cl = best["combo"]["legs"]
+        if cl and best["combo"]["joint"] and min(x["start"] for x in cl) > now_s:
+            c.execute("INSERT OR IGNORE INTO combo_log(day,legs,joint,fair_odds,created) VALUES(?,?,?,?,?)",
+                      (et_day(min(x["start"] for x in cl)), json.dumps([dict(game_id=x["game_id"], player_id=x["player_id"], player=x["player"], team=x["team"], stat=x["stat"], line=x["line"], p=x["p"]) for x in cl]),
+                       best["combo"]["joint"], best["combo"]["fair_odds"], now.isoformat()))
+        for o in value["picks"]:
+            if o["start"] <= now_s: continue
+            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (et_day(o["start"]), o["game_id"], o.get("player_id", ""), o.get("player") or o.get("text"), o.get("team", ""), "value", o["stat"], o["line"], o["side"], o["p"],
+                       o.get("hit"), o.get("n"), o["price"], o.get("book"), 0, now.isoformat()))
+        c.commit()
+
+def grade_picks():
+    """Grade logged picks against final box scores (void when the player did not play)."""
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    with closing(con()) as c:
+        for r in c.execute("SELECT * FROM pick_log WHERE result IS NULL").fetchall():
+            g = c.execute("SELECT home_pts, away_pts FROM games WHERE game_id=?", (r["game_id"],)).fetchone()
+            if not g: continue                         # game not final / not ingested yet
+            if r["stat"] == "ml":
+                margin = g["home_pts"] - g["away_pts"]; won = (margin > 0) if r["side"] == "home" else (margin < 0)
+                res, actual = ("won" if won else "lost"), float(margin if r["side"] == "home" else -margin)
+            else:
+                pr = c.execute("SELECT pts,reb,ast,fg3m,stl,blk FROM player_games WHERE game_id=? AND player_id=?", (r["game_id"], r["player_id"])).fetchone()
+                if not pr: res, actual = "void", None
+                elif r["stat"] in ("dd", "td"):
+                    cats = sum(1 for k in ("pts", "reb", "ast") if pr[k] >= 10); actual = float(cats); res = "won" if cats >= (2 if r["stat"] == "dd" else 3) else "lost"
+                else:
+                    actual = float(sum(pr[k] for k in COMBO_PARTS.get(r["stat"], (r["stat"],)))); res = "won" if actual > r["line"] else "lost"
+            c.execute("UPDATE pick_log SET result=?, actual=?, graded_at=? WHERE id=?", (res, actual, now, r["id"]))
+        for r in c.execute("SELECT * FROM combo_log WHERE result IS NULL").fetchall():
+            legs = json.loads(r["legs"]); rs = []
+            for l in legs:
+                x = c.execute("SELECT result FROM pick_log WHERE game_id=? AND player_id=? AND stat=? AND kind='leg'", (l["game_id"], l["player_id"], l["stat"])).fetchone()
+                rs.append(x["result"] if x else None)
+            if any(v is None for v in rs): continue
+            res = "lost" if "lost" in rs else ("void" if "void" in rs else "won")
+            c.execute("UPDATE combo_log SET result=?, graded_at=? WHERE id=?", (res, now, r["id"]))
+        c.commit()
+
+@app.get("/api/track")
+def track_record(x_code: str = Header("")):
+    """Track record of the published best picks and value bets, graded against real results."""
+    check(x_code)
+    try: grade_picks()
+    except Exception: logging.exception("grading failed")
+    with closing(con()) as c:
+        legs = [dict(r) for r in c.execute("SELECT * FROM pick_log ORDER BY day DESC, id")]
+        combos = [dict(r) for r in c.execute("SELECT * FROM combo_log ORDER BY day DESC")]
+    def summ(rows):
+        g = [r for r in rows if r["result"] in ("won", "lost")]
+        return dict(n=len(g), won=sum(1 for r in g if r["result"] == "won"), avg_p=(sum(r["model_p"] for r in g) / len(g)) if g else None,
+                    pending=sum(1 for r in rows if r["result"] is None), void=sum(1 for r in rows if r["result"] == "void"))
+    L = [r for r in legs if r["kind"] == "leg"]; V = [r for r in legs if r["kind"] == "value"]
+    out = dict(legs=summ(L), value=summ(V))
+    bins = []
+    for lo, hi in ((0.0, 0.7), (0.7, 0.8), (0.8, 1.01)):
+        g = [r for r in L if r["result"] in ("won", "lost") and lo <= r["model_p"] < hi]
+        if g: bins.append(dict(lo=lo, hi=min(hi, 1.0), n=len(g), predicted=sum(r["model_p"] for r in g) / len(g), actual=sum(1 for r in g if r["result"] == "won") / len(g)))
+    out["calibration"] = bins
+    by = {}
+    for r in L:
+        if r["result"] in ("won", "lost"): d = by.setdefault(r["stat"], dict(n=0, won=0)); d["n"] += 1; d["won"] += r["result"] == "won"
+    out["by_stat"] = by
+    pv = [r for r in V if r["result"] in ("won", "lost") and r["price"]]
+    out["value_roi"] = (sum((r["price"] - 1) if r["result"] == "won" else -1 for r in pv) / len(pv)) if pv else None
+    gc = [x for x in combos if x["result"] in ("won", "lost")]
+    out["combos"] = dict(n=len(gc), won=sum(1 for x in gc if x["result"] == "won"), avg_p=(sum(x["joint"] for x in gc) / len(gc)) if gc else None, pending=sum(1 for x in combos if x["result"] is None))
+    days = {}
+    for x in combos: days.setdefault(x["day"], dict(day=x["day"], combo=dict(result=x["result"], joint=x["joint"], fair_odds=x["fair_odds"], legs=json.loads(x["legs"])), legs=[], value=[]))
+    for r in legs:
+        d = days.setdefault(r["day"], dict(day=r["day"], combo=None, legs=[], value=[]))
+        (d["legs"] if r["kind"] == "leg" else d["value"]).append(dict(player=r["player"], team=r["team"], stat=r["stat"], line=r["line"], side=r["side"], p=r["model_p"], price=r["price"],
+                                                                      result=r["result"], actual=r["actual"], in_combo=bool(r["in_combo"])))
+    out["days"] = sorted(days.values(), key=lambda d: d["day"], reverse=True)[:21]
+    return out
+
 @app.get("/api/value")
 def value_picks(x_code: str = Header("")):
     """Legs where the model's chance clearly beats the bookmaker's price, each with the evidence behind it. Needs bookmaker prices."""
     check(x_code)
+    res = compute_value()
+    try: log_picks(value=res)
+    except Exception: logging.exception("pick logging failed")
+    return res
+
+def compute_value():
     preds = enriched(); out = []
     for p in preds:
         if (p.get("injury") or {}).get("status") in ("Out",): continue
@@ -283,7 +388,7 @@ def value_picks(x_code: str = Header("")):
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
                 if edge < 0.06 or l["n"] < 5: continue
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
-                out.append(dict(kind="player", game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
+                out.append(dict(kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
                                 price=l["price"], book=l["book"], p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
                                 confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
@@ -292,7 +397,7 @@ def value_picks(x_code: str = Header("")):
             edge = p[pk] - 1 / b["price"]; adj = 0.7 * p[pk] + 0.3 / b["price"]
             if edge < 0.06: continue
             hk = p[f"{s}_hit"]
-            out.append(dict(kind="player", game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
+            out.append(dict(kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
                             p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0,
                             confidence="Medium" if edge >= 0.1 and hk["k"] / max(hk["n"], 1) >= 0.25 else "Speculative",
                             evidence=[f"Model chance {p[pk]*100:.1f}% vs price implies {100/b['price']:.1f}%", f"Did it in {hk['k']} of his last {hk['n']} games"] +
@@ -312,7 +417,7 @@ def value_picks(x_code: str = Header("")):
         for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
             pr = (b.get("h2h") or {}).get(side)
             if pr and g[pk] - 1 / pr[0] >= 0.04:
-                ranked.append(dict(kind="team", game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
+                ranked.append(dict(kind="team", start=g["start"], game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
                                    adj_edge=g[pk] - 1 / pr[0], confidence="Medium" if g[pk] - 1 / pr[0] >= 0.06 else "Speculative",
                                    evidence=[f"Betting-market consensus (DraftKings) puts {nmx} at {g[pk]*100:.0f}% to win; {bkName_(pr[1])}'s price implies only {100/pr[0]:.0f}%",
                                              f"Expected score {g['away']} {g['away_pts']:.0f} – {g['home']} {g['home_pts']:.0f} (market spread and total)",
@@ -322,8 +427,14 @@ def value_picks(x_code: str = Header("")):
 
 @app.get("/api/best")
 def best(x_code: str = Header("")):
-    """Safest legs of the day plus a suggested 2-3 leg combo aiming for fair odds of ~2.0+ while staying likely."""
+    """Safest legs of the day plus a suggested 2-3 leg combo aiming for fair odds of ~2.0+ while staying likely. Also locks them into the track record."""
     check(x_code)
+    res = compute_best()
+    try: log_picks(best=res)
+    except Exception: logging.exception("pick logging failed")
+    return res
+
+def compute_best():
     preds = enriched(); cands = []
     for p in preds:
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
@@ -335,7 +446,7 @@ def best(x_code: str = Header("")):
             o = max(ok, key=lambda x: x["line"])  # highest line that is still safe = best payout among safe legs
             if o["p"] > 0.86: continue  # too short to be worth a leg (pays almost nothing)
             cands.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
-                              p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], starting=p["starting"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
+                              p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
     cands.sort(key=lambda x: -x["score"])
     combo, used, games = [], set(), set()
     pmap = {(p["game_id"], p["player_id"]): p for p in preds}

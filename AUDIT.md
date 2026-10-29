@@ -19,6 +19,11 @@ Friends use it through a shared access code; picks/bets/comments are stored in S
 6. `odds.py` — The Odds API client (credit-aware, per-game cooldown), stores all bookmakers; `slate.py` — ESPN schedule/injuries + Rotowire lineups (HTML scrape).
 7. `app.py` (FastAPI) + `static/index.html` (single-file vanilla JS UI, PWA; light "sportsbook" theme by default with a dark toggle; each game is a set of collapsible market sections). `live.py` — live scores/box scores from ESPN.
 
+## Track record (new)
+`app.py` locks the published "best picks" / value bets into `pick_log` and `combo_log` the first time they are generated (before tip-off, never edited), then grades them
+against final box scores (`grade_picks`). `/api/track` summarises hit rate vs the model's own probabilities (calibration). Please check the logging/grading logic for
+look-ahead bias, double counting, timezone (ET day) errors and void handling.
+
 ## Commands
 ```
 pip install -r requirements.txt

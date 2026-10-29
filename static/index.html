@@ -72,6 +72,7 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .more>summary{font-size:12px;color:var(--acc);cursor:pointer;margin-top:8px}.seg.mini{margin:2px 0 0}.seg.mini button{padding:4px 8px;font-size:12px;flex:none}
 .mhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 2px}.mhd .mt{margin:0}
 .wn4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:6px}.th.clk{cursor:pointer}.th.clk:hover{background:var(--card2)}.lsum{font-size:12px;color:var(--mute);margin:-2px 0 6px}
+.lgh{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer}.lgh img{width:30px;height:30px;object-fit:contain}.lgh:hover{background:var(--card2)}.lg2.open .chv{transform:rotate(180deg)}.chv{color:var(--mute);transition:transform .15s}.lsum2{padding:0 14px 12px;font-size:12.5px}
 .od .bk{font-size:9px;color:var(--mute);text-transform:uppercase;letter-spacing:.4px}
 .mk2{display:flex;gap:5px;margin-top:5px;min-width:0}.mk2 .od{flex:1;display:flex;justify-content:space-between;padding:6px 10px;align-items:center;text-align:left;gap:6px}.mk2 .od .p{display:block}
 .l5t{background:none;border:0;color:var(--acc);font-size:12px;padding:6px 0 0}.l5{display:none;margin-top:4px}.l5.open{display:block}
@@ -165,7 +166,7 @@ table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk 
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["today","Games"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
+const TABS=[["today","Games"],["best","Best picks"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My bets"],["players","Players"]];
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
 let tab=localStorage.tab&&TABS.some(t=>t[0]==localStorage.tab)?localStorage.tab:"today";
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,oddsManual=false,snaps={},alerts=[],live={};
@@ -196,8 +197,8 @@ const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 
 function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
 function go(t,pid){tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
-async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",tab!="today");
-  clearInterval(liveTimer);try{await({today,live:liveTab,lineups:lineupsTab,picks,bets,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
+async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
+  clearInterval(liveTimer);try{await({today,best:bestTab,live:liveTab,lineups:lineupsTab,picks,bets,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -221,7 +222,8 @@ function estOdds(){return legs.length&&legs.every(l=>l.price)?legs.reduce((a,l)=
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
   const e=estOdds(),inp=$("#podds");let o=oddsManual&&inp&&inp.value!==""?parseFloat(inp.value):(e||null);
   try{const r=await post("parlay",{legs:legs.map(({game_id,player_id,stat,line,side,team,lo,hi})=>({game_id,player_id,stat,line,side,team,lo,hi})),odds:o||null});calc={r,o:o||null};drawSlip()}catch(x){}},250)}
-function drawSlip(){const w=$("#slipwrap");if(tab!="today"){w.innerHTML="";return}
+const SLIPTABS=["today","best"];
+function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHTML="";return}
   const fid=document.activeElement&&document.activeElement.id;
   const keep=($("#podds")||{}).value,stake=($("#stake")||{}).value||"",note=($("#note")||{}).value||"";const r=calc&&calc.r,e=estOdds();
   const oddsVal=oddsManual&&keep!==undefined&&keep!==""?keep:(e?e.toFixed(2):"");
@@ -370,11 +372,11 @@ function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.comb
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
 function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));oddsManual=false;calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);oddsManual=false;calc=null;slipMin=false;paintSel();drawSlip();recalc()}
-async function today(a){await loadSlate();api("best").then(b=>{best=b;const el=$("#bestbox");if(el)el.innerHTML=bestHTML()}).catch(()=>{});api("value").then(v=>{VAL=v;const el=$("#valbox");if(el)el.innerHTML=valueHTML()}).catch(()=>{});
+async function today(a){await loadSlate();
   if(!slate.length){a.innerHTML='<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
   const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
-  a.innerHTML=`<div id="bestbox">${bestHTML()}</div><div id="valbox">${valueHTML()}</div><div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
+  a.innerHTML=`<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
    <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div>
@@ -394,6 +396,30 @@ function valueHTML(){if(!VAL)return"";
    <p class="mute" style="margin:8px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check, and track results on the My bets tab.</p></div>`}
 function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o.stat,o.side,o.line,o.price,o.book,o.p,o.text);
   else pick(o.game_id,o.player_id,o.stat,o.line,o.price,o.book,o.p,o.hit,o.n)}
+
+/* ---------- best picks tab: today's picks + track record ---------- */
+let bestView=(()=>{try{return localStorage.bestView||"today"}catch(e){return"today"}})();
+const pc0=x=>x==null?"–":Math.round(x*100)+"%";
+const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
+async function bestTab(a){await loadSlate();
+  const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
+  a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today's picks</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Track record</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
+  if(bestView=="today"){const [b,v]=await Promise.all([api("best"),api("value")]);best=b;VAL=v;
+    $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML()}
+  else{const t=await api("track"),L=t.legs,C=t.combos,V=t.value;
+    const gap=L.n>=20?L.won/L.n-L.avg_p:null;
+    const verdict=L.n<20?`Too early to judge: about ${20-L.n} more graded picks are needed before the hit rate means much.`:gap<-0.07?"Picks are winning less often than the model expected, so its confidence has been too high.":gap>0.07?"Picks are winning more often than the model expected, so it has been cautious.":"Hit rate is close to what the model expected.";
+    $("#bbody").innerHTML=`<div class="tiles"><div class="tile"><div class="v">${L.n?pc0(L.won/L.n):"–"}</div><div class="k">Legs won (${L.won} of ${L.n}${L.pending?`, ${L.pending} pending`:""})</div></div>
+      <div class="tile"><div class="v">${pc0(L.avg_p)}</div><div class="k">Model expected</div></div>
+      <div class="tile"><div class="v">${C.n?C.won+"/"+C.n:"–"}</div><div class="k">Daily combos won${C.n?` (model expected ${pc0(C.avg_p)})`:""}</div></div></div>
+     <div class="card"><h2>What this tells us</h2><p style="margin:0">${verdict}</p>
+      ${t.calibration.length?`<table class="t" style="margin-top:8px"><tr><th style="text-align:left">When the model said</th><th>Picks</th><th>Hit</th></tr>${t.calibration.map(b=>`<tr><td style="text-align:left">${pc0(b.lo)}–${pc0(b.hi)} (avg ${pc0(b.predicted)})</td><td>${b.n}</td><td>${pc0(b.actual)}</td></tr>`).join("")}</table>`:""}
+      ${Object.keys(t.by_stat).length?`<h3>By market</h3><div class="pillrow" style="flex-wrap:wrap">${Object.entries(t.by_stat).map(([k,v])=>`<span class="pill">${statName[k]||k}: ${v.won}/${v.n}</span>`).join("")}</div>`:""}
+      ${V.n?`<h3>Value bets</h3><p class="mute" style="margin:0">${V.won} of ${V.n} won (model expected ${pc0(V.avg_p)})${t.value_roi!=null?` · return on flat stakes ${(t.value_roi*100>=0?"+":"")+(t.value_roi*100).toFixed(0)}%`:""}</p>`:""}
+      <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></div>
+     ${t.days.length?t.days.map(d=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${new Date(d.day+"T12:00:00").toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})}</b>${d.combo?`<span>Daily combo: ${resIcon(d.combo.result)} <span class="mute">(model ${pc0(d.combo.joint)})</span></span>`:""}</div>
+        ${d.legs.map(x=>`<div class="lg"><div>${esc(x.player)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}
+        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${esc(x.player)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</div>`).join(""):'<div class="card empty">Nothing recorded yet. Picks start being logged from the first time you open Today\'s picks.</div>'}`}}
 
 /* ---------- friends' picks ---------- */
 async function picks(a){const ps=await api("picks");
@@ -515,20 +541,24 @@ async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refres
 let LU=[],luF={q:"",conf:false};
 const luChip=t=>/out|ofs/i.test(t)?"out":/ques|doubt|game-time|gtd/i.test(t)?"q":"ok";
 const dotc=p=>p==null||p>=100?"var(--good)":p>=50?"var(--gold)":"var(--bad)";
-let luOpen={};const luOn=k=>luOpen[k]!==false;
-function luTog(k){luOpen[k]=!luOn(k);drawLineups()}
-function luAll(open){LU.forEach(g=>[g.away,g.home].forEach(sd=>luOpen[luId(g)+"|"+sd.team]=open));drawLineups()}
+let luOpen={};
 const luId=g=>g.away.team+"-"+g.home.team;
-function luSide(sd,gid){const k=gid+"|"+sd.team,open=luOn(k);
+function luTog(id){luOpen[id]=!luOpen[id];drawLineups()}
+function luAll(open){LU.forEach(g=>luOpen[luId(g)]=open);drawLineups()}
+function luSide(sd){
   const row=(p,out)=>`<div class="lp"><span class="pos">${esc(p.pos)}</span>${photo(p.player_id||0,p.name)}<span class="nm2" ${p.player_id?`onclick="go('players','${p.player_id}')"`:""}>${p.top3?"⭐ ":""}${esc(p.name)}${p.new?'<span class="newb">NEW</span>':""}</span>${out?`<span class="stc ${luChip(p.status)}">${esc(p.status)}</span>`:`<span class="dot" style="background:${dotc(p.pct)}" title="${esc(p.note||"")}"></span>`}</div>`;
-  const sum=sd.starters.map(p=>p.name.split(" ").slice(-1)[0]).join(", ");
-  return `<div><div class="th clk" onclick="luTog('${k}')"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span><span style="margin-left:auto;color:var(--mute)">${open?"▾":"▸"}</span></div>
-   ${open?`${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
-   ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}`:`<div class="lsum">${esc(sum||"Lineup not posted yet")}${sd.out.length?` · ${sd.out.length} may not play`:""}</div>`}</div>`}
+  return `<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span></div>
+   ${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
+   ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
 function drawLineups(){const q=luF.q.toLowerCase();
-  const gs=LU.filter(g=>(!luF.conf||(g.away.confirmed&&g.home.confirmed))&&(!q||[g.away,g.home].some(sd=>(sd.team+" "+nm(sd.team)+" "+sd.starters.concat(sd.out).map(p=>p.name).join(" ")).toLowerCase().includes(q))));
-  $("#lubody").innerHTML=gs.map(g=>`<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><img src="${logo(g.away.team)}" style="width:30px;height:30px" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" style="width:30px;height:30px" alt=""><span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span></div>
-    <div class="lu">${luSide(g.away,luId(g))}${luSide(g.home,luId(g))}</div></div>`).join("")||'<div class="card empty">No lineups match.</div>'}
+  const hit=g=>[g.away,g.home].some(sd=>(sd.team+" "+nm(sd.team)+" "+sd.starters.concat(sd.out).map(p=>p.name).join(" ")).toLowerCase().includes(q));
+  const gs=LU.filter(g=>(!luF.conf||(g.away.confirmed&&g.home.confirmed))&&(!q||hit(g)));
+  const last=sd=>sd.starters.map(p=>p.name.split(" ").slice(-1)[0]).join(", ")||"not posted yet";
+  const chip=sd=>`<span class="stc ${sd.confirmed?"ok":"ex"}">${sd.team} ${sd.confirmed?"confirmed":"expected"}</span>`;
+  $("#lubody").innerHTML=gs.map(g=>{const id=luId(g),open=luOpen[id]||(q&&luOpen[id]!==false);   // a search opens the matching games
+    return `<div class="card lg2 ${open?"open":""}" style="padding:0"><div class="lgh" onclick="luTog('${id}')"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt="">
+      <span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span><span class="chv">▾</span></div>
+      ${open?`<div class="lu" style="padding:0 14px 12px">${luSide(g.away)}${luSide(g.home)}</div>`:`<div class="lsum2">${chip(g.away)} ${chip(g.home)}<div class="mute" style="margin-top:4px">${nm(g.away.team)}: ${esc(last(g.away))}<br>${nm(g.home.team)}: ${esc(last(g.home))}</div></div>`}</div>`}).join("")||'<div class="card empty">No lineups match.</div>'}
 async function lineupsTab(a){a.innerHTML=`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
    <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
   LU=await api("lineups");drawLineups()}
