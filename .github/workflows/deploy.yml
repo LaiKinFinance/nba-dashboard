@@ -1,0 +1,31 @@
+name: Deploy to Fly.io
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: nba-top3-dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Create app and volume if missing
+        run: |
+          flyctl apps list | grep -q "^$APP " || flyctl apps create "$APP"
+          flyctl volumes list -a "$APP" | grep -q nba_data || flyctl volumes create nba_data --size 1 --region syd -a "$APP" -y
+      - name: Set secrets
+        env:
+          APP_ACCESS_CODE: ${{ secrets.APP_ACCESS_CODE }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          [ -n "$APP_ACCESS_CODE" ] && flyctl secrets set APP_ACCESS_CODE="$APP_ACCESS_CODE" -a "$APP" --stage
+          [ -n "$ODDS_API_KEY" ] && flyctl secrets set ODDS_API_KEY="$ODDS_API_KEY" -a "$APP" --stage
+          true
+      - name: Deploy
+        run: flyctl deploy --remote-only -a "$APP"
