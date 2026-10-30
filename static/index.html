@@ -347,7 +347,7 @@ function gameHTML(g){gameIdx[g.game_id]=g;const t=Object.values(g.teams),away=t.
   const open=openGames.has(g.game_id),all=[...away.players,...home.players],gt=gtab[g.game_id]||"players";
   return `<div class="game ${open?"open":""}" id="g${g.game_id}"><button class="gh" onclick="tg('${g.game_id}')">
    <div class="tm"><img src="${logo(away.team)}" alt=""><div><b>${nm(away.team)}</b><small>${away.team}</small></div></div>
-   <div class="mid"><div class="t">${timeOf(g.start)}</div><div class="s">at</div></div>
+   <div class="mid"><div class="t">${timeOf(g.start)}${liveDot(g.game_id)}</div><div class="s">at</div></div>
    <div class="tm r"><div><b>${nm(home.team)}</b><small>${home.team}</small></div><img src="${logo(home.team)}" alt=""></div>
    <div class="av">${all.map(p=>photo(p.player_id,p.player)).join("")}</div><span class="chev">▾</span></button>
    <div class="gb"><div class="gbody">${open?gbodyHTML(g):""}</div></div></div>`}
@@ -366,6 +366,8 @@ function drawGames(){const q=filt.q.toLowerCase();let gs=slate.filter(g=>{
   if(filt.start)gs=gs.map(g=>({...g,teams:Object.fromEntries(Object.entries(g.teams).map(([k,t])=>[k,{...t,players:t.players.filter(p=>p.starting)}]))}));
   let h="",last="";for(const g of gs){const d=dayKey(g.start);if(d!=last){h+=`<div class="day">${d}</div>`;last=d}h+=gameHTML(g)}
   $("#glist").innerHTML=h||'<div class="empty">No games match.</div>';paintSel();centerStrips()}
+function playingHTML(){const rows=(best&&best.playing||[]).filter(x=>LIVEIDS.has(x.game_id));if(!rows.length)return"";
+  return `<div class="card"><h2>Playing now</h2>${rows.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:"over"})} · model ${pc0(x.p)}</small></div></div>`).join("")}</div>`}
 function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.combo;
   const L=l=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · bench/TBC"}</span></div><div style="text-align:right"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</div></div></div>`;
   return `<div class="card best"><h2>⭐ Today's best picks</h2><p class="mute" style="margin:0 0 6px">A safe-ish multi: each leg is likely and has hit in most of the player's last 10 games.</p>
@@ -377,7 +379,7 @@ function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.comb
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
 function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
-async function today(a){await loadSlate();
+async function today(a){await loadSlate();LIVEIDS=liveSet(await quietLive());
   if(!slate.length){a.innerHTML=(meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. The numbers will appear in a few minutes.</div>`:"")+'<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
   const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
@@ -385,7 +387,7 @@ async function today(a){await loadSlate();
    <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div>
-   <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="glist"></div>`;drawGames();pollStatus()}
+   <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="glist"></div>`;drawGames();pollStatus();dotTimer()}
 
 /* ---------- value bets with evidence ---------- */
 let VAL=null;
@@ -406,13 +408,19 @@ function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o
 let bestView="today";      // always open on today's picks
 const pc0=x=>x==null?"–":Math.round(x*100)+"%";
 const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
-const trackWho=(x,liveIds)=>`${x.player_id?photo(x.player_id,x.player):""}${x.team?`<img src="${logo(x.team)}" alt="${esc(x.team)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}${esc(x.player)}<span class="live-dot" data-g="${esc(x.game_id||"")}" style="${liveIds.has(x.game_id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
+let LIVEIDS=new Set();
+const quietLive=async()=>{try{const r=await fetch("/api/live",{headers:hdr()});return r.ok?await r.json():[]}catch(e){return[]}};
+const liveSet=g=>new Set((g||[]).filter(x=>x.state=="in").map(x=>x.game_id));
+const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEIDS.has(id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
+async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
+const dotTimer=()=>{liveTimer=setInterval(()=>{if(document.visibilityState=="visible")refreshDots()},30000)};     // red dots follow the live scoreboard while a page is open
+const trackWho=x=>`${x.player_id?photo(x.player_id,x.player):""}${x.team?`<img src="${logo(x.team)}" alt="${esc(x.team)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}${esc(x.player)}${liveDot(x.game_id)}`;
 async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
   a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today's picks</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Track record</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
-  if(bestView=="today"){const [b,v]=await Promise.all([api("best"),api("value"),slateP]);best=b;VAL=v;
-    $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML()}
-  else{const [t,lv0]=await Promise.all([api("track"),api("live").catch(()=>[])]),L=t.legs,C=t.combos,V=t.value;await slateP;const liveIds=new Set((lv0||[]).filter(g=>g.state=="in").map(g=>g.game_id));
+  if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LIVEIDS=liveSet(lv0);
+    $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+playingHTML()+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML();dotTimer()}
+  else{const [t,lv0]=await Promise.all([api("track"),quietLive()]),L=t.legs,C=t.combos,V=t.value;await slateP;LIVEIDS=liveSet(lv0);
     const gap=L.n>=20?L.won/L.n-L.avg_p:null;
     const verdict=L.n<20?`Too early to judge: about ${20-L.n} more graded picks are needed before the hit rate means much.`:gap<-0.07?"Picks are winning less often than the model expected, so its confidence has been too high.":gap>0.07?"Picks are winning more often than the model expected, so it has been cautious.":"Hit rate is close to what the model expected.";
     $("#bbody").innerHTML=`<div class="tiles"><div class="tile"><div class="v">${L.n?pc0(L.won/L.n):"–"}</div><div class="k">Legs won (${L.won} of ${L.n}${L.pending?`, ${L.pending} pending`:""})</div></div>
@@ -425,11 +433,9 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
       ${t.closing&&t.closing.n?`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">On ${t.closing.n} value picks the price we showed was ${t.closing.avg_clv>=0?"better":"worse"} than the last price seen before tip-off by ${Math.abs(t.closing.avg_clv*100).toFixed(1)}% on average, and better on ${pc0(t.closing.share_beat)} of them. Consistently beating the closing price over hundreds of picks is the best sign of a real edge; wins and losses alone prove little. (Our last price check was on average ${Math.round(t.closing.avg_mins_before_tip)} min before tip-off.)</p>`:`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">Collecting data: bookmaker prices are now saved every time they are fetched, and compared with each pick once its game has started.</p>`}
       <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></div>
      ${t.days.length?t.days.map(d=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})}</b>${d.combo?`<span>Daily combo: ${resIcon(d.combo.result)} <span class="mute">(model ${pc0(d.combo.joint)})</span></span>`:""}</div>
-        ${d.legs.map(x=>`<div class="lg"><div>${trackWho(x,liveIds)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}
-        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${trackWho(x,liveIds)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</div>`).join(""):'<div class="card empty">Nothing recorded yet. Picks start being logged from the first time you open Today\'s picks.</div>'}`;
-    // the red dot follows the live scoreboard (checked every 30 seconds while this page is open)
-    liveTimer=setInterval(async()=>{if(document.visibilityState!="visible"||tab!="best"||bestView!="track")return;let g;try{g=await api("live")}catch(e){return}
-      const on=new Set(g.filter(x=>x.state=="in").map(x=>x.game_id));document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=on.has(d.dataset.g)?"":"none"})},30000)}}
+        ${d.legs.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}
+        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${trackWho(x)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</div>`).join(""):'<div class="card empty">Nothing recorded yet. Picks start being logged from the first time you open Today\'s picks.</div>'}`;
+    dotTimer()}}
 
 /* ---------- friends' picks ---------- */
 const boardRows=(rows,fmt)=>rows.length?rows.map((r,i)=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>${i+1}. ${esc(r.user)}</span><b>${fmt(r)}</b></div>`).join(""):'<p class="mute" style="margin:2px 0">Nobody yet</p>';
@@ -438,13 +444,13 @@ function leaderboardHTML(lb){return `<div class="card"><h2>Leaderboard</h2>
   <h3>Hardest pick won</h3>${boardRows(lb.hardest,r=>`won a ${pct(r.chance)} pick`)}
   <h3>Biggest price won <span class="mute">(bookmaker price when saved, about)</span></h3>${boardRows(lb.biggest_price||[],r=>`won at about ${r.price.toFixed(2)}`)}
   <h3>% of picks won <span class="mute">(after ${lb.min_picks} finished picks)</span></h3>${boardRows(lb.rate,r=>`${pct(r.rate)} · ${r.picks} picks`)}</div>`}
-async function picks(a){const [ps,lb]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null)]);
+async function picks(a){const [ps,lb,lv0]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null),quietLive()]);LIVEIDS=liveSet(lv0);
   a.innerHTML=(lb?leaderboardHTML(lb):"")+(ps.length?ps.map(p=>`<div class="card"><b>${esc(p.user)}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span>
-   ${p.legs.map(l=>`<div class="lg"><div>${esc(l.text||"")}<small>${legDesc(l)}</small></div></div>`).join("")}
+   ${p.legs.map(l=>`<div class="lg"><div>${esc(l.text||"")}${liveDot(l.game_id)}<small>${legDesc(l)}</small></div></div>`).join("")}
    <div class="mute" style="margin:6px 0">${p.odds?`Odds ${esc(p.odds)} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
    <button class="btn" onclick="vote(${p.id},1)">👍</button> <button class="btn" onclick="vote(${p.id},-1)">👎</button> <b>${p.score}</b> <span class="mute">(${p.voters} votes)</span>
    ${p.comments.map(c=>`<div class="mute" style="margin-top:4px"><b style="color:var(--ink)">${esc(c.user)}:</b> ${esc(c.body)}</div>`).join("")}
-   <div style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="c${p.id}" placeholder="Comment"><button class="btn" onclick="cmt(${p.id})">Post</button></div></div>`).join(""):'<div class="card empty">Nothing shared yet.<br>On the Games tab, choose picks, then press “Share pick”.</div>')}
+   <div style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="c${p.id}" placeholder="Comment"><button class="btn" onclick="cmt(${p.id})">Post</button></div></div>`).join(""):'<div class="card empty">Nothing shared yet.<br>On the Games tab, choose picks, then press “Share pick”.</div>');dotTimer()}
 async function vote(id,v){if(!needName())return;await post(`picks/${id}/vote`,{v});render()}
 async function cmt(id){if(!needName())return;const b=$("#c"+id).value.trim();if(b){await post(`picks/${id}/comment`,{body:b});render()}}
 
@@ -520,7 +526,7 @@ function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="
   return `<div style="display:flex;gap:6px;margin:6px 0"><button class="pill ${fullStats?"on":""}" onclick="fullStats=!fullStats;drawLive()">More stats</button><button class="pill ${sa?"on":""}" onclick="showAll.has('${g.game_id}')?showAll.delete('${g.game_id}'):showAll.add('${g.game_id}');drawLive()">All players</button></div>`+
   b.teams.map(t=>{const rows=(sa?t.players:t.players.slice(0,8));
     return `<div class="th"><img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}</div><div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>STL</th><th>BLK</th>${fullStats?"<th>FG</th><th>TO</th><th>+/-</th>":""}</tr>
-    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td><td>${r.fg3m}</td><td>${r.stl}</td><td>${r.blk}</td>${fullStats?`<td>${esc(r.fg)}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
+    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${g.state=="in"&&r.oncourt?'<span class="live-dot" title="On the court" style="margin:0 0 0 6px"></span>':""}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td><td>${r.fg3m}</td><td>${r.stl}</td><td>${r.blk}</td>${fullStats?`<td>${esc(r.fg)}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
 function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.score,fin=g.state!="pre";
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
   return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+boxHTML(g):""}</div></div>`}

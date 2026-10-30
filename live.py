@@ -54,9 +54,20 @@ def _num(s):
     try: return int(float(s))
     except (TypeError, ValueError): return 0
 
+def _on_court(js):
+    """Players on the floor now: each team's starters, then every substitution in order. A team whose count is not exactly 5 gets no one marked."""
+    court = {}
+    for t in js.get("boxscore", {}).get("players", []):
+        court[t["team"]["id"]] = {a["athlete"]["id"] for grp in t.get("statistics", []) for a in grp["athletes"] if a.get("starter")}
+    subs = sorted((q for q in js.get("plays") or [] if (q.get("type") or {}).get("text") == "Substitution"), key=lambda q: int(q.get("sequenceNumber") or 0))
+    for q in subs:
+        ids = [x["athlete"]["id"] for x in q.get("participants") or []]; tid = (q.get("team") or {}).get("id")
+        if len(ids) == 2 and tid in court: court[tid].discard(ids[1]); court[tid].add(ids[0])
+    return {pid for c in court.values() if len(c) == 5 for pid in c}
+
 def _box(game_id):
     js = _get(SUM, event=game_id)
-    teams = []
+    on = _on_court(js); teams = []
     for t in js.get("boxscore", {}).get("players", []):
         rows = []
         for grp in t.get("statistics", []):
@@ -66,7 +77,7 @@ def _box(game_id):
                 if not st or a.get("didNotPlay"): continue
                 made3 = (st.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted") or "0-0").split("-")[0]
                 pm = (st.get("plusMinus") or "0").replace("+", "")
-                rows.append(dict(player_id=a["athlete"]["id"], player=a["athlete"]["displayName"], starter=bool(a.get("starter")),
+                rows.append(dict(player_id=a["athlete"]["id"], player=a["athlete"]["displayName"], starter=bool(a.get("starter")), oncourt=a["athlete"]["id"] in on,
                                  min=_num(st.get("minutes")), pts=_num(st.get("points")), reb=_num(st.get("rebounds")), ast=_num(st.get("assists")),
                                  stl=_num(st.get("steals")), blk=_num(st.get("blocks")), tov=_num(st.get("turnovers")), fg3m=_num(made3),
                                  fg=st.get("fieldGoalsMade-fieldGoalsAttempted", ""), pm=_num(pm)))

@@ -697,8 +697,9 @@ def track_record(x_code: str = Header("")):
         known = [starts[g] for g in gid.get(day, ()) if starts.get(g)]
         d["start"] = min(known) if known else None       # the page shows this day by the viewer's own clock
     recent = sorted(days.values(), key=lambda d: d["day"], reverse=True)[:21]
-    waiting = [d for d in recent if any(x["result"] is None for x in d["legs"] + d["value"]) and not (d["start"] and has_started(d["start"]))]
-    out["days"] = sorted(waiting, key=lambda d: d["start"] or d["day"]) + [d for d in recent if d not in waiting]    # coming games first (soonest at the top), then finished days newest first
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=36)).strftime("%Y-%m-%dT%H:%MZ")
+    waiting = [d for d in recent if any(x["result"] is None for x in d["legs"] + d["value"]) and not (d["start"] and d["start"] < cutoff)]
+    out["days"] = sorted(waiting, key=lambda d: d["start"] or d["day"]) + [d for d in recent if d not in waiting]    # days with picks still waiting first (soonest at the top, including games in play), then finished days newest first
     return out
 
 @app.get("/api/value")
@@ -810,7 +811,16 @@ def compute_best():
         legs = [dict(game_id=x["game_id"], player_id=x["player_id"], stat=x["stat"], line=x["line"], side="over") for x in combo]
         res = pl.parlay(legs, pmap, alph["alphas"], alph["corr"], n=60000)
         if (res["fair_odds"] or 0) >= 2.0 or len(combo) == 3: break
-    return dict(legs=cands[:8], combo=dict(legs=combo, joint=res["joint"] if res else None, fair_odds=res["fair_odds"] if res else None))
+    return dict(legs=cands[:8], combo=dict(legs=combo, joint=res["joint"] if res else None, fair_odds=res["fair_odds"] if res else None), playing=playing_picks())
+
+def playing_picks():
+    """Picks that were published before tip-off and have no result yet, for games that have started. The page shows only those in a live game."""
+    out = []
+    with closing(con()) as c:
+        for r in c.execute("SELECT player, player_id, team, game_id, stat, line, model_p, in_combo FROM pick_log WHERE kind='leg' AND result IS NULL ORDER BY day, id").fetchall():
+            st = _game_start(c, r["game_id"])
+            if st and has_started(st): out.append(dict(player=r["player"], player_id=r["player_id"], team=r["team"], game_id=r["game_id"], stat=r["stat"], line=r["line"], p=r["model_p"], in_combo=bool(r["in_combo"])))
+    return out
 
 _status_cache = dict(t=0, data=None)
 @app.get("/api/status")
