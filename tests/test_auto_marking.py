@@ -223,3 +223,13 @@ def test_leaderboard_boards(db):
     assert [r["user"] for r in lb["most_won"]] == ["ann", "bob"] and lb["most_won"][0]["won"] == 2
     assert lb["hardest"][0] == dict(user="ann", chance=.2)
     assert lb["rate"] == []          # nobody has 5 finished picks yet
+
+
+def test_bookmaker_price_is_the_saved_leg_prices_multiplied_and_needs_every_leg():
+    assert app.bookmaker_price([dict(price=1.5), dict(price=2.0)]) == 3.0
+    assert app.bookmaker_price([dict(price=1.5), dict()]) is None and app.bookmaker_price([]) is None
+
+def test_leaderboard_biggest_price_won(db):
+    i = _bet(db, [dict(L("pts", 24.5), price=2.0), dict(L("pts", 24.5), price=1.5)]); db.execute("UPDATE bets SET user='ann' WHERE id=?", (i,))
+    j = _bet(db, [L("pts", 24.5)]); db.execute("UPDATE bets SET user='bob' WHERE id=?", (j,)); db.commit()     # no saved price: not on this board
+    assert TestClient(app.app).get("/api/leaderboard").json()["biggest_price"] == [dict(user="ann", price=3.0)]

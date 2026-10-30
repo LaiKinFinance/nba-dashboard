@@ -1029,18 +1029,29 @@ def delete_bet(bid: int, x_user: str = Header(""), x_code: str = Header("")):
 
 MIN_FOR_RATE = 5
 
+def bookmaker_price(legs):
+    """Approximate combined bookmaker price of a pick: the leg prices saved with it, multiplied. None unless every leg has one.
+    (A bookmaker's own same-game price is usually lower, because it allows for the legs being linked.)"""
+    prices = [l.get("price") for l in legs]
+    if not prices or any(not x for x in prices): return None
+    out = 1.0
+    for x in prices: out *= x
+    return out
+
 @app.get("/api/leaderboard")
 def leaderboard(x_code: str = Header("")):
     """Friends compared on saved picks that have a result: most won, hardest pick won (lowest model chance), and share won."""
     check(x_code)
     _safe(grade_bets)
     with closing(con()) as c:
-        rows = [dict(r) for r in c.execute("SELECT user, result, model_prob FROM bets WHERE result IN ('won','lost')")]
+        rows = [dict(r) for r in c.execute("SELECT user, result, model_prob, legs FROM bets WHERE result IN ('won','lost')")]
     by = {}
     for r in rows:
-        u = by.setdefault(r["user"], dict(user=r["user"], won=0, lost=0, hardest=None))
+        u = by.setdefault(r["user"], dict(user=r["user"], won=0, lost=0, hardest=None, price=None))
         if r["result"] == "won":
             u["won"] += 1
+            bp = bookmaker_price(_safe(lambda: json.loads(r["legs"])) or [])
+            if bp and (u["price"] is None or bp > u["price"]): u["price"] = bp
             if r["model_prob"] is not None and (u["hardest"] is None or r["model_prob"] < u["hardest"]): u["hardest"] = r["model_prob"]
         else: u["lost"] += 1
     for u in by.values(): u["picks"] = u["won"] + u["lost"]; u["rate"] = u["won"] / u["picks"]
@@ -1048,6 +1059,7 @@ def leaderboard(x_code: str = Header("")):
     return dict(
         most_won=[dict(user=u["user"], won=u["won"], picks=u["picks"]) for u in sorted(us, key=lambda u: (-u["won"], key(u))) if u["won"]],
         hardest=[dict(user=u["user"], chance=u["hardest"]) for u in sorted((u for u in us if u["hardest"] is not None), key=lambda u: (u["hardest"], key(u)))],
+        biggest_price=[dict(user=u["user"], price=u["price"]) for u in sorted((u for u in us if u["price"]), key=lambda u: (-u["price"], key(u)))],
         rate=[dict(user=u["user"], rate=u["rate"], picks=u["picks"]) for u in sorted((u for u in us if u["picks"] >= MIN_FOR_RATE), key=lambda u: (-u["rate"], -u["picks"], key(u)))],
         min_picks=MIN_FOR_RATE)
 
