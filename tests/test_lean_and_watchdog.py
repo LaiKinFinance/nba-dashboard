@@ -41,3 +41,9 @@ def test_the_page_is_always_rechecked_so_a_phone_never_keeps_an_old_version():
     c = TestClient(app.app)
     r = c.get("/"); assert r.status_code == 200 and r.headers["cache-control"] == "no-cache" and r.headers.get("etag")
     assert c.get("/api/ping").headers["cache-control"] == "no-store"
+
+
+def test_tabs_are_best_games_picks_players_only():
+    html = open("static/index.html", encoding="utf-8").read()
+    assert 'const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Players"]];' in html
+    assert "async function liveTab" not in html and "async function lineupsTab" not in html          # Live and Lineups now live inside each game

@@ -170,7 +170,7 @@ details.card>summary.csum{color:var(--ink);font-size:17px;font-weight:700;margin
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["best","Best picks"],["today","Games"],["live","Live"],["lineups","Lineups"],["picks","Friends' picks"],["bets","My picks"],["players","Players"]];
+const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Players"]];
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
 let tab="best";   // the app always opens on Best picks (the home tab)
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,snaps={},alerts=[],live={};
@@ -199,9 +199,11 @@ const bk=b=>BK[b]||String(b||"").slice(0,4).toUpperCase();
 const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 
 function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
-function go(t,pid){tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
+let picksView="mine";
+function go(t,pid){if(t=="bets"){picksView="mine";t="pk"}else if(t=="picks"){picksView="friends";t="pk"}else if(t=="live"||t=="lineups")t="today";      // old links still land somewhere sensible
+  tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
 async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
-  clearInterval(liveTimer);try{await({today,best:bestTab,live:liveTab,lineups:lineupsTab,picks,bets,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
+  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -330,7 +332,7 @@ function ttHTML(g){const x=_mx(g);if(!x)return"";const {m,H,A,id}=x,tT=mbg(id,"t
   const tt=((m.team_totals||{})[tT]||[]).map(l=>{const o=tO=="over",tm=tT=="home"?H:A,p=o?l.p_over:1-l.p_over;
     return tbtn(id,"tt",tO,l.line,{label:`${nm(tm)} ${o?"over":"under"} ${l.line}`,prob:p,team:tT,text:`${nm(tm)} ${o?"over":"under"} ${l.line} points`})}).join("");
   return `<div class="mhd"><div class="sbt" style="margin:0">Team Total</div>${segc(id,"ttT",[["away",nm(A)],["home",nm(H)]])}${segc(id,"ttO",[["over","Over"],["under","Under"]])}</div>${stripH(tt)}`}
-const gsec={},SECDEF={best3:true,top:true,players:true,margin:false,tteam:false,h2h:false};
+const gsec={},SECDEF={live:true,lineups:false,best3:true,top:true,players:true,margin:false,tteam:false,h2h:false};
 const secOpen=(id,k)=>(gsec[id]&&gsec[id][k]!==undefined)?gsec[id][k]:SECDEF[k];
 const sec=(id,k,title,body)=>`<div class="sec ${secOpen(id,k)?"open":""}" data-k="${k}"><button class="sh" aria-expanded="${secOpen(id,k)}" aria-controls="section-${id}-${k}" onclick="togSec('${id}','${k}')"><span>${title}</span><span class="cv" aria-hidden="true"></span></button><div class="sbody" id="section-${id}-${k}">${body}</div></div>`;
 function togSec(id,k){(gsec[id]=gsec[id]||{})[k]=!secOpen(id,k);const el=document.querySelector(`#g${id} .sec[data-k="${k}"]`);el.classList.toggle("open");el.querySelector('.sh').setAttribute('aria-expanded',String(secOpen(id,k)));if(secOpen(id,k)){paintSel();centerStrips(el)}}
@@ -354,6 +356,8 @@ function best3HTML(g){const b=g.best3||[];
 function addG3(gid,i){const l=(gameIdx[gid]||{}).best3[i];if(!l)return;addLeg({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n},true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 function gbodyHTML(g){const id=g.game_id,m=g.match;let h=oldPriceNote(g)+levelBlurb(g);
   if((g.best3||[]).length)h+=sec(id,"best3","Best 3 picks",best3HTML(g));
+  const L=LG.find(x=>x.game_id==id);if(L&&L.state!="pre")h+=sec(id,"live",L.state=="in"?"Live score":"Final score",liveBodyHTML(g));
+  h+=sec(id,"lineups","Lineups",lineupsBodyHTML(g));
   h+=sec(id,"h2h","Form & Head-to-Head",h2hHTML(g));
   h+=sec(id,"top","Top Markets",topHTML(g));
   h+=sec(id,"players","Player Props",playersHTML(g));
@@ -362,7 +366,7 @@ function gameHTML(g){gameIdx[g.game_id]=g;const t=Object.values(g.teams),away=t.
   const open=openGames.has(g.game_id),all=[...away.players,...home.players],gt=gtab[g.game_id]||"players";
   return `<div class="game ${open?"open":""}" id="g${g.game_id}"><button class="gh" onclick="tg('${g.game_id}')">
    <div class="tm"><img src="${logo(away.team)}" alt=""><div><b>${nm(away.team)}</b><small>${away.team}</small></div></div>
-   <div class="mid"><div class="t">${timeOf(g.start)}${liveDot(g.game_id)}</div><div class="s">at</div></div>
+   <div class="mid">${midHTML(g)}</div>
    <div class="tm r"><div><b>${nm(home.team)}</b><small>${home.team}</small></div><img src="${logo(home.team)}" alt=""></div>
    <div class="av">${all.map(p=>photo(p.player_id,p.player)).join("")}</div><span class="chev">▾</span></button>
    <div class="gb"><div class="gbody">${open?gbodyHTML(g):""}</div></div></div>`}
@@ -374,13 +378,14 @@ document.addEventListener("mousemove",e=>{if(!drag)return;const dx=e.pageX-drag.
 document.addEventListener("mouseup",()=>{if(drag&&drag.moved){const s=drag.s;s.dataset.dragged=1;setTimeout(()=>delete s.dataset.dragged,0)}drag=null});
 document.addEventListener("click",e=>{const s=e.target.closest(".strip");if(s&&s.dataset.dragged){e.stopPropagation();e.preventDefault()}},true);
 function tg(id){const el=$("#g"+id);if(openGames.has(id))openGames.delete(id);else openGames.add(id);el.classList.toggle("open");
-  if(openGames.has(id)){const b=el.querySelector(".gbody");if(!b.innerHTML.trim()){b.innerHTML=gbodyHTML(gameIdx[id]);paintSel()}centerStrips(el)}}
-function drawGames(){const q=filt.q.toLowerCase();let gs=slate.filter(g=>{
-    if(filt.day!="all"&&dayKey(g.start)!=filt.day)return false;
-    if(q){const txt=Object.values(g.teams).map(t=>t.team+" "+(NAMES[t.team]||"")+" "+t.players.map(p=>p.player).join(" ")).join(" ").toLowerCase();if(!txt.includes(q))return false}return true});
-  if(filt.start)gs=gs.map(g=>({...g,teams:Object.fromEntries(Object.entries(g.teams).map(([k,t])=>[k,{...t,players:t.players.filter(p=>p.starting)}]))}));
-  let h="",last="";for(const g of gs){const d=dayKey(g.start);if(d!=last){h+=`<div class="day">${d}</div>`;last=d}h+=gameHTML(g)}
-  $("#glist").innerHTML=h||'<div class="empty">No games match.</div>';paintSel();centerStrips()}
+  if(openGames.has(id)){const b=el.querySelector(".gbody");if(!b.innerHTML.trim()){b.innerHTML=gbodyHTML(gameIdx[id]);paintSel()}centerStrips(el);const L=LG.find(x=>x.game_id==id);if(L&&L.state!="pre")loadBox(id)}}
+function drawGames(){const q=filt.q.toLowerCase(),rank={in:0,pre:1,post:2};
+  let rows=gameRows().filter(r=>gameDayOf(r.start,r.l?r.l.state:"pre")==gamesDay).filter(r=>{if(!q)return true;
+    const txt=r.g?Object.values(r.g.teams).map(t=>t.team+" "+(NAMES[t.team]||"")+" "+t.players.map(p=>p.player).join(" ")).join(" "):[r.l.home.team,r.l.away.team].map(t=>t+" "+(NAMES[t]||"")).join(" ");return txt.toLowerCase().includes(q)});
+  rows.sort((a,b)=>gamesDay=="today"?((rank[a.l?a.l.state:"pre"]-rank[b.l?b.l.state:"pre"])||(a.start<b.start?-1:1)):(a.start<b.start?-1:1));
+  let h="";for(const r of rows){if(r.g){let g=r.g;if(filt.start)g={...g,teams:Object.fromEntries(Object.entries(g.teams).map(([k,t])=>[k,{...t,players:t.players.filter(p=>p.starting)}]))};h+=gameHTML(g)}else h+=liveHTML(r.l)}
+  const none={yesterday:"No finished games from yesterday.",today:"No games today.",tomorrow:"No games listed for tomorrow yet."}[gamesDay];
+  $("#glist").innerHTML=h||`<div class="empty">${none}</div>`;paintSel();centerStrips()}
 let playingOpen=true;
 const playingLegs=()=>(best&&best.playing||[]).filter(x=>LIVEIDS.has(x.game_id)).map(x=>({game_id:x.game_id,player_id:x.player_id,team:x.team,text:x.player,stat:x.stat,line:x.line,side:"over"}));
 async function loadPlayingBoxes(){const ids=[...new Set(playingLegs().map(l=>l.game_id))];
@@ -403,16 +408,14 @@ function bestHTML(){if(!best)return"";const c=best.combo;
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
 function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
-async function today(a){await loadSlate();LIVEIDS=liveSet(await quietLive());
-  if(!slate.length){a.innerHTML=(meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. The numbers will appear in a few minutes.</div>`:"")+'<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
-  const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
+async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];STARTED=st||[];
+  const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
-  a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()"></div>
-   <details class="note" ${foldOpen("gfil",false)?"open":""} ontoggle="foldSet('gfil',this.open)"><summary>Filters${filt.day!="all"?" · "+filt.day:""}${filt.start?" · starters only":""}</summary><div class="tools" style="margin-top:8px">
-   <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
+  a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}${daySwitch(gamesDay,"setGamesDay")}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()"></div>
+   <details class="note" ${foldOpen("gfil",false)?"open":""} ontoggle="foldSet('gfil',this.open)"><summary>Filters${filt.start?" · starters only":""}</summary><div class="tools" style="margin-top:8px">
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div></details>
-   <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="glist"></div>`;drawGames();pollStatus();dotTimer()}
+   <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="glist"></div>`;drawGames();pollStatus();liveTimer=setInterval(refreshGames,20000)}
 
 /* ---------- value bets with evidence ---------- */
 let VAL=null;
@@ -466,10 +469,6 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
       <div class="tile"><div class="v">${pc0(L.avg_p)}</div><div class="k">Model expected</div></div>
       <div class="tile"><div class="v">${C.n?C.won+"/"+C.n:"–"}</div><div class="k">Daily combos won${C.n?` (model expected ${pc0(C.avg_p)})`:""}</div></div></div>
      ${bankrollHTML(t.bankroll)}<details class="card" ${trkOpen("tells")?"open":""} ontoggle="trkSet('tells',this.open)"><summary class="csum">What this tells us</summary><p style="margin:0">${verdict}</p>
-      ${t.calibration.length?`<table class="t" style="margin-top:8px"><tr><th style="text-align:left">When the model said</th><th>Picks</th><th>Hit</th></tr>${t.calibration.map(b=>`<tr><td style="text-align:left">${pc0(b.lo)}–${pc0(b.hi)} (avg ${pc0(b.predicted)})</td><td>${b.n}</td><td>${pc0(b.actual)}</td></tr>`).join("")}</table>`:""}
-      ${Object.keys(t.by_stat).length?`<h3>By market</h3><div class="pillrow" style="flex-wrap:wrap">${Object.entries(t.by_stat).map(([k,v])=>`<span class="pill">${statName[k]||k}: ${v.won}/${v.n}</span>`).join("")}</div>`:""}
-      ${V.n?`<h3>Value bets</h3><p class="mute" style="margin:0">${V.won} of ${V.n} won (model expected ${pc0(V.avg_p)})</p>`:""}
-      ${t.closing&&t.closing.n?`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">On ${t.closing.n} value picks the price we showed was ${t.closing.avg_clv>=0?"better":"worse"} than the last price seen before tip-off by ${Math.abs(t.closing.avg_clv*100).toFixed(1)}% on average, and better on ${pc0(t.closing.share_beat)} of them. Consistently beating the closing price over hundreds of picks is the best sign of a real edge; wins and losses alone prove little. (Our last price check was on average ${Math.round(t.closing.avg_mins_before_tip)} min before tip-off.)</p>`:`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">Collecting data: bookmaker prices are now saved every time they are fetched, and compared with each pick once its game has started.</p>`}
       <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></details>
      ${t.days.length?t.days.map((d,di)=>{const all=[...d.legs,...d.value],w=all.filter(x=>x.result=="won").length,l=all.filter(x=>x.result=="lost").length,wt=all.filter(x=>x.result==null).length;return `<details class="card" ${foldOpen("day_"+d.day,di==0)?"open":""} ontoggle="foldSet('day_${d.day}',this.open)"><summary class="csum" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} <span class="mute" style="font-weight:400;font-size:13px">· ${w} won · ${l} lost${wt?` · ${wt} waiting`:""}</span></span>${d.combo?`<span style="font-weight:400;font-size:14px">Daily combo: ${resIcon(d.combo.result)}</span>`:""}</summary>
         ${d.legs.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}
@@ -483,7 +482,7 @@ function leaderboardHTML(lb){const top=(lb.most_won||[])[0];return `<details cla
   <h3>Hardest pick won</h3>${boardRows(lb.hardest,r=>`won a ${pct(r.chance)} pick`)}
   <h3>Biggest price won <span class="mute">(bookmaker price when saved, about)</span></h3>${boardRows(lb.biggest_price||[],r=>`won at about ${r.price.toFixed(2)}`)}
   <h3>% of picks won <span class="mute">(after ${lb.min_picks} finished picks)</span></h3>${boardRows(lb.rate,r=>`${pct(r.rate)} · ${r.picks} picks`)}</details>`}
-async function picks(a){const [ps,lb,lv0]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null),quietLive()]);LIVEIDS=liveSet(lv0);
+async function friendsPicks(a){const [ps,lb,lv0]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null),quietLive()]);LIVEIDS=liveSet(lv0);
   a.innerHTML=(lb?leaderboardHTML(lb):"")+(ps.length?ps.map(p=>`<div class="card"><b>${esc(p.user)}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span>
    ${p.legs.map(l=>`<div class="lg"><div>${esc(l.text||"")}${liveDot(l.game_id)}<small>${legDesc(l)}</small></div></div>`).join("")}
    <div class="mute" style="margin:6px 0">${p.odds?`Odds ${esc(p.odds)} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
@@ -496,6 +495,9 @@ async function cmt(id){if(!needName())return;const b=$("#c"+id).value.trim();if(
 /* ---------- personal pick results ---------- */
 const legLine=l=>`${esc(l.text||"")} – ${legDesc(l)}`;
 async function delPick(id){if(!confirm("Delete this pick? It cannot be brought back."))return;try{await api("bets/"+id,{method:"DELETE"})}catch(e){return}render()}
+function setPicksView(v){picksView=v;render()}
+async function picksTab(a){a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${picksView=="mine"?"on":""}" onclick="setPicksView('mine')">Mine</button><button class="${picksView=="friends"?"on":""}" onclick="setPicksView('friends')">Friends</button></div><div id="pkbody"><p class="mute">Loading…</p></div>`;
+  await (picksView=="mine"?bets:friendsPicks)($("#pkbody"))}
 async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.teams||{};
   const mine=s.bets.filter(b=>b.user==me),open=mine.filter(b=>b.result=="open"),done=mine.filter(b=>b.result!="open");
   const u=s.users.find(x=>x.user==me)||{bets:0,settled:0,wins:0,losses:0};
@@ -517,9 +519,9 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
   // live numbers for picks still waiting: same figures as the Live tab, refreshed every 20 seconds
   const ids=[...new Set(open.flatMap(b=>JSON.parse(b.legs).map(l=>l.game_id)))];
   const paint=()=>{const el=$("#openPicks");if(el)el.innerHTML=open.map(card).join("")};
-  const refresh=async()=>{if(tab!="bets"||!ids.length)return;try{LG=await api("live")}catch(e){return}LIVEIDS=liveSet(LG);
+  const refresh=async()=>{if(tab!="pk"||picksView!="mine"||!ids.length)return;try{LG=await api("live")}catch(e){return}LIVEIDS=liveSet(LG);
     await Promise.all(ids.filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
-    if(tab=="bets")paint()};
+    if(tab=="pk"&&picksView=="mine")paint()};
   if(ids.length){await refresh();liveTimer=setInterval(()=>{if(document.visibilityState=="visible")refresh()},20000)}}
 
 /* ---------- players ---------- */
@@ -568,7 +570,7 @@ function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="
   const sa=showAll.has(g.game_id);
   return `<div style="display:flex;gap:6px;margin:6px 0"><button class="pill ${fullStats?"on":""}" onclick="fullStats=!fullStats;drawLive()">More stats</button><button class="pill ${sa?"on":""}" onclick="showAll.has('${g.game_id}')?showAll.delete('${g.game_id}'):showAll.add('${g.game_id}');drawLive()">All players</button></div>`+
   b.teams.map(t=>{const rows=(sa?t.players:t.players.slice(0,8));
-    return `<div class="th"><img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}</div><div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>STL</th><th>BLK</th>${fullStats?"<th>FG</th><th>TO</th><th>+/-</th>":""}</tr>
+    return `<div class="th"><img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}</div>${t.players.some(r=>r.starter)?`<div class="mute" style="font-size:12px;margin:0 0 4px">Started: ${t.players.filter(r=>r.starter).map(r=>esc(r.player)).join(", ")}</div>`:""}<div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>STL</th><th>BLK</th>${fullStats?"<th>FG</th><th>TO</th><th>+/-</th>":""}</tr>
     ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${g.state=="in"&&r.oncourt?'<span class="live-dot" title="On the court" style="margin:0 0 0 6px"></span>':""}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td><td>${r.fg3m}</td><td>${r.stl}</td><td>${r.blk}</td>${fullStats?`<td>${esc(r.fg)}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
 function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.score,fin=g.state!="pre";
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
@@ -629,59 +631,43 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
 // one bar per category for double-double and triple-double picks: points, rebounds, assists, plus steals or blocks once they reach 5
 function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||0],["STL",r.stl||0],["BLK",r.blk||0]].filter(([k,v],i)=>i<3||v>=5);
   return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:34px;font-size:12px">${k}</span><div style="flex:1">${ticksBar(v,10,v>=10)}</div></div>`).join("")}
-function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
-function drawLive(){const el=$("#lbody");if(!el)return;
-  // by the phone's own date. Today: live games, then games still to play today, then games finished today. Tomorrow: games still to come after today.
-  const rank={in:0,pre:1,post:2},day=g=>dayName(g.start);
-  const mine=LG.filter(g=>liveDay=="yesterday"?(g.state=="post"&&day(g)=="yesterday"):liveDay=="tomorrow"?(g.state=="pre"&&day(g)=="later"):(g.state=="in"||day(g)=="today")).sort((a,b)=>liveDay=="today"?(rank[a.state]-rank[b.state])||(a.start<b.start?-1:1):(a.start<b.start?-1:1));
-  const liveN=mine.filter(g=>g.state=="in").length;
-  const title=liveDay=="yesterday"?"Yesterday's games":liveDay=="tomorrow"?"Tomorrow's games":liveN?`${liveN} game${liveN>1?"s":""} live now`:"Today's games";
-  const none={yesterday:"No finished games from yesterday.",today:"No games today.",tomorrow:"No games listed for tomorrow yet."}[liveDay];
-  el.innerHTML=daySwitch(liveDay,"setLiveDay")+(mine.length?`<h3 style="margin-top:0">${title}</h3>`+mine.map(liveHTML).join(""):`<div class="card empty">${none}</div>`)}
-async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catch(e){return}
-  const ids=new Set(openLive);
-  await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
-  if(tab=="live")drawLive()}
-async function liveTab(a){a.innerHTML=`${infoNote("live","Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. ⭐ marks the model's top-3 players.")}<div id="lbody"><p class="mute">Loading…</p></div>`;
-  await refreshLive();liveTimer=setInterval(refreshLive,20000)}
-
-/* ---------- lineups ---------- */
-let LU=[],luF={q:"",conf:false};
+let LU=[],STARTED=[];
 const luChip=t=>/out|ofs/i.test(t)?"out":/ques|doubt|game-time|gtd/i.test(t)?"q":"ok";
 const dotc=p=>p==null||p>=100?"var(--good)":p>=50?"var(--gold)":"var(--bad)";
-let luOpen={};
-const luId=g=>g.away.team+"-"+g.home.team;
-function luTog(id){luOpen[id]=!luOpen[id];drawLineups()}
-function luAll(open){LU.forEach(g=>luOpen[luId(g)]=open);drawLineups()}
 function luSide(sd){
   const row=(p,out)=>`<div class="lp"><span class="pos">${esc(p.pos)}</span>${photo(p.player_id||0,p.name)}<span class="nm2" ${p.player_id?`onclick="go('players','${p.player_id}')"`:""}>${p.top3?"⭐ ":""}${esc(p.name)}${p.new?'<span class="newb">NEW</span>':""}</span>${out?`<span class="stc ${luChip(p.status)}">${esc(p.status)}</span>`:`<span class="dot" style="background:${dotc(p.pct)}" title="${esc(p.note||"")}"></span>`}</div>`;
   return `<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span></div>
    ${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
    ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
-function drawLineups(){const q=luF.q.toLowerCase();
-  const hit=g=>[g.away,g.home].some(sd=>(sd.team+" "+nm(sd.team)+" "+sd.starters.concat(sd.out).map(p=>p.name).join(" ")).toLowerCase().includes(q));
-  const gs=LU.filter(g=>(luDay=="tomorrow"?luWhen(g)=="later":luWhen(g)=="today")&&(!luF.conf||(g.away.confirmed&&g.home.confirmed))&&(!q||hit(g)));
-  const last=sd=>sd.starters.map(p=>p.name.split(" ").slice(-1)[0]).join(", ")||"not posted yet";
-  const chip=sd=>`<span class="stc ${sd.confirmed?"ok":"ex"}">${sd.team} ${sd.confirmed?"confirmed":"expected"}</span>`;
-  $("#lubody").innerHTML=gs.map(g=>{const id=luId(g),open=luOpen[id]||(q&&luOpen[id]!==false);   // a search opens the matching games
-    return `<div class="card lg2 ${open?"open":""}" style="padding:0"><div class="lgh" onclick="luTog('${id}')"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt="">
-      <span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span><span class="chv">▾</span></div>
-      ${open?`<div class="lu" style="padding:0 14px 12px">${luSide(g.away)}${luSide(g.home)}</div>`:`<div class="lsum2">${chip(g.away)} ${chip(g.home)}<div class="mute" style="margin-top:4px">${nm(g.away.team)}: ${esc(last(g.away))}<br>${nm(g.home.team)}: ${esc(last(g.home))}</div></div>`}</div>`}).join("")||'<div class="card empty">No lineups match.</div>'}
-let STARTED=[];
 const quietGet=async p=>{try{const r=await fetch("/api/"+p,{headers:hdr()});return r.ok?await r.json():[]}catch(e){return[]}};
-function setLuDay(d){luDay=d;render()}
-function startedHTML(day,intro){const gs=STARTED.filter(g=>dayName(g.start)==day);if(!gs.length)return"";
-  const side=sd=>`<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="mute">${sd.score??""}</span></div>${sd.starters.length?sd.starters.map(p=>`<div class="lp">${photo(p.player_id,p.name)}<span class="nm2" onclick="go('players','${p.player_id}')">${esc(p.name)}</span></div>`).join(""):'<div class="mute" style="padding:8px 0">No starters recorded</div>'}</div>`;
-  return `<div class="note">${intro}</div>`+gs.map(g=>`<details class="card lg2" style="padding:0"><summary class="lgh" style="list-style:none"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt=""><span class="mute" style="margin-left:auto">${g.away.score}–${g.home.score} Final</span></summary><div class="lu" style="padding:0 14px 12px">${side(g.away)}${side(g.home)}</div></details>`).join("")}
-const luWhen=g=>g.start?dayName(g.start):"today";
-async function lineupsTab(a){
-  const [lu,st]=await Promise.all([luDay=="yesterday"?Promise.resolve(LU):api("lineups"),quietGet("started")]);STARTED=st||[];
-  if(luDay=="yesterday"){a.innerHTML=daySwitch(luDay,"setLuDay")+(startedHTML("yesterday","Who actually started yesterday's games (from the box scores).")||'<div class="card empty">No finished games from yesterday.</div>');return}
-  LU=lu;
-  a.innerHTML=daySwitch(luDay,"setLuDay")+`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
-   ${infoNote("lu",`Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.`)}<div id="lubody"><p class="mute">Loading lineups…</p></div>`;
-  drawLineups();
-  if(luDay=="today"){$("#lubody").insertAdjacentHTML("afterend",startedHTML("today","Finished today: who actually started."))}}
+
+/* ---------- games tab: every game of the day in one place (projections, live score, lineups) ---------- */
+let gamesDay="today";
+const gameDayOf=(start,state)=>{if(state=="in")return"today";const d=dayName(start);return d=="later"?"tomorrow":d};
+function setGamesDay(d){gamesDay=d;render()}
+function gameRows(){const rows=new Map();
+  slate.forEach(g=>rows.set(g.game_id,{id:g.game_id,start:g.start,g,l:null}));
+  LG.forEach(l=>{const r=rows.get(l.game_id);if(r)r.l=l;else rows.set(l.game_id,{id:l.game_id,start:l.start,g:null,l})});
+  return [...rows.values()]}
+const midHTML=g=>{const L=LG.find(x=>x.game_id==g.game_id);
+  return L&&L.state!="pre"?`<div class="t">${L.away.score}–${L.home.score}${liveDot(g.game_id)}</div><div class="s">${esc(stLabel(L))}</div>`:`<div class="t">${timeOf(g.start)}${liveDot(g.game_id)}</div><div class="s">at</div>`};
+const startedSide=sd=>`<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="mute">${sd.score??""}</span></div>${sd.starters.length?sd.starters.map(p=>`<div class="lp">${photo(p.player_id,p.name)}<span class="nm2" onclick="go('players','${p.player_id}')">${esc(p.name)}</span></div>`).join(""):'<div class="mute" style="padding:8px 0">No starters recorded</div>'}</div>`;
+function liveBodyHTML(g){const L=LG.find(x=>x.game_id==g.game_id);return L&&L.state!="pre"?lineScore(L)+boxHTML(L):'<p class="mute">Game has not started.</p>'}
+function lineupsBodyHTML(g){const id=g.game_id,L=LG.find(x=>x.game_id==id),t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
+  const e=LU.find(x=>x.away.team==away.team&&x.home.team==home.team),st=STARTED.find(x=>x.game_id==id),b=boxes[id];
+  if(e&&(!L||L.state=="pre"))return `<div class="lu">${luSide(e.away)}${luSide(e.home)}</div>`;
+  if(st)return `<div class="lu">${startedSide(st.away)}${startedSide(st.home)}</div>`;
+  if(b)return `<div class="lu">${b.teams.map(tm=>startedSide({team:tm.team,score:"",starters:tm.players.filter(p=>p.starter).map(p=>({player_id:p.player_id,name:p.player}))})).join("")}</div>`;
+  return e?`<div class="lu">${luSide(e.away)}${luSide(e.home)}</div>`:'<p class="mute">No lineup posted yet.</p>'}
+function paintLiveSections(id){const g=gameIdx[id];if(!g)return;const a=document.getElementById(`section-${id}-live`),b=document.getElementById(`section-${id}-lineups`);if(a)a.innerHTML=liveBodyHTML(g);if(b)b.innerHTML=lineupsBodyHTML(g)}
+function drawLive(){Object.keys(gameIdx).forEach(paintLiveSections);LG.forEach(l=>{if(!gameIdx[l.game_id]){const el=$("#lv"+l.game_id);if(el)el.outerHTML=liveHTML(l)}})}
+async function loadBox(id){try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(!r.ok)return;boxes[id]=await r.json()}catch(e){return}
+  const l=LG.find(x=>x.game_id==id);if(gameIdx[id])paintLiveSections(id);else{const el=$("#lv"+id);if(el&&l&&openLive.has(id))el.outerHTML=liveHTML(l)}}
+function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);const l=LG.find(x=>x.game_id==id),el=$("#lv"+id);if(l&&el)el.outerHTML=liveHTML(l);if(openLive.has(id)&&l&&l.state!="pre")loadBox(id)}
+async function refreshGames(){if(tab!="today"||document.visibilityState!="visible")return;const lg=await quietLive();if(!lg.length&&!LG.length)return;LG=lg;LIVEIDS=liveSet(LG);
+  document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"});
+  LG.forEach(l=>{const g=gameIdx[l.game_id];if(g){const m=document.querySelector("#g"+l.game_id+" .mid");if(m)m.innerHTML=midHTML(g)}else{const el=$("#lv"+l.game_id);if(el)el.outerHTML=liveHTML(l)}});
+  const ids=[...new Set([...openGames,...openLive])].filter(id=>{const l=LG.find(x=>x.game_id==id);return l&&l.state!="pre"});await Promise.all(ids.map(loadBox))}
 
 /* ---------- theme ---------- */
 function paintTheme(){const t=document.documentElement.dataset.theme;const b=$("#thm");if(b)b.textContent=t=="dark"?"☀":"☾";const m=$("#tc");if(m)m.content=t=="dark"?"#0e2452":"#0a66b3"}
