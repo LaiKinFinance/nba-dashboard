@@ -866,6 +866,8 @@ def best(x_code: str = Header("")):
     except Exception: logging.exception("pick logging failed")
     return res
 
+MIN_BEST_LINE = 1.5       # a line like "over 0.5 rebounds" is so close to certain that bookmakers rarely list it, so it is never suggested
+
 def compute_best():
     preds = next_game_day([p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]); cands = []
     _, why = model_status(preds)
@@ -874,19 +876,21 @@ def compute_best():
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
         for s in ("pts", "reb", "ast"):
             if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue        # no "safe leg" claims for points until checked
-            opts = [dict(line=b["line"], p=b["p_over"], hit=b["hit"], n=b["n"], price=b["price"]) for b in p["book"].get(s, [])] or \
-                   [dict(line=l["line"], p=l["p_over"], hit=l["hit"], n=l["n"], price=None) for l in p["ladders"][s]]
-            ok = [o for o in opts if o["p"] >= 0.62 and o["n"] >= 5 and o["hit"] / o["n"] >= 0.7]
+            # real bookmaker lines first (a price found recently for exactly that line); only when none exist at all do we fall back to the model's own lines
+            real = [] if is_stale(p.get("odds_age_h")) else [dict(line=b["line"], p=b["p_over"], hit=b["hit"], n=b["n"], price=b["price"]) for b in p["book"].get(s, []) if b.get("price")]
+            opts = real or [dict(line=l["line"], p=l["p_over"], hit=l["hit"], n=l["n"], price=None) for l in p["ladders"][s]]
+            ok = [o for o in opts if o["p"] >= 0.62 and o["n"] >= 5 and o["hit"] / o["n"] >= 0.7 and o["line"] >= MIN_BEST_LINE]
             if not ok: continue
             o = max(ok, key=lambda x: x["line"])  # highest line that is still safe = best payout among safe legs
             if o["p"] > 0.86: continue  # too short to be worth a leg (pays almost nothing)
             cands.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
-                              p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
-    cands.sort(key=lambda x: -x["score"])
+                              p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], real=bool(real), starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
+    cands.sort(key=lambda x: (not x["real"], -x["score"]))          # lines a bookmaker really offers come first
     combo, used, games = [], set(), set()
     pmap = {(p["game_id"], p["player_id"]): p for p in preds}
     alph = require_current_model(preds); res = None
     for c in cands:
+        if not c["real"]: continue                                     # the combined pick uses only lines a bookmaker was found to offer
         if c["player_id"] in used or c["game_id"] in games: continue  # spread across players and games to limit correlation
         combo.append(c); used.add(c["player_id"]); games.add(c["game_id"])
         legs = [dict(game_id=x["game_id"], player_id=x["player_id"], stat=x["stat"], line=x["line"], side="over") for x in combo]
