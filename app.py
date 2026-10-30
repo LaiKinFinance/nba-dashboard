@@ -680,7 +680,7 @@ def track_record(x_code: str = Header("")):
     for x in combos: days.setdefault(x["day"], dict(day=x["day"], combo=dict(result=x["result"], joint=x["joint"], fair_odds=x["fair_odds"], legs=json.loads(x["legs"])), legs=[], value=[]))
     for r in legs:
         d = days.setdefault(r["day"], dict(day=r["day"], combo=None, legs=[], value=[]))
-        (d["legs"] if r["kind"] == "leg" else d["value"]).append(dict(player=r["player"], team=r["team"], stat=r["stat"], line=r["line"], side=r["side"], p=r["model_p"], price=r["price"],
+        (d["legs"] if r["kind"] == "leg" else d["value"]).append(dict(player=r["player"], player_id=r["player_id"], game_id=r["game_id"], team=r["team"], stat=r["stat"], line=r["line"], side=r["side"], p=r["model_p"], price=r["price"],
                                                                       result=r["result"], actual=r["actual"], in_combo=bool(r["in_combo"])))
     starts = {}
     with closing(con()) as c:
