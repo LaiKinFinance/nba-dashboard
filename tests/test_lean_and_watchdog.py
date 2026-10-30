@@ -35,3 +35,9 @@ def test_new_style_names_do_not_reuse_the_player_row_class():
 
 def test_slate_keeps_no_copies_in_memory_between_requests():
     assert not hasattr(app, "_lean_memo")       # a memo of lean copies grew by about 140 KB per player per rebuild and could fill the 1 GB server
+
+
+def test_the_page_is_always_rechecked_so_a_phone_never_keeps_an_old_version():
+    c = TestClient(app.app)
+    r = c.get("/"); assert r.status_code == 200 and r.headers["cache-control"] == "no-cache" and r.headers.get("etag")
+    assert c.get("/api/ping").headers["cache-control"] == "no-store"

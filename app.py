@@ -204,6 +204,7 @@ async def limits(request: Request, call_next):
         q.append(now)
     resp = await call_next(request)
     if request.url.path.startswith("/api/"): resp.headers["Cache-Control"] = "no-store"        # a browser must never reuse an old answer
+    else: resp.headers["Cache-Control"] = "no-cache"          # the page itself: the phone asks the server each time whether it changed, so an update is never missed
     return resp
 
 app.add_middleware(BodyLimit, limit=MAX_BODY)
