@@ -526,6 +526,10 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
 
 
 /* ---------- live scores ---------- */
+const dayName=iso=>{const d=new Date(iso),t=new Date(),y=new Date(t.getTime()-864e5),k=x=>x.toDateString();return k(d)==k(t)?"today":k(d)==k(y)?"yesterday":d<t?"older":"later"};   // by the phone's own clock
+let liveDay="today",luDay="today";
+const daySwitch=(cur,setter)=>`<div class="seg" style="margin:0 0 12px"><button class="${cur=="today"?"on":""}" onclick="${setter}('today')">Today</button><button class="${cur=="yesterday"?"on":""}" onclick="${setter}('yesterday')">Yesterday</button></div>`;
+function setLiveDay(d){liveDay=d;drawLive()}
 let PT={},LG=[],boxes={},openLive=new Set(),fullStats=false,liveTimer=null,showAll=new Set();
 const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g.state=="post"?g.detail:timeOf(g.start);
 function catCount(r){return["pts","reb","ast","stl","blk"].reduce((n,k)=>n+((r[k]||0)>=10?1:0),0)}   // official rule: any five categories
@@ -602,8 +606,10 @@ function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||
   return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:34px;font-size:12px">${k}</span><div style="flex:1">${ticksBar(v,10,v>=10)}</div></div>`).join("")}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
-  const liveN=LG.filter(g=>g.state=="in").length;
-  el.innerHTML=(LG.length?`<h3 style="margin-top:0">${liveN?`${liveN} game${liveN>1?"s":""} live now`:"Games"}</h3>`+LG.map(liveHTML).join(""):'<div class="card empty">No games on the scoreboard right now.</div>')}
+  // Today: anything live, anything still to come, and games finished on the phone's today. Yesterday: games finished on the phone's yesterday.
+  const mine=LG.filter(g=>liveDay=="yesterday"?(g.state=="post"&&dayName(g.start)=="yesterday"):(g.state!="post"||dayName(g.start)=="today"||dayName(g.start)=="later"));
+  const liveN=mine.filter(g=>g.state=="in").length;
+  el.innerHTML=daySwitch(liveDay,"setLiveDay")+(mine.length?`<h3 style="margin-top:0">${liveDay=="yesterday"?"Yesterday's games":liveN?`${liveN} game${liveN>1?"s":""} live now`:"Games"}</h3>`+mine.map(liveHTML).join(""):`<div class="card empty">${liveDay=="yesterday"?"No finished games from yesterday.":"No games on the scoreboard right now."}</div>`)}
 async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catch(e){return}
   const ids=new Set(openLive);
   await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
@@ -633,7 +639,14 @@ function drawLineups(){const q=luF.q.toLowerCase();
     return `<div class="card lg2 ${open?"open":""}" style="padding:0"><div class="lgh" onclick="luTog('${id}')"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt="">
       <span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span><span class="chv">▾</span></div>
       ${open?`<div class="lu" style="padding:0 14px 12px">${luSide(g.away)}${luSide(g.home)}</div>`:`<div class="lsum2">${chip(g.away)} ${chip(g.home)}<div class="mute" style="margin-top:4px">${nm(g.away.team)}: ${esc(last(g.away))}<br>${nm(g.home.team)}: ${esc(last(g.home))}</div></div>`}</div>`}).join("")||'<div class="card empty">No lineups match.</div>'}
-async function lineupsTab(a){a.innerHTML=`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
+let STARTED=[];
+function setLuDay(d){luDay=d;render()}
+function startedHTML(){const gs=STARTED.filter(g=>dayName(g.start)=="yesterday");
+  const side=sd=>`<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="mute">${sd.score??""}</span></div>${sd.starters.length?sd.starters.map(p=>`<div class="lp">${photo(p.player_id,p.name)}<span class="nm2" onclick="go('players','${p.player_id}')">${esc(p.name)}</span></div>`).join(""):'<div class="mute" style="padding:8px 0">No starters recorded</div>'}</div>`;
+  return gs.length?`<div class="note">Who actually started yesterday's games (from the box scores).</div>`+gs.map(g=>`<details class="card lg2" style="padding:0"><summary class="lgh" style="list-style:none"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt=""><span class="mute" style="margin-left:auto">${g.away.score}–${g.home.score} Final</span></summary><div class="lu" style="padding:0 14px 12px">${side(g.away)}${side(g.home)}</div></details>`).join(""):'<div class="card empty">No finished games from yesterday.</div>'}
+async function lineupsTab(a){
+  if(luDay=="yesterday"){a.innerHTML=daySwitch(luDay,"setLuDay")+'<div id="lubody"><p class="mute">Loading…</p></div>';try{STARTED=await api("started")}catch(e){STARTED=[]}$("#lubody").innerHTML=startedHTML();return}
+  a.innerHTML=daySwitch(luDay,"setLuDay")+`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
    <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
   LU=await api("lineups");drawLineups()}
 

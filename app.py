@@ -956,6 +956,18 @@ def lineups_tab(x_code: str = Header("")):
                         r["new"] = not any(sl.name_match(nm, r["name"]) for nm in last_starters[side["team"]])
     return games
 
+@app.get("/api/started")
+def who_started(x_code: str = Header("")):
+    """Finished games of the last two and a half days with the five players who actually started for each team, from the box scores already saved."""
+    check(x_code)
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=60)).strftime("%Y-%m-%dT%H:%MZ"); out = []
+    with closing(con()) as c:
+        for g in c.execute("SELECT game_id, tip_utc, home, away, home_pts, away_pts FROM games WHERE tip_utc >= ? ORDER BY tip_utc DESC, game_id", (cutoff,)).fetchall():
+            rows = c.execute("SELECT player_id, player, team FROM player_games WHERE game_id=? AND starter=1 ORDER BY min DESC", (g["game_id"],)).fetchall()
+            side = lambda team, pts: dict(team=team, score=pts, starters=[dict(player_id=r["player_id"], name=r["player"]) for r in rows if r["team"] == team])
+            out.append(dict(game_id=g["game_id"], start=g["tip_utc"], home=side(g["home"], g["home_pts"]), away=side(g["away"], g["away_pts"])))
+    return out
+
 @app.get("/api/live")
 def live_scores(x_code: str = Header("")):
     check(x_code)

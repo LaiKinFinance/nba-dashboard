@@ -24,7 +24,7 @@ def cached(key, ttl, fn):
 
 def _et_dates():
     now = dt.datetime.now(ZoneInfo("America/New_York"))
-    return [(now + dt.timedelta(days=d)).strftime("%Y%m%d") for d in (-1, 0)]
+    return [(now + dt.timedelta(days=d)).strftime("%Y%m%d") for d in (-2, -1, 0)]
 
 def _scoreboard():
     games, seen = [], set()
@@ -43,9 +43,9 @@ def _scoreboard():
     return games
 
 def scoreboard():
-    """Live now, then not-yet-started, then finished (finished games older than ~16h are dropped)."""
+    """Live now, then not-yet-started, then finished (finished games older than ~44h are dropped, so yesterday on any phone clock is still there)."""
     games = cached("sb", 10, _scoreboard)
-    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=16)).strftime("%Y-%m-%dT%H:%MZ")
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=44)).strftime("%Y-%m-%dT%H:%MZ")
     games = [g for g in games if g["state"] != "post" or g["start"] >= cutoff]
     order = {"in": 0, "pre": 1, "post": 2}
     return sorted(games, key=lambda g: (order.get(g["state"], 3), g["start"]))
