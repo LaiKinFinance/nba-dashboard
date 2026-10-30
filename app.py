@@ -210,6 +210,36 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)      # the page and the sl
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_refresh_loop, daemon=True).start()
 
+WATCHDOG_FAILS = 5            # answers missed in a row (one check a minute, 30 seconds each) before the site restarts itself
+WATCHDOG_MIN_GAP = 3600       # and never more than one self-restart an hour, so a restart can never turn into a loop
+
+def watchdog_should_restart(fails, last_restart, now):
+    return fails >= WATCHDOG_FAILS and now - last_restart > WATCHDOG_MIN_GAP
+
+def _watchdog():
+    """If the site stops answering its own simple page for about five minutes, stop the process; Fly then starts it again by itself."""
+    import urllib.request
+    marker = os.path.join(os.path.dirname(DB), "watchdog_restart.txt"); fails = 0
+    time.sleep(300)                          # a fresh start gets five minutes to finish its first catch-up before it is judged
+    while True:
+        try: urllib.request.urlopen(f"http://127.0.0.1:{os.environ.get('PORT', '8080')}/api/ping", timeout=30).read(); fails = 0
+        except Exception: fails += 1
+        try: last = float(open(marker).read())
+        except Exception: last = 0.0
+        if watchdog_should_restart(fails, last, time.time()):
+            try: open(marker, "w").write(str(time.time()))
+            except Exception: pass
+            logging.error("watchdog: the site did not answer %s times in a row; restarting it", fails); logging.shutdown(); os._exit(1)
+        time.sleep(60)
+
+if os.environ.get("AUTO_REFRESH") == "1" and os.environ.get("FLY_APP_NAME"):
+    threading.Thread(target=_watchdog, daemon=True).start()
+
+@app.get("/api/ping")
+def ping():
+    """A page that touches nothing: it answers as long as the web server itself is alive."""
+    return {"ok": True}
+
 def con():
     c = sqlite3.connect(DB, timeout=30); c.row_factory = sqlite3.Row
     c.execute("PRAGMA busy_timeout=30000"); c.execute("PRAGMA journal_mode=WAL"); return c
@@ -507,6 +537,22 @@ def stats_norm_cdf(x):
     from scipy.stats import norm
     return norm.cdf(x)
 
+_SLATE_DROP = {"ladders", "alphas", "opp_factor", "lineup_status", "model_id", "rest"}      # sent by the server before, never read by the page
+_lean_memo = {}
+
+def _lean(x):
+    """A copy of the data with numbers rounded to 6 decimals (the page shows whole percents), so the Games page downloads less."""
+    if isinstance(x, float): return round(x, 6)
+    if isinstance(x, dict): return {k: _lean(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)): return [_lean(v) for v in x]
+    return x
+
+def _lean_player(p):
+    hit = _lean_memo.get(id(p))
+    if hit and hit[0] is p: return hit[1]
+    if len(_lean_memo) > 4000: _lean_memo.clear()
+    out = {k: _lean(v) for k, v in p.items() if k not in _SLATE_DROP}; _lean_memo[id(p)] = (p, out); return out
+
 @app.get("/api/slate")
 def get_slate(x_code: str = Header("")):
     check(x_code)
@@ -518,8 +564,8 @@ def get_slate(x_code: str = Header("")):
         if g is None:      # build each game's block once (it used to be rebuilt for every player, 78 times instead of 13)
             g = games[p["game_id"]] = dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"]), ltime.get(p["game_id"])),
                                            insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"]))
-        g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(p)
-    return sorted(games.values(), key=lambda g: g["start"])
+        g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(_lean_player(p))
+    return _lean(sorted(games.values(), key=lambda g: g["start"]))
 
 def bkName_(b):
     return "Sportsbet" if b == "sportsbet" else (b or "the bookmaker")
