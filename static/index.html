@@ -485,9 +485,10 @@ async function friendsPicks(a){const [ps,lb,lv0]=await Promise.all([api("picks")
   a.innerHTML=(lb?leaderboardHTML(lb):"")+(ps.length?ps.map(p=>`<div class="card"><b>${esc(p.user)}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span>
    ${p.legs.map(l=>`<div class="lg"><div>${esc(l.text||"")}${liveDot(l.game_id)}<small>${legDesc(l)}</small></div></div>`).join("")}
    <div class="mute" style="margin:6px 0">${p.odds?`Odds ${esc(p.odds)} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
-   <button class="btn" onclick="vote(${p.id},1)">👍</button> <button class="btn" onclick="vote(${p.id},-1)">👎</button> <b>${p.score}</b> <span class="mute">(${p.voters} votes)</span>
+   <button class="btn" onclick="vote(${p.id},1)">👍</button> <button class="btn" onclick="vote(${p.id},-1)">👎</button> <b>${p.score}</b> <span class="mute">(${p.voters} votes)</span>${p.user==localStorage.user?` <button class="btn" style="float:right" onclick="delShared(${p.id})">Delete</button>`:""}
    ${p.comments.map(c=>`<div class="mute" style="margin-top:4px"><b style="color:var(--ink)">${esc(c.user)}:</b> ${esc(c.body)}</div>`).join("")}
    <div style="display:flex;gap:6px;margin-top:8px"><input class="inp" id="c${p.id}" placeholder="Comment"><button class="btn" onclick="cmt(${p.id})">Post</button></div></div>`).join(""):'<div class="card empty">Nothing shared yet.<br>On the Games tab, choose picks, then press “Share pick”.</div>');dotTimer()}
+async function delShared(id){if(!confirm("Delete this shared pick, with its comments and thumbs? It cannot be brought back."))return;try{await api("picks/"+id,{method:"DELETE"})}catch(e){return}render()}
 async function vote(id,v){if(!needName())return;await post(`picks/${id}/vote`,{v});render()}
 async function cmt(id){if(!needName())return;const b=$("#c"+id).value.trim();if(b){await post(`picks/${id}/comment`,{body:b});render()}}
 

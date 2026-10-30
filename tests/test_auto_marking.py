@@ -288,3 +288,14 @@ def test_the_same_pick_cannot_be_shared_twice_but_can_be_shared_and_saved(db):
     assert c.post("/api/picks", json=body, headers={"X-User": "other"}).status_code == 200
     assert c.post("/api/bets", json=body, headers={"X-User": "mark"}).status_code == 200      # saving the same pick as well is allowed
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 2
+
+
+def test_only_the_owner_can_delete_a_shared_pick_and_its_comments_and_thumbs_go_with_it(db):
+    c = TestClient(app.app); body = {"legs": [dict(L("pts", 24.5), game_id="future")]}
+    c.post("/api/picks", json=body, headers={"X-User": "mark"})
+    c.post("/api/picks/1/comment", json={"body": "nice"}, headers={"X-User": "other"}); c.post("/api/picks/1/vote", json={"v": 1}, headers={"X-User": "other"})
+    assert c.delete("/api/picks/1", headers={"X-User": "other"}).status_code == 404                 # someone else cannot remove it
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 1
+    assert c.delete("/api/picks/1", headers={"X-User": "mark"}).status_code == 200
+    assert [db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("picks", "comments", "votes")] == [0, 0, 0]
+    assert c.delete("/api/picks/1", headers={"X-User": "mark"}).status_code == 404                 # already gone

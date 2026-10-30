@@ -1282,6 +1282,16 @@ def add_pick(body: PickInput, x_user: str = Header(""), x_code: str = Header("")
                   (user, dt.datetime.now(dt.timezone.utc).isoformat(), "", json.dumps(body["legs"]), body.get("note", "")[:500], body.get("odds"), body.get("model_prob"))); c.commit()
     return {"ok": True}
 
+@app.delete("/api/picks/{pid}")
+def delete_shared_pick(pid: int, x_user: str = Header(""), x_code: str = Header("")):
+    """Remove your own shared pick together with its comments and thumbs. A shared pick has no result and counts nowhere, so no record changes."""
+    user = who(x_user, x_code)
+    with closing(con()) as c:
+        if not c.execute("SELECT 1 FROM picks WHERE id=? AND user=?", (pid, user)).fetchone(): raise HTTPException(404, "Not your pick")
+        c.execute("DELETE FROM comments WHERE pick_id=?", (pid,)); c.execute("DELETE FROM votes WHERE pick_id=?", (pid,))
+        c.execute("DELETE FROM picks WHERE id=? AND user=?", (pid, user)); c.commit()
+    return {"ok": True}
+
 @app.post("/api/picks/{pid}/comment")
 def comment(pid: int, body: dict = Body(...), x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
