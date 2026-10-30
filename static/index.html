@@ -329,7 +329,7 @@ function ttHTML(g){const x=_mx(g);if(!x)return"";const {m,H,A,id}=x,tT=mbg(id,"t
   const tt=((m.team_totals||{})[tT]||[]).map(l=>{const o=tO=="over",tm=tT=="home"?H:A,p=o?l.p_over:1-l.p_over;
     return tbtn(id,"tt",tO,l.line,{label:`${nm(tm)} ${o?"over":"under"} ${l.line}`,prob:p,team:tT,text:`${nm(tm)} ${o?"over":"under"} ${l.line} points`})}).join("");
   return `<div class="mhd"><div class="sbt" style="margin:0">Team Total</div>${segc(id,"ttT",[["away",nm(A)],["home",nm(H)]])}${segc(id,"ttO",[["over","Over"],["under","Under"]])}</div>${stripH(tt)}`}
-const gsec={},SECDEF={top:true,players:true,margin:false,tteam:false,h2h:false};
+const gsec={},SECDEF={best3:true,top:true,players:true,margin:false,tteam:false,h2h:false};
 const secOpen=(id,k)=>(gsec[id]&&gsec[id][k]!==undefined)?gsec[id][k]:SECDEF[k];
 const sec=(id,k,title,body)=>`<div class="sec ${secOpen(id,k)?"open":""}" data-k="${k}"><button class="sh" aria-expanded="${secOpen(id,k)}" aria-controls="section-${id}-${k}" onclick="togSec('${id}','${k}')"><span>${title}</span><span class="cv" aria-hidden="true"></span></button><div class="sbody" id="section-${id}-${k}">${body}</div></div>`;
 function togSec(id,k){(gsec[id]=gsec[id]||{})[k]=!secOpen(id,k);const el=document.querySelector(`#g${id} .sec[data-k="${k}"]`);el.classList.toggle("open");el.querySelector('.sh').setAttribute('aria-expanded',String(secOpen(id,k)));if(secOpen(id,k)){paintSel();centerStrips(el)}}
@@ -346,11 +346,18 @@ function h2hHTML(g){const ins=g.insight;if(!ins)return'<p class="mute">No histor
 function oldPriceNote(g){const times=[g.match&&g.match.prices_at,...Object.values(g.teams||{}).flatMap(t=>t.players.map(p=>p.odds_at))].filter(Boolean);
   const worst=times.length?Math.max(...times.map(t=>(Date.now()-new Date(t).getTime())/36e5)):null;return worst!=null&&worst>8?`<div class="note" style="margin:0 0 8px">Some bookmaker prices for this game are about ${Math.round(worst)} hours old. VALUE labels are switched off until they are refreshed. Check the price on Sportsbet before betting.</div>`:""}
 function levelBlurb(g){const n=((g.match&&g.match.level_lines)||[]).length+Object.values(g.teams||{}).reduce((a,t)=>a+t.players.reduce((b,p)=>b+Object.values(p.level_lines||{}).reduce((c,v)=>c+v.length,0),0),0);return levelNote(n)}
+function best3HTML(g){const b=g.best3||[];
+  return `<p class="mute" style="margin:0 0 6px">The three strongest safe legs in this game, from three different players. Not advice: tap Evidence to see why each was chosen.</p>`+b.map((l,i)=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · bench/TBC"}</span></div><div style="text-align:right;flex:0 1 38%"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.real?(l.price?` · ${l.price.toFixed(2)}`:""):" · no bookmaker line found"}</div></div></div>
+   <details><summary style="font-size:12px">Evidence</summary><ul class="why">${l.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>
+   <div style="margin:4px 0 10px"><button class="btn" onclick="addG3('${g.game_id}',${i})">Add to pick list</button></div>`).join("")}
+function addG3(gid,i){const l=(gameIdx[gid]||{}).best3[i];if(!l)return;addLeg({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n},true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
 function gbodyHTML(g){const id=g.game_id,m=g.match;let h=oldPriceNote(g)+levelBlurb(g);
+  if((g.best3||[]).length)h+=sec(id,"best3","Best 3 picks",best3HTML(g));
+  h+=sec(id,"h2h","Form & Head-to-Head",h2hHTML(g));
   h+=sec(id,"top","Top Markets",topHTML(g));
   h+=sec(id,"players","Player Props",playersHTML(g));
   if(m){h+=sec(id,"margin","Margin Markets",marginHTML(g));if((m.team_totals||{}).home)h+=sec(id,"tteam","Team Totals",ttHTML(g))}
-  h+=sec(id,"h2h","Form & Head-to-Head",h2hHTML(g));return h}
+  return h}
 function gameHTML(g){gameIdx[g.game_id]=g;const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   const open=openGames.has(g.game_id),all=[...away.players,...home.players],gt=gtab[g.game_id]||"players";
   return `<div class="game ${open?"open":""}" id="g${g.game_id}"><button class="gh" onclick="tg('${g.game_id}')">

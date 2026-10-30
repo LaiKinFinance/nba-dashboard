@@ -592,7 +592,7 @@ def _lean_player(p):
 def get_slate(x_code: str = Header("")):
     check(x_code)
     import odds
-    games = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
+    games = {}; raw = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
     with with_c as c: bl = odds.load_lines(c); lage = odds.line_ages(c); ltime = odds.line_times(c)
     for p in enriched():
         g = games.get(p["game_id"])
@@ -600,6 +600,8 @@ def get_slate(x_code: str = Header("")):
             g = games[p["game_id"]] = dict(game_id=p["game_id"], start=p["start"], teams={}, match=match_payload(gp.get(p["game_id"]), bl.get(p["game_id"]), lage.get(p["game_id"]), ltime.get(p["game_id"])),
                                            insight=_insight(hist, p["team"] if p["home"] else p["opp"], p["opp"] if p["home"] else p["team"], p["date"]))
         g["teams"].setdefault(p["team"], dict(team=p["team"], opp=p["opp"], home=p["home"], lineup=p["lineup_status"], players=[]))["players"].append(_lean_player(p))
+        raw.setdefault(p["game_id"], []).append(p)
+    for gid, g in games.items(): g["best3"] = _safe(lambda: best3_for_game(raw[gid])) or []
     return _lean(sorted(games.values(), key=lambda g: g["start"]))
 
 def bkName_(b):
@@ -868,10 +870,10 @@ def best(x_code: str = Header("")):
 
 MIN_BEST_LINE = 1.5       # a line like "over 0.5 rebounds" is so close to certain that bookmakers rarely list it, so it is never suggested
 
-def compute_best():
-    preds = next_game_day([p for p in enriched() if not p.get("frozen") and not has_started(p["start"])]); cands = []
-    _, why = model_status(preds)
-    if why: return dict(legs=[], combo=dict(legs=[], joint=None, fair_odds=None), notice=why)
+def _best_candidates(preds):
+    """The safe legs (rebounds and assists; points are left out) for these players, one per player and stat: the highest line that is still
+    62-86% likely, was cleared in at least 7 of the last 10 games, and is at least MIN_BEST_LINE. Real bookmaker lines are used when they exist."""
+    cands = []
     for p in preds:
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
         for s in ("pts", "reb", "ast"):
@@ -885,6 +887,27 @@ def compute_best():
             if o["p"] > 0.86: continue  # too short to be worth a leg (pays almost nothing)
             cands.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
                               p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], real=bool(real), starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
+    return cands
+
+def best3_for_game(players):
+    """The three strongest safe legs in one game, from three different players, each with the evidence behind it. Nothing for a game that has started."""
+    live = [p for p in players if not p.get("frozen") and not has_started(p["start"])]
+    if not live: return []
+    cands = _best_candidates(live); cands.sort(key=lambda x: (not x["real"], -x["score"]))
+    by_id = {p["player_id"]: p for p in live}
+    out, used = [], set()
+    for c in cands:
+        if c["player_id"] in used: continue
+        used.add(c["player_id"]); p = by_id[c["player_id"]]
+        out.append(dict(c, evidence=[f"Model gives a {c['p']*100:.0f}% chance of going over {c['line']} {c['stat']}"] + _evidence(p, c["stat"], c["line"], c["p"], 1.0, 0.0, 0.0)[1:]))
+        if len(out) == 3: break
+    return out
+
+def compute_best():
+    preds = next_game_day([p for p in enriched() if not p.get("frozen") and not has_started(p["start"])])
+    _, why = model_status(preds)
+    if why: return dict(legs=[], combo=dict(legs=[], joint=None, fair_odds=None), notice=why)
+    cands = _best_candidates(preds)
     cands.sort(key=lambda x: (not x["real"], -x["score"]))          # lines a bookmaker really offers come first
     combo, used, games = [], set(), set()
     pmap = {(p["game_id"], p["player_id"]): p for p in preds}

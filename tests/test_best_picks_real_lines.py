@@ -36,3 +36,18 @@ def test_a_stale_price_counts_as_no_bookmaker_line(best):
 
 def test_tiny_lines_are_never_suggested(best):
     assert all(l["line"] >= app.MIN_BEST_LINE for l in best["legs"]) and "tiny" not in {l["player_id"] for l in best["legs"]}
+
+
+def _p(pid, ast=(), reb=(), start=None, **k):
+    d = player(pid, "g1", ladder_reb=list(reb)); d["ladders"]["ast"] = list(ast); d["start"] = start or FUTURE; d.update(k); return d
+
+def test_each_game_gets_three_picks_from_three_players_with_evidence():
+    players = [_p("a", reb=[entry(3.5, .70)], ast=[entry(2.5, .80)]), _p("b", reb=[entry(4.5, .66)]), _p("c", ast=[entry(3.5, .72)]), _p("d", reb=[entry(2.5, .64)])]
+    for p in players: p["proj"] = {"pts": 15., "reb": 8., "ast": 4.}; p["last10"] = [dict(reb=5, ast=3, pts=10)] * 10
+    out = app.best3_for_game(players)
+    assert len(out) == 3 and len({o["player_id"] for o in out}) == 3                      # one pick per player, never the same player twice
+    assert all(o["evidence"][0].startswith("Model gives a") and any("last 10 games" in e for e in o["evidence"]) for o in out)
+
+def test_no_picks_for_a_game_that_has_started():
+    past = (NOW - dt.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%MZ")
+    assert app.best3_for_game([_p("a", reb=[entry(3.5, .70)], start=past)]) == []
