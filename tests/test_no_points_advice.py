@@ -35,5 +35,7 @@ def test_slips_without_points_keep_chances_without_money_advice(client):
 
 def test_page_has_no_money_entry_or_advice():
     html = open("static/index.html", encoding="utf8").read()
-    for removed in ('id="stake"', 'id="podds"', 'stakeGuide', 'bankroll', 'sendReturned', 'Profit / loss', 'r.value.ev', 'value_roi'):
+    for removed in ('id="stake"', 'id="podds"', 'stakeGuide', 'sendReturned', 'Profit / loss', 'r.value.ev', 'value_roi'):
         assert removed not in html
+    # the only money on the page is the pretend $1,000 bankroll on the Track record (Mark's request): no place to type a stake, and it says it is pretend
+    assert "Pretend money" in html and "Hypothetical $" in html

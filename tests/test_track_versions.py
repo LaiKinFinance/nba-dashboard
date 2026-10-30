@@ -52,3 +52,23 @@ def test_coming_days_come_first_soonest_at_the_top(client):
                   (day, g, "p" + g, "A", "T", "leg", "reb", 5.5, "over", .8, "t", res, "NEW"))
     c.commit()
     assert [d["day"] for d in client.get("/api/track").json()["days"]] == ["2998-01-01", "2999-01-01", "2020-01-01"]
+
+
+def _row(i, day, result, price, stat="reb", line=3.5, game="g", pid="p", kind="leg"):
+    return dict(id=i, day=day, game_id=game, player_id=pid + str(i), stat=stat, line=line, side="over", result=result, price=price, kind=kind)
+
+def test_hypothetical_bankroll_flat_ten_dollars_on_priced_picks():
+    legs = [_row(1, "2026-10-01", "won", 2.0), _row(2, "2026-10-01", "lost", 1.5), _row(3, "2026-10-02", "won", 1.8),
+            _row(4, "2026-10-02", "void", 3.0), _row(5, "2026-10-02", None, 2.0), _row(6, "2026-10-02", "won", None)]
+    b = app.bankroll(legs)
+    assert (b["won"], b["lost"], b["void"], b["waiting"], b["no_price"]) == (2, 1, 1, 1, 1)
+    assert round(b["balance"], 2) == round(1000 + 10 * 1.0 - 10 + 10 * 0.8, 2) and round(b["profit"], 2) == 8.0
+    assert [round(x["balance"], 2) for x in b["series"]] == [1000.0, 1008.0] and round(b["roi"], 4) == round(8 / 30, 4)
+
+def test_a_pick_published_twice_counts_once_and_prefers_the_priced_copy():
+    a = _row(1, "2026-10-01", "won", None, pid="same"); b = dict(_row(2, "2026-10-01", "won", 2.0, kind="value"), player_id=a["player_id"])
+    out = app.bankroll([a, b]); assert out["won"] == 1 and out["no_price"] == 0 and round(out["profit"], 2) == 10.0
+
+def test_bankroll_with_nothing_settled_is_flat():
+    out = app.bankroll([_row(1, "2026-10-01", None, 2.0)])
+    assert out["balance"] == 1000.0 and out["roi"] is None and out["series"] == [] and out["waiting"] == 1

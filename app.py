@@ -729,6 +729,30 @@ def grade_bets():
         c.commit()
     return dict(graded=n, problem=None)
 
+BANK_START, BANK_STAKE = 1000.0, 10.0
+
+def bankroll(legs):
+    """Hypothetical only: a $1,000 start and a flat $10 on every published pick that had a bookmaker price when it was published
+    (a win pays stake x (price - 1), a loss costs the stake, a void returns it). Picks with no price are left out, because we cannot say what they would have paid.
+    The same pick published as both a best pick and a value bet counts once."""
+    best = {}
+    for r in sorted(legs, key=lambda r: (r["day"], r["id"])):
+        k = (r["game_id"], r["player_id"], r["stat"], r["line"], r["side"])
+        if k not in best or (not best[k].get("price") and r.get("price")): best[k] = r
+    rows = sorted(best.values(), key=lambda r: (r["day"], r["id"]))
+    no_price = sum(1 for r in rows if not r.get("price")); priced = [r for r in rows if r.get("price")]
+    bal, days, won, lost, void = BANK_START, {}, 0, 0, 0
+    for r in priced:
+        if r["result"] == "won": bal += BANK_STAKE * (r["price"] - 1); won += 1
+        elif r["result"] == "lost": bal -= BANK_STAKE; lost += 1
+        elif r["result"] == "void": void += 1
+        else: continue
+        days[r["day"]] = bal
+    settled = won + lost
+    return dict(start=BANK_START, stake=BANK_STAKE, balance=bal, profit=bal - BANK_START, won=won, lost=lost, void=void, no_price=no_price,
+                waiting=sum(1 for r in priced if r["result"] is None), roi=((bal - BANK_START) / (BANK_STAKE * settled)) if settled else None,
+                series=[dict(day=d, balance=b) for d, b in sorted(days.items())])
+
 @app.get("/api/track")
 def track_record(x_code: str = Header("")):
     """Track record of the published best picks and value bets, graded against real results."""
@@ -743,7 +767,7 @@ def track_record(x_code: str = Header("")):
         return dict(n=len(g), won=sum(1 for r in g if r["result"] == "won"), avg_p=(sum(r["model_p"] for r in g) / len(g)) if g else None,
                     pending=sum(1 for r in rows if r["result"] is None), void=sum(1 for r in rows if r["result"] == "void"))
     L = [r for r in legs if r["kind"] == "leg"]; V = [r for r in legs if r["kind"] == "value"]
-    out = dict(legs=summ(L), value=summ(V))
+    out = dict(legs=summ(L), value=summ(V), bankroll=bankroll(legs))
     bins = []
     for lo, hi in ((0.0, 0.7), (0.7, 0.8), (0.8, 1.01)):
         g = [r for r in L if r["result"] in ("won", "lost") and lo <= r["model_p"] < hi]

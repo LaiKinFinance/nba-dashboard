@@ -356,7 +356,6 @@ function gbodyHTML(g){const id=g.game_id,m=g.match;let h=oldPriceNote(g)+levelBl
   h+=sec(id,"h2h","Form & Head-to-Head",h2hHTML(g));
   h+=sec(id,"top","Top Markets",topHTML(g));
   h+=sec(id,"players","Player Props",playersHTML(g));
-  if(m){h+=sec(id,"margin","Margin Markets",marginHTML(g));if((m.team_totals||{}).home)h+=sec(id,"tteam","Team Totals",ttHTML(g))}
   return h}
 function gameHTML(g){gameIdx[g.game_id]=g;const t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   const open=openGames.has(g.game_id),all=[...away.players,...home.players],gt=gtab[g.game_id]||"players";
@@ -438,6 +437,14 @@ const liveSet=g=>new Set((g||[]).filter(x=>x.state=="in").map(x=>x.game_id));
 const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEIDS.has(id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
 async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
 const dotTimer=()=>{liveTimer=setInterval(()=>{if(document.visibilityState=="visible")refreshDots()},30000)};     // red dots follow the live scoreboard while a page is open
+const usd=x=>(x<0?"-":"")+"$"+Math.abs(x).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+function bankrollHTML(b){if(!b)return"";const up=b.profit>=0,col=up?"var(--good)":"var(--bad)",n=b.won+b.lost;
+  let chart="";const sr=b.series||[];
+  if(sr.length>=2){const W=300,H=64,vals=[b.start,...sr.map(x=>x.balance)],lo=Math.min(...vals),hi=Math.max(...vals),sp=(hi-lo)||1,pts=vals.map((v,i)=>`${(i/(vals.length-1)*W).toFixed(1)},${(H-4-(v-lo)/sp*(H-8)).toFixed(1)}`),y0=(H-4-(b.start-lo)/sp*(H-8)).toFixed(1);
+    chart=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:64px;margin-top:8px" role="img" aria-label="Balance over time"><line x1="0" x2="${W}" y1="${y0}" y2="${y0}" stroke="var(--line)" stroke-dasharray="4 3"/><polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.join(" ")}"/></svg>`}
+  return `<div class="card"><h2>Hypothetical $${b.start.toLocaleString()} bankroll <span class="mute" style="font-weight:400;font-size:13px">$${b.stake} on every pick that had a bookmaker price</span></h2>
+   <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:28px;font-weight:800;color:${col}">${usd(b.balance)}</span><b style="color:${col}">${up?"+":""}${usd(b.profit)}${b.roi!=null?` (${up?"+":""}${(b.roi*100).toFixed(1)}% of money bet)`:""}</b></div>
+   ${chart}<p class="mute" style="margin:6px 0 0;font-size:12.5px">${n} settled · ${b.won} won · ${b.lost} lost${b.void?` · ${b.void} void`:""}${b.waiting?` · ${b.waiting} waiting`:""}${b.no_price?` · ${b.no_price} not counted (no bookmaker price)`:""}. Pretend money, to see whether the picks would have paid.</p></div>`}
 const trackWho=x=>`${x.player_id?photo(x.player_id,x.player):""}${x.team?`<img src="${logo(x.team)}" alt="${esc(x.team)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}${esc(x.player)}${liveDot(x.game_id)}`;
 async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
@@ -450,7 +457,7 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
     $("#bbody").innerHTML=`<div class="tiles"><div class="tile"><div class="v">${L.n?pc0(L.won/L.n):"–"}</div><div class="k">Legs won (${L.won} of ${L.n}${L.pending?`, ${L.pending} pending`:""})</div></div>
       <div class="tile"><div class="v">${pc0(L.avg_p)}</div><div class="k">Model expected</div></div>
       <div class="tile"><div class="v">${C.n?C.won+"/"+C.n:"–"}</div><div class="k">Daily combos won${C.n?` (model expected ${pc0(C.avg_p)})`:""}</div></div></div>
-     <div class="card"><h2>What this tells us</h2><p style="margin:0">${verdict}</p>
+     ${bankrollHTML(t.bankroll)}<div class="card"><h2>What this tells us</h2><p style="margin:0">${verdict}</p>
       ${t.calibration.length?`<table class="t" style="margin-top:8px"><tr><th style="text-align:left">When the model said</th><th>Picks</th><th>Hit</th></tr>${t.calibration.map(b=>`<tr><td style="text-align:left">${pc0(b.lo)}–${pc0(b.hi)} (avg ${pc0(b.predicted)})</td><td>${b.n}</td><td>${pc0(b.actual)}</td></tr>`).join("")}</table>`:""}
       ${Object.keys(t.by_stat).length?`<h3>By market</h3><div class="pillrow" style="flex-wrap:wrap">${Object.entries(t.by_stat).map(([k,v])=>`<span class="pill">${statName[k]||k}: ${v.won}/${v.n}</span>`).join("")}</div>`:""}
       ${V.n?`<h3>Value bets</h3><p class="mute" style="margin:0">${V.won} of ${V.n} won (model expected ${pc0(V.avg_p)})</p>`:""}
