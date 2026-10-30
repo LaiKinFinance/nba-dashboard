@@ -84,7 +84,7 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .big{font-size:30px;font-weight:800;line-height:1}.kv{display:flex;justify-content:space-between;font-size:13px;margin:4px 0}
 .btn{background:var(--btn);border:1px solid var(--line);border-radius:7px;padding:7px 12px;font-weight:600}.btn:hover{background:var(--btnh)}
 .btn.p{background:var(--gold);border-color:var(--gold);color:#101010}.btn.g{background:var(--good);border-color:var(--good);color:#fff}.btn.r{background:var(--c-bad-bg);border-color:var(--c-bad-fg);color:var(--c-bad-fg)}
-.btn.xl{padding:12px 16px;font-size:15px;flex:1}
+.btn.xl{padding:12px 16px;font-size:15px;flex:1}.btn:disabled{opacity:.55;cursor:default;filter:grayscale(.6)}
 .edge{border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px}.edge.g{background:var(--edge-g-bg);border:1px solid var(--edge-g-line)}.edge.b{background:var(--edge-b-bg);border:1px solid var(--edge-b-line)}
 .alert{background:var(--c-warn-bg);border:1px solid var(--c-warn-fg);color:var(--c-warn-fg);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;gap:8px}.alert a{cursor:pointer;color:var(--c-warn-fg);text-decoration:underline}
 @media(max-width:960px){.slip{position:fixed;left:0;right:0;bottom:0;top:auto;border-radius:14px 14px 0 0;z-index:30;max-height:75vh;overflow:auto;padding-bottom:calc(12px + env(safe-area-inset-bottom))}.slip.min .sb{display:none}.slip h2{cursor:pointer;margin:0}}
@@ -223,7 +223,9 @@ function paintSel(){const on=new Set(legs.map(key));document.querySelectorAll(".
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
   try{const r=await post("parlay",{legs:legsPayload()});calc={r};drawSlip()}catch(x){}},250)}
 const SLIPTABS=["today","best"];
+let slipDone={saved:false,shared:false,sig:""};     // which buttons have been used for the pick list as it is now; a change to the list starts afresh
 function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHTML="";return}
+  const sig=legs.map(key).sort().join("~");if(slipDone.sig!==sig)slipDone={saved:false,shared:false,sig};
   const fid=document.activeElement&&document.activeElement.id,note=($("#note")||{}).value||"",r=calc&&calc.r;
   const mine=alerts.filter(a=>legs.some(l=>l.player_id==a.pid));
   w.innerHTML=`<div class="slip ${slipMin?"min":""}"><h2 onclick="slipMin=!slipMin;drawSlip()"><span>Pick list <span class="badge">${legs.length}</span></span><span class="mute" style="font-weight:400">${r&&r.joint!=null&&legs.length?pct(r.joint)+" estimated chance · "+(slipMin?"tap to open":"tap to close"):""}</span></h2><div class="sb">
@@ -236,15 +238,18 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
    ${r&&r.points_warning?`<div class="note" style="margin:8px 0">${esc(r.points_warning)}</div>`:""}
    ${r&&r.warning?`<div class="note" style="margin:8px 0">${esc(r.warning)}</div>`:""}`:""}
   ${legs.length?`<input class="inp" id="note" placeholder="Note for friends (optional)" style="margin:6px 0" value="${esc(note)}">
-   <div style="display:flex;gap:6px"><button class="btn" style="flex:1" onclick="share()">Share pick</button><button class="btn p" style="flex:1" onclick="logBet()">Save pick</button></div>
+   <div style="display:flex;gap:6px"><button class="btn" style="flex:1" ${slipDone.shared?"disabled":""} onclick="share()">${slipDone.shared?"Shared ✓":"Share pick"}</button><button class="btn p" style="flex:1" ${slipDone.saved?"disabled":""} onclick="logBet()">${slipDone.saved?"Saved ✓":"Save pick"}</button></div>
+   ${slipDone.saved||slipDone.shared?`<div class="mute" style="margin:6px 0 0">${[slipDone.saved?`Saved on <a onclick="go('bets')" style="color:var(--acc);cursor:pointer">My picks</a>`:"",slipDone.shared?`Shared on <a onclick="go('picks')" style="color:var(--acc);cursor:pointer">Friends' picks</a>`:""].filter(Boolean).join(" · ")} <a onclick="clearSlip()" style="color:var(--acc);cursor:pointer">Clear list</a></div>`:""}
    <p class="mute" style="margin:8px 0 0">These are estimates. Save picks to see how often they are right.</p>`:""}
   </div></div>`;
   if(fid&&$("#"+fid)){const el=$("#"+fid);el.focus();try{el.setSelectionRange(el.value.length,el.value.length)}catch(x){}}}
 function clearSlip(){legs=[];calc=null;paintSel();drawSlip()}
 const legsPayload=()=>legs.map(l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:l.side,team:l.team,lo:l.lo,hi:l.hi,kind:l.kind,text:l.text,price:l.price||undefined}));
-async function share(){if(!needName()||!calc)return;await post("picks",{legs:legsPayload(),note:$("#note").value,model_prob:calc.r.unsupported?undefined:calc.r.joint});legs=[];calc=null;go("picks")}
-async function logBet(){if(!needName()||!calc)return;
-  await post("bets",{legs:legsPayload(),model_prob:calc.r.unsupported?undefined:calc.r.joint});legs=[];calc=null;go("bets")}
+async function sendPick(route,body,flag){if(!needName()||!calc||slipDone[flag])return;slipDone[flag]=true;drawSlip();     // greyed out at once, so a double tap cannot send it twice
+  try{await post(route,body)}catch(e){if(!(e&&/already/i.test(e.detail||"")))slipDone[flag]=false}drawSlip()}
+const pickBody=()=>({legs:legsPayload(),model_prob:calc&&calc.r.unsupported?undefined:calc&&calc.r.joint});
+function share(){sendPick("picks",{...pickBody(),note:($("#note")||{}).value||""},"shared")}
+function logBet(){sendPick("bets",pickBody(),"saved")}
 
 /* ---------- live lineup/injury alerts ---------- */
 async function pollStatus(){if(!legs.length)return;try{live=await api("status")}catch(e){return}

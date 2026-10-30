@@ -279,3 +279,12 @@ def test_players_and_lineup_pages_use_the_current_roster_team(db):
     df = pd.DataFrame([dict(player_id="p1", player="A", team="MEM"), dict(player_id="p2", player="B", team="MEM"), dict(player_id="p3", player="C", team="MEM")])
     out = app._with_current_team(df, db)                                          # lineups use this: traded -> new team, off every roster -> left out, unlisted -> last team
     assert dict(zip(out.player_id, out.team)) == {"p1": "DAL", "p3": "MEM"}
+
+
+def test_the_same_pick_cannot_be_shared_twice_but_can_be_shared_and_saved(db):
+    c = TestClient(app.app); body = {"legs": [dict(L("pts", 24.5), game_id="future")]}
+    assert c.post("/api/picks", json=body, headers={"X-User": "mark"}).status_code == 200
+    assert c.post("/api/picks", json=body, headers={"X-User": "mark"}).status_code == 409
+    assert c.post("/api/picks", json=body, headers={"X-User": "other"}).status_code == 200
+    assert c.post("/api/bets", json=body, headers={"X-User": "mark"}).status_code == 200      # saving the same pick as well is allowed
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 2

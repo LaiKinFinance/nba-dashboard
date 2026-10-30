@@ -1213,6 +1213,9 @@ def add_pick(body: PickInput, x_user: str = Header(""), x_code: str = Header("")
     user = who(x_user, x_code)
     body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
+        key = _pick_key(body["legs"])
+        for r in c.execute("SELECT legs FROM picks WHERE user=?", (user,)).fetchall():
+            if _pick_key(_safe(lambda: json.loads(r["legs"])) or []) == key: raise HTTPException(409, "You have already shared this pick")
         c.execute("INSERT INTO picks(user,created,game_id,legs,note,odds,model_prob) VALUES(?,?,?,?,?,?,?)",
                   (user, dt.datetime.now(dt.timezone.utc).isoformat(), "", json.dumps(body["legs"]), body.get("note", "")[:500], body.get("odds"), body.get("model_prob"))); c.commit()
     return {"ok": True}

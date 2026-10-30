@@ -25,15 +25,20 @@ test('personal results render without a model, prices or money', async () => {
   assert.doesNotMatch(app.innerHTML, /\$|profit|stake|refund|Sportsbet|bankroll/i);
 });
 
-test('saving a pick sends no financial fields and keeps its threshold type', async () => {
+test('saving a pick sends no financial fields, keeps its threshold type, and cannot be sent twice', async () => {
   const payloadLine = script.match(/^const legsPayload=[^\n]+/m)[0];
-  const save = script.slice(script.indexOf('async function logBet()'), script.indexOf('/* ---------- live lineup/injury alerts ---------- */'));
+  const save = script.slice(script.indexOf('async function sendPick('), script.indexOf('/* ---------- live lineup/injury alerts ---------- */'));
   const original = [{game_id:'g',player_id:'p',stat:'pts',line:20,side:'over',kind:'atleast'}];
   const calls=[];
-  const run = new Function('post','needName','go',`let legs=${JSON.stringify(original)},calc={r:{joint:.7}};`+payloadLine+save+';return logBet');
-  await run(async (route,body)=>calls.push({route,body}), ()=>true, ()=>{})();
+  const run = new Function('post','needName','go',`let legs=${JSON.stringify(original)},calc={r:{joint:.7}},slipDone={saved:false,shared:false,sig:""};const drawSlip=()=>{},$=()=>({value:"hi"});`+payloadLine+save+';return {logBet,share,state:()=>slipDone}');
+  const api = run(async (route,body)=>calls.push({route,body}), ()=>true, ()=>{});
+  api.logBet(); api.logBet(); api.logBet(); await new Promise(r=>setTimeout(r,20));        // three quick taps send it once
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].route, 'bets');
   assert.equal(calls[0].body.legs[0].kind, 'atleast');
   assert.equal(calls[0].body.model_prob, .7);
   for(const key of ['stake','odds','amount','returned_amount']) assert.equal(Object.hasOwn(calls[0].body,key), false);
+  api.share(); await new Promise(r=>setTimeout(r,20));                                       // sharing is still open after saving
+  assert.equal(calls.length, 2); assert.equal(calls[1].route, 'picks'); assert.equal(calls[1].body.note, 'hi');
+  assert.deepEqual([api.state().saved, api.state().shared], [true, true]);
 });
