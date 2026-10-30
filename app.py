@@ -299,6 +299,9 @@ def init():
         # Existing money columns are left untouched. New records only track outcomes.
         for col, typ in (("manual", "INTEGER DEFAULT 0"), ("settled_at", "TEXT"), ("leg_results", "TEXT"), ("settle_note", "TEXT")):
             if col not in bhave: c.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
+        phave = {r[1] for r in c.execute("PRAGMA table_info(picks)")}
+        for col, typ in (("result", "TEXT"), ("settled_at", "TEXT"), ("leg_results", "TEXT")):
+            if col not in phave: c.execute(f"ALTER TABLE picks ADD COLUMN {col} {typ}")
         have = {r[1] for r in c.execute("PRAGMA table_info(pick_log)")}
         for col, typ in (("price_close", "REAL"), ("close_book", "TEXT"), ("close_mins_before", "REAL"), ("model_id", "TEXT")):
             if col not in have: c.execute(f"ALTER TABLE pick_log ADD COLUMN {col} {typ}")
@@ -706,26 +709,33 @@ def grade_picks():
             c.execute("UPDATE combo_log SET result=?, graded_at=? WHERE id=?", (res, now, r["id"]))
         c.commit()
 
-def grade_bets():
-    """Score saved personal picks. Unplayed or tied picks do not count as wins/losses."""
+def _score_legs(c, legs):
+    """Won / lost / open / void for a list of legs, from the saved game results (shared by saved and shared picks)."""
     import settle
-    n = 0
+    results = []
+    for l in legs:
+        g = c.execute("SELECT home_pts, away_pts FROM games WHERE game_id=? AND home_pts IS NOT NULL", (l["game_id"],)).fetchone()
+        pl = None
+        if g and l["stat"] not in TEAM_STATS:
+            have_box = c.execute("SELECT 1 FROM player_games WHERE game_id=? LIMIT 1", (l["game_id"],)).fetchone()
+            if have_box:
+                r = c.execute("SELECT pts,reb,ast,fg3m,stl,blk FROM player_games WHERE game_id=? AND player_id=?", (l["game_id"], l.get("player_id"))).fetchone()
+                pl = dict(r) if r else "missing"
+        results.append(settle.leg_result(l, dict(g) if g else None, pl))
+    return settle.settle_bet(legs, results), results
+
+def grade_bets():
+    """Score saved personal picks and shared picks. Unplayed or tied picks do not count as wins/losses."""
+    n = 0; now = lambda: dt.datetime.now(dt.timezone.utc).isoformat()
     with closing(con()) as c:
         for b in c.execute("SELECT * FROM bets WHERE result='open' AND COALESCE(manual,0)=0").fetchall():
-            legs = json.loads(b["legs"]); results = []
-            for l in legs:
-                g = c.execute("SELECT home_pts, away_pts FROM games WHERE game_id=? AND home_pts IS NOT NULL", (l["game_id"],)).fetchone()
-                pl = None
-                if g and l["stat"] not in TEAM_STATS:
-                    have_box = c.execute("SELECT 1 FROM player_games WHERE game_id=? LIMIT 1", (l["game_id"],)).fetchone()
-                    if have_box:
-                        r = c.execute("SELECT pts,reb,ast,fg3m,stl,blk FROM player_games WHERE game_id=? AND player_id=?", (l["game_id"], l.get("player_id"))).fetchone()
-                        pl = dict(r) if r else "missing"
-                results.append(settle.leg_result(l, dict(g) if g else None, pl))
-            res = settle.settle_bet(legs, results)
+            res, results = _score_legs(c, json.loads(b["legs"]))
             if res == "open": continue
-            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=NULL WHERE id=?",
-                      (res, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(results), b["id"])); n += 1
+            c.execute("UPDATE bets SET result=?, settled_at=?, leg_results=?, settle_note=NULL WHERE id=?", (res, now(), json.dumps(results), b["id"])); n += 1
+        for b in c.execute("SELECT id, legs FROM picks WHERE COALESCE(result,'open')='open'").fetchall():           # shared picks: shown to friends with their result
+            res, results = _score_legs(c, _safe(lambda: json.loads(b["legs"])) or [])
+            if res == "open": continue
+            c.execute("UPDATE picks SET result=?, settled_at=?, leg_results=? WHERE id=?", (res, now(), json.dumps(results), b["id"])); n += 1
         c.commit()
     return dict(graded=n, problem=None)
 
@@ -1057,6 +1067,21 @@ def players(q: str = "", x_code: str = Header("")):
         rm = _roster_team_map(c)
     return [dict(player_id=r["player_id"], player=r["player"], team=(rm[r["player_id"]] or "") if r["player_id"] in rm else r["team"]) for r in rows]
 
+@app.get("/api/team/{abbr}")
+def team_players(abbr: str, x_code: str = Header("")):
+    """The players on one team's current roster who have played this season, most minutes first, with their season averages."""
+    check(x_code)
+    abbr = abbr.upper()[:5]
+    with closing(con()) as c:
+        rm = _roster_team_map(c); ids = [pid for pid, t in rm.items() if t == abbr]
+        if not ids:                                           # no roster table yet: the team's players of the last six weeks
+            ids = [r[0] for r in c.execute("SELECT DISTINCT player_id FROM player_games WHERE team=? AND date >= date('now','-45 day')", (abbr,))]
+        if not ids: return []
+        marks = ",".join("?" * len(ids))
+        rows = c.execute(f"""SELECT player_id, player, COUNT(*) g, AVG(min) mn, AVG(pts) pts, AVG(reb) reb, AVG(ast) ast FROM player_games
+                             WHERE player_id IN ({marks}) AND season=(SELECT MAX(season) FROM player_games) AND min > 0 GROUP BY player_id ORDER BY AVG(min) DESC LIMIT 20""", ids).fetchall()
+    return [dict(player_id=r["player_id"], player=r["player"], games=r["g"], min=round(r["mn"], 1), pts=round(r["pts"], 1), reb=round(r["reb"], 1), ast=round(r["ast"], 1)) for r in rows]
+
 @app.get("/api/player/{pid}")
 def player(pid: str, x_code: str = Header("")):
     """Plain data for the player page: last 20 games (newest first), double/triple-double counts, tonight's projection if any."""
@@ -1262,10 +1287,11 @@ def leaderboard(x_code: str = Header("")):
 @app.get("/api/picks")
 def picks(x_code: str = Header("")):
     check(x_code)
+    _safe(grade_bets)
     with closing(con()) as c:
         ps = [dict(r) for r in c.execute("SELECT * FROM picks ORDER BY id DESC LIMIT 100")]
         for p in ps:
-            p["legs"] = json.loads(p["legs"])
+            p["legs"] = json.loads(p["legs"]); p["result"] = p.get("result") or "open"; p["leg_results"] = _safe(lambda: json.loads(p["leg_results"])) if p.get("leg_results") else None
             p["comments"] = [dict(r) for r in c.execute("SELECT * FROM comments WHERE pick_id=? ORDER BY id", (p["id"],))]
             v = c.execute("SELECT coalesce(sum(v),0) s, count(*) n FROM votes WHERE pick_id=?", (p["id"],)).fetchone(); p["score"], p["voters"] = v["s"], v["n"]
     return ps
@@ -1275,6 +1301,7 @@ def add_pick(body: PickInput, x_user: str = Header(""), x_code: str = Header("")
     user = who(x_user, x_code)
     body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
+        if _any_started(c, body["legs"]): raise HTTPException(400, "A game in this pick has already started, so it can no longer be shared")
         key = _pick_key(body["legs"])
         for r in c.execute("SELECT legs FROM picks WHERE user=?", (user,)).fetchall():
             if _pick_key(_safe(lambda: json.loads(r["legs"])) or []) == key: raise HTTPException(409, "You have already shared this pick")

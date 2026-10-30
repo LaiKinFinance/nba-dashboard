@@ -299,3 +299,28 @@ def test_only_the_owner_can_delete_a_shared_pick_and_its_comments_and_thumbs_go_
     assert c.delete("/api/picks/1", headers={"X-User": "mark"}).status_code == 200
     assert [db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("picks", "comments", "votes")] == [0, 0, 0]
     assert c.delete("/api/picks/1", headers={"X-User": "mark"}).status_code == 404                 # already gone
+
+
+def test_shared_picks_get_a_result_from_the_game(db):
+    c = TestClient(app.app); lost = {"legs": [dict(L("pts", 30.5))]}; won = {"legs": [dict(L("pts", 24.5))]}
+    app.init()
+    db.execute("INSERT INTO picks(user,created,game_id,legs) VALUES('mark','t','',?)", (json.dumps(won["legs"]),)); db.execute("INSERT INTO picks(user,created,game_id,legs) VALUES('mark','t','',?)", (json.dumps(lost["legs"]),))
+    db.execute("INSERT INTO picks(user,created,game_id,legs) VALUES('mark','t','',?)", (json.dumps([dict(game_id='future', player_id='p', stat='pts', line=10.5, side='over')]),)); db.commit()
+    got = {p["id"]: p for p in c.get("/api/picks").json()}
+    assert [got[i]["result"] for i in (1, 2, 3)] == ["won", "lost", "open"] and got[1]["leg_results"] == ["won"]
+
+def test_a_pick_cannot_be_shared_once_its_game_has_started(db):
+    db.execute("CREATE TABLE IF NOT EXISTS projections(game_id TEXT, player_id TEXT, payload TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id))")
+    db.execute("INSERT INTO projections VALUES('started','p','{\"start\":\"2020-01-01T00:00Z\"}','t')"); db.commit()
+    r = TestClient(app.app).post("/api/picks", json={"legs": [dict(game_id="started", player_id="p", stat="pts", line=10.5, side="over")]}, headers={"X-User": "mark"})
+    assert r.status_code == 400
+
+def test_team_page_lists_the_current_roster_with_season_averages(db):
+    db.executescript("""CREATE TABLE IF NOT EXISTS rosters(player_id TEXT PRIMARY KEY, team TEXT, name TEXT, fetched_at TEXT);
+        INSERT INTO rosters VALUES('a','DAL','Aldama','t'); INSERT INTO rosters VALUES('b','DAL','Bench','t'); INSERT INTO rosters VALUES('z','MEM','Other','t');""")
+    for col in ("player TEXT", "team TEXT", "season TEXT", "min REAL"): db.execute(f"ALTER TABLE player_games ADD COLUMN {col}")
+    for pid, nm, mn, pts in (("a", "Aldama", 30, 14), ("a", "Aldama", 34, 18), ("b", "Bench", 10, 2), ("z", "Other", 35, 25)):
+        db.execute("INSERT INTO player_games(game_id,player_id,player,team,season,min,pts,reb,ast) VALUES('g',?,?,'DAL','2026',?,?,5,3)", (pid, nm, mn, pts))
+    db.commit()
+    out = TestClient(app.app).get("/api/team/dal").json()
+    assert [p["player"] for p in out] == ["Aldama", "Bench"] and out[0]["pts"] == 16.0 and out[0]["games"] == 2 and out[0]["min"] == 32.0
