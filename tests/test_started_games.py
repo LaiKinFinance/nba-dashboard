@@ -15,7 +15,7 @@ def gp(start): return dict(source="market", home="NY", away="BOS", p_home=.75, p
 def player(game, start):
     ladder = [dict(line=3.5, p_over=.7, hit=9, n=10, price=2.4, book="sportsbet", edge=.3, alt=None, boost=0, fade=0)]
     return dict(player_id="p" + game, game_id=game, player="X", team="A", opp="B", home=1, start=start, injury=None, starting=True, min=30, odds_age_h=1.0, odds_at=None,
-                strip={"reb": ladder, "ast": [], "pts": []}, book={}, proj={"pts": 15., "reb": 8., "ast": 4.}, p_dd=.1, p_td=.01, show_dd=False, show_td=False,
+                strip={"reb": ladder, "ast": [], "pts": []}, book={"reb": ladder}, proj={"pts": 15., "reb": 8., "ast": 4.}, p_dd=.1, p_td=.01, show_dd=False, show_td=False,
                 ladders={"pts": [], "reb": ladder, "ast": []}, sd={}, last10=[], evidence=[], absent=[], opp_factor={}, lineup_status="")
 
 @pytest.fixture

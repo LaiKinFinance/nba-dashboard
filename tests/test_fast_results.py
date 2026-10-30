@@ -52,3 +52,13 @@ def test_who_started_lists_the_five_starters_of_recent_finished_games(db):
     assert [g["game_id"] for g in out] == ["new"]
     g = out[0]; assert g["home"]["score"] == 114 and g["away"]["score"] == 111
     assert [p["name"] for p in g["home"]["starters"]] == [f"Atl {i}" for i in range(5)] and len(g["away"]["starters"]) == 5
+
+
+def test_playing_now_lists_only_picks_that_had_a_bookmaker_price(db):
+    import datetime as dt
+    started = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%MZ")
+    db.execute("INSERT INTO games(game_id,date,tip_utc,home,away) VALUES('g1','2026-10-30',?,'A','B')", (started,))
+    for pid, price in (("priced", 1.8), ("unpriced", None)):
+        db.execute("INSERT INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,in_combo,created) VALUES('2026-10-30','g1',?,?,'A','leg','reb',3.5,'over',.7,9,10,?,0,'t')", (pid, pid, price))
+    db.commit()
+    assert [r["player_id"] for r in app.playing_picks()] == ["priced"]

@@ -896,21 +896,20 @@ MIN_BEST_LINE = 1.5       # a line like "over 0.5 rebounds" is so close to certa
 
 def _best_candidates(preds):
     """The safe legs (rebounds and assists; points are left out) for these players, one per player and stat: the highest line that is still
-    62-86% likely, was cleared in at least 7 of the last 10 games, and is at least MIN_BEST_LINE. Real bookmaker lines are used when they exist."""
+    62-86% likely, was cleared in at least 7 of the last 10 games, and is at least MIN_BEST_LINE. Only lines with a real bookmaker price are used."""
     cands = []
     for p in preds:
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
         for s in ("pts", "reb", "ast"):
             if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue        # no "safe leg" claims for points until checked
-            # real bookmaker lines first (a price found recently for exactly that line); only when none exist at all do we fall back to the model's own lines
+            # only lines a bookmaker really offers (a price found recently for exactly that line). No bookmaker line found = no pick.
             real = [] if is_stale(p.get("odds_age_h")) else [dict(line=b["line"], p=b["p_over"], hit=b["hit"], n=b["n"], price=b["price"]) for b in p["book"].get(s, []) if b.get("price")]
-            opts = real or [dict(line=l["line"], p=l["p_over"], hit=l["hit"], n=l["n"], price=None) for l in p["ladders"][s]]
-            ok = [o for o in opts if o["p"] >= 0.62 and o["n"] >= 5 and o["hit"] / o["n"] >= 0.7 and o["line"] >= MIN_BEST_LINE]
+            ok = [o for o in real if o["p"] >= 0.62 and o["n"] >= 5 and o["hit"] / o["n"] >= 0.7 and o["line"] >= MIN_BEST_LINE]
             if not ok: continue
             o = max(ok, key=lambda x: x["line"])  # highest line that is still safe = best payout among safe legs
             if o["p"] > 0.86: continue  # too short to be worth a leg (pays almost nothing)
             cands.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
-                              p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], real=bool(real), starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
+                              p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], real=True, starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
     return cands
 
 def best3_for_game(players):
@@ -949,7 +948,7 @@ def playing_picks():
     """Picks that were published before tip-off and have no result yet, for games that have started. The page shows only those in a live game."""
     out = []
     with closing(con()) as c:
-        for r in c.execute("SELECT player, player_id, team, game_id, stat, line, model_p, in_combo FROM pick_log WHERE kind='leg' AND result IS NULL ORDER BY day, id").fetchall():
+        for r in c.execute("SELECT player, player_id, team, game_id, stat, line, model_p, in_combo FROM pick_log WHERE kind='leg' AND result IS NULL AND price IS NOT NULL ORDER BY day, id").fetchall():
             st = _game_start(c, r["game_id"])
             if st and has_started(st): out.append(dict(player=r["player"], player_id=r["player_id"], team=r["team"], game_id=r["game_id"], stat=r["stat"], line=r["line"], p=r["model_p"], in_combo=bool(r["in_combo"])))
     return out
