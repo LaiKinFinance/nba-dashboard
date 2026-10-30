@@ -528,7 +528,7 @@ function drawPlayer(){const d=pdata,g10=d.games.slice(0,10).reverse(),vals=g10.m
 /* ---------- live scores ---------- */
 const dayName=iso=>{const d=new Date(iso),t=new Date(),y=new Date(t.getTime()-864e5),k=x=>x.toDateString();return k(d)==k(t)?"today":k(d)==k(y)?"yesterday":d<t?"older":"later"};   // by the phone's own clock
 let liveDay="today",luDay="today";
-const daySwitch=(cur,setter)=>`<div class="seg" style="margin:0 0 12px"><button class="${cur=="today"?"on":""}" onclick="${setter}('today')">Today</button><button class="${cur=="yesterday"?"on":""}" onclick="${setter}('yesterday')">Yesterday</button></div>`;
+const daySwitch=(cur,setter)=>`<div class="seg" style="margin:0 0 12px">${[["yesterday","Yesterday"],["today","Today"],["tomorrow","Tomorrow"]].map(([k,t])=>`<button class="${cur==k?"on":""}" onclick="${setter}('${k}')">${t}</button>`).join("")}</div>`
 function setLiveDay(d){liveDay=d;drawLive()}
 let PT={},LG=[],boxes={},openLive=new Set(),fullStats=false,liveTimer=null,showAll=new Set();
 const stLabel=g=>g.state=="in"?(g.name=="STATUS_HALFTIME"?"Halftime":g.detail):g.state=="post"?g.detail:timeOf(g.start);
@@ -606,10 +606,13 @@ function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||
   return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:34px;font-size:12px">${k}</span><div style="flex:1">${ticksBar(v,10,v>=10)}</div></div>`).join("")}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
-  // Today: anything live, anything still to come, and games finished on the phone's today. Yesterday: games finished on the phone's yesterday.
-  const mine=LG.filter(g=>liveDay=="yesterday"?(g.state=="post"&&dayName(g.start)=="yesterday"):(g.state!="post"||dayName(g.start)=="today"||dayName(g.start)=="later"));
+  // by the phone's own date. Today: live games, then games still to play today, then games finished today. Tomorrow: games still to come after today.
+  const rank={in:0,pre:1,post:2},day=g=>dayName(g.start);
+  const mine=LG.filter(g=>liveDay=="yesterday"?(g.state=="post"&&day(g)=="yesterday"):liveDay=="tomorrow"?(g.state=="pre"&&day(g)=="later"):(g.state=="in"||day(g)=="today")).sort((a,b)=>liveDay=="today"?(rank[a.state]-rank[b.state])||(a.start<b.start?-1:1):(a.start<b.start?-1:1));
   const liveN=mine.filter(g=>g.state=="in").length;
-  el.innerHTML=daySwitch(liveDay,"setLiveDay")+(mine.length?`<h3 style="margin-top:0">${liveDay=="yesterday"?"Yesterday's games":liveN?`${liveN} game${liveN>1?"s":""} live now`:"Games"}</h3>`+mine.map(liveHTML).join(""):`<div class="card empty">${liveDay=="yesterday"?"No finished games from yesterday.":"No games on the scoreboard right now."}</div>`)}
+  const title=liveDay=="yesterday"?"Yesterday's games":liveDay=="tomorrow"?"Tomorrow's games":liveN?`${liveN} game${liveN>1?"s":""} live now`:"Today's games";
+  const none={yesterday:"No finished games from yesterday.",today:"No games today.",tomorrow:"No games listed for tomorrow yet."}[liveDay];
+  el.innerHTML=daySwitch(liveDay,"setLiveDay")+(mine.length?`<h3 style="margin-top:0">${title}</h3>`+mine.map(liveHTML).join(""):`<div class="card empty">${none}</div>`)}
 async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catch(e){return}
   const ids=new Set(openLive);
   await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
@@ -632,7 +635,7 @@ function luSide(sd){
    ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
 function drawLineups(){const q=luF.q.toLowerCase();
   const hit=g=>[g.away,g.home].some(sd=>(sd.team+" "+nm(sd.team)+" "+sd.starters.concat(sd.out).map(p=>p.name).join(" ")).toLowerCase().includes(q));
-  const gs=LU.filter(g=>(!luF.conf||(g.away.confirmed&&g.home.confirmed))&&(!q||hit(g)));
+  const gs=LU.filter(g=>(luDay=="tomorrow"?luWhen(g)=="later":luWhen(g)=="today")&&(!luF.conf||(g.away.confirmed&&g.home.confirmed))&&(!q||hit(g)));
   const last=sd=>sd.starters.map(p=>p.name.split(" ").slice(-1)[0]).join(", ")||"not posted yet";
   const chip=sd=>`<span class="stc ${sd.confirmed?"ok":"ex"}">${sd.team} ${sd.confirmed?"confirmed":"expected"}</span>`;
   $("#lubody").innerHTML=gs.map(g=>{const id=luId(g),open=luOpen[id]||(q&&luOpen[id]!==false);   // a search opens the matching games
@@ -640,15 +643,20 @@ function drawLineups(){const q=luF.q.toLowerCase();
       <span class="mute" style="margin-left:auto">${g.start?timeOf(g.start):esc(g.time)}</span><span class="chv">▾</span></div>
       ${open?`<div class="lu" style="padding:0 14px 12px">${luSide(g.away)}${luSide(g.home)}</div>`:`<div class="lsum2">${chip(g.away)} ${chip(g.home)}<div class="mute" style="margin-top:4px">${nm(g.away.team)}: ${esc(last(g.away))}<br>${nm(g.home.team)}: ${esc(last(g.home))}</div></div>`}</div>`}).join("")||'<div class="card empty">No lineups match.</div>'}
 let STARTED=[];
+const quietGet=async p=>{try{const r=await fetch("/api/"+p,{headers:hdr()});return r.ok?await r.json():[]}catch(e){return[]}};
 function setLuDay(d){luDay=d;render()}
-function startedHTML(){const gs=STARTED.filter(g=>dayName(g.start)=="yesterday");
+function startedHTML(day,intro){const gs=STARTED.filter(g=>dayName(g.start)==day);if(!gs.length)return"";
   const side=sd=>`<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="mute">${sd.score??""}</span></div>${sd.starters.length?sd.starters.map(p=>`<div class="lp">${photo(p.player_id,p.name)}<span class="nm2" onclick="go('players','${p.player_id}')">${esc(p.name)}</span></div>`).join(""):'<div class="mute" style="padding:8px 0">No starters recorded</div>'}</div>`;
-  return gs.length?`<div class="note">Who actually started yesterday's games (from the box scores).</div>`+gs.map(g=>`<details class="card lg2" style="padding:0"><summary class="lgh" style="list-style:none"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt=""><span class="mute" style="margin-left:auto">${g.away.score}–${g.home.score} Final</span></summary><div class="lu" style="padding:0 14px 12px">${side(g.away)}${side(g.home)}</div></details>`).join(""):'<div class="card empty">No finished games from yesterday.</div>'}
+  return `<div class="note">${intro}</div>`+gs.map(g=>`<details class="card lg2" style="padding:0"><summary class="lgh" style="list-style:none"><img src="${logo(g.away.team)}" alt=""><b>${nm(g.away.team)}</b><span class="mute">at</span><b>${nm(g.home.team)}</b><img src="${logo(g.home.team)}" alt=""><span class="mute" style="margin-left:auto">${g.away.score}–${g.home.score} Final</span></summary><div class="lu" style="padding:0 14px 12px">${side(g.away)}${side(g.home)}</div></details>`).join("")}
+const luWhen=g=>g.start?dayName(g.start):"today";
 async function lineupsTab(a){
-  if(luDay=="yesterday"){a.innerHTML=daySwitch(luDay,"setLuDay")+'<div id="lubody"><p class="mute">Loading…</p></div>';try{STARTED=await api("started")}catch(e){STARTED=[]}$("#lubody").innerHTML=startedHTML();return}
+  const [lu,st]=await Promise.all([luDay=="yesterday"?Promise.resolve(LU):api("lineups"),quietGet("started")]);STARTED=st||[];
+  if(luDay=="yesterday"){a.innerHTML=daySwitch(luDay,"setLuDay")+(startedHTML("yesterday","Who actually started yesterday's games (from the box scores).")||'<div class="card empty">No finished games from yesterday.</div>');return}
+  LU=lu;
   a.innerHTML=daySwitch(luDay,"setLuDay")+`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
    <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
-  LU=await api("lineups");drawLineups()}
+  drawLineups();
+  if(luDay=="today"){$("#lubody").insertAdjacentHTML("afterend",startedHTML("today","Finished today: who actually started."))}}
 
 /* ---------- theme ---------- */
 function paintTheme(){const t=document.documentElement.dataset.theme;const b=$("#thm");if(b)b.textContent=t=="dark"?"☀":"☾";const m=$("#tc");if(m)m.content=t=="dark"?"#0e2452":"#0a66b3"}
