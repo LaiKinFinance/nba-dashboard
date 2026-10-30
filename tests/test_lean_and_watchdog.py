@@ -26,3 +26,8 @@ def test_watchdog_waits_for_five_misses_and_never_restarts_twice_in_an_hour():
     assert app.watchdog_should_restart(5, 0, now)
     assert not app.watchdog_should_restart(9, now - 600, now)           # restarted ten minutes ago: leave it alone
     assert app.watchdog_should_restart(5, now - 3601, now)
+
+
+def test_new_style_names_do_not_reuse_the_player_row_class():
+    css = open("static/index.html", encoding="utf-8").read()
+    assert css.count(".pl{") == 1 and ".pl.hit" not in css and ".pl.tg" not in css      # .pl is the Games tab player row; the number pill is .npl

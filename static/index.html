@@ -152,8 +152,8 @@ table.bx{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}ta
 table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}table.ls2 td.qw{color:var(--ink);font-weight:700}table.ls2 td{color:var(--mute)}table.ls2 td:last-child{color:var(--ink)}table.ls2 td:first-child{color:var(--ink)}
 .ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--c-warn-fg)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:var(--c-warn-bg);color:var(--c-warn-fg)}
 .tbar{margin-top:6px}.tbar .trk{position:relative;height:26px}.tbar .pbar{position:absolute;left:0;right:0;top:10px;height:6px;margin:0}.tbar.cmp .trk{height:8px}.tbar.cmp .pbar{top:0;height:8px}
-.tk{position:absolute;top:0;bottom:0;width:1px;background:var(--card)}.pl{position:absolute;top:2px;height:22px;min-width:26px;padding:0 8px;border-radius:11px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;background:var(--acc);color:#fff;transform:translateX(-50%)}
-.pl.hit{background:var(--good)}.pl.tg{left:auto;right:0;transform:none;background:var(--btn);color:var(--mute)}.tlab{position:relative;height:14px;font-size:10.5px;color:var(--mute)}.tlab span{position:absolute;top:1px;transform:translateX(-100%)}
+.tk{position:absolute;top:0;bottom:0;width:1px;background:var(--card)}.npl{position:absolute;top:2px;height:22px;min-width:26px;padding:0 8px;border-radius:11px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;background:var(--acc);color:#fff;transform:translateX(-50%)}
+.npl.hit{background:var(--good)}.npl.tg{left:auto;right:0;transform:none;background:var(--btn);color:var(--mute)}.tlab{position:relative;height:14px;font-size:10.5px;color:var(--mute)}.tlab span{position:absolute;top:1px;transform:translateX(-100%)}
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
 </style>
@@ -583,7 +583,7 @@ function ticksBar(cur,tgt,hit,compact=false){tgt=Math.max(1,Math.round(tgt));con
   const bar=`<div class="pbar ${hit?"hit":""}"><i style="width:${pct}%"></i>${tk}</div>`;
   if(compact)return `<div class="tbar cmp"><div class="trk">${bar}</div></div>`;
   // like Sportsbet: the number reached sits on the bar where the fill ends, and the target sits at the far end
-  return `<div class="tbar"><div class="trk">${bar}<span class="pl ${hit?"hit":""}" style="left:min(max(${pct}%,15px),calc(100% - 58px))">${Math.round(cur)}</span><span class="pl tg">${tgt}</span></div>${step>1?`<div class="tlab">${lb}</div>`:""}</div>`}
+  return `<div class="tbar"><div class="trk">${bar}<span class="npl ${hit?"hit":""}" style="left:min(max(${pct}%,15px),calc(100% - 58px))">${Math.round(cur)}</span><span class="npl tg">${tgt}</span></div>${step>1?`<div class="tlab">${lb}</div>`:""}</div>`}
 function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||""),who=legWho(l);
   if(!g)return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
   if(g.state=="pre")return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
