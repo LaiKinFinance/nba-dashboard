@@ -407,10 +407,11 @@ async function today(a){await loadSlate();LIVEIDS=liveSet(await quietLive());
   if(!slate.length){a.innerHTML=(meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. The numbers will appear in a few minutes.</div>`:"")+'<div class="card empty">No upcoming games right now. The app refreshes every few hours.</div>';return}
   const days=[...new Set(slate.map(g=>dayKey(g.start)))];const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
-  a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()">
+  a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()"></div>
+   <details class="note" ${foldOpen("gfil",false)?"open":""} ontoggle="foldSet('gfil',this.open)"><summary>Filters${filt.day!="all"?" · "+filt.day:""}${filt.start?" · starters only":""}</summary><div class="tools" style="margin-top:8px">
    <button class="pill ${filt.day=="all"?"on":""}" onclick="filt.day='all';render()">All</button>${days.map(d=>`<button class="pill ${filt.day==d?"on":""}" onclick="filt.day='${d}';render()">${d}</button>`).join("")}
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
-   <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div>
+   <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div></details>
    <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). <b>SB</b> marks a real Sportsbet price; otherwise the price is the model's fair odds. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="glist"></div>`;drawGames();pollStatus();dotTimer()}
 
 /* ---------- value bets with evidence ---------- */
@@ -418,13 +419,13 @@ let VAL=null;
 function valueHTML(){if(!VAL)return"";
   if(!VAL.odds_connected)return `<div class="card vb"><h2>💎 Value bets</h2><p class="mute" style="margin:0">Value bets compare the model with real bookmaker prices, so they need the Odds API connected. Until then, use the "best picks" above and the green <b style="color:var(--good)">VALUE</b> tags (they appear on any price the app has).</p></div>`;
   if(!VAL.picks.length)return `<div class="card vb"><h2>💎 Value bets</h2><p class="mute" style="margin:0">No leg currently beats the price by a clear margin (6+ points) with enough history. That is normal on many nights; bookmakers are usually close to right.</p></div>`;
-  return `<div class="card vb"><h2>💎 Value bets <span class="mute" style="font-weight:400">model vs Sportsbet price, with the evidence</span></h2>
+  return `<details class="card vb" ${foldOpen("value",false)?"open":""} ontoggle="foldSet('value',this.open)"><summary class="csum">💎 Value bets <span class="mute" style="font-weight:400;font-size:13px">(${VAL.picks.length}) · model vs Sportsbet price, with the evidence</span></summary>
    <p class="mute" style="margin:0 0 6px">Ranked by edge after leaning 30% toward the market, to avoid over-trusting the model. Confidence counts: recent hit rate, projection vs line, stable minutes, injury evidence, edge size.</p>
    ${VAL.picks.map((o,i)=>`<div class="bl" style="align-items:flex-start">${o.kind=="player"?photo(o.player_id,o.player):'<span class="ph"></span>'}<div class="x"><b>${esc(o.kind=="player"?o.player:o.text)}</b><span class="mute">${o.kind=="player"?legDesc(o)+" · "+(NAMES[o.team]||o.team):"Match winner"}</span>
      <div style="margin-top:3px"><span class="conf ${o.confidence}">${o.confidence}</span> <span class="mute">hit ${o.n?o.hit+"/"+o.n:"–"}</span>${o.price_age_h!=null?` <span class="mute" style="${o.price_age_h>6?"color:#b45309":""}">· price ${o.price_age_h<1?"under 1h":Math.round(o.price_age_h)+"h"} old${o.price_age_h>6?" — check Sportsbet":""}</span>`:""}</div>
      <details><summary style="font-size:12px">Evidence</summary><ul class="why">${o.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details></div>
      <div style="text-align:right"><div class="good" style="font-weight:800">${o.edge>0?"+":""}${(o.edge*100).toFixed(0)} pts</div><div class="mute">${o.price.toFixed(2)} ${bkName(o.book)}</div><button class="btn p" style="margin-top:4px;padding:4px 10px" onclick="addValue(${i})">Add</button></div></div>`).join("")}
-   <details style="margin:8px 0 0"><summary>How are these picked?</summary><p class="mute" style="margin:6px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check. You can save a pick and see how it went on the My picks tab.</p></details></div>`}
+   <details style="margin:8px 0 0"><summary>How are these picked?</summary><p class="mute" style="margin:6px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check. You can save a pick and see how it went on the My picks tab.</p></details></details>`}
 function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o.stat,o.side,o.line,o.price,o.book,o.p,o.text);
   else pick(o.game_id,o.player_id,o.stat,o.line,o.price,o.book,o.p,o.hit,o.n)}
 
@@ -439,7 +440,9 @@ const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEI
 async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
 const dotTimer=()=>{liveTimer=setInterval(()=>{if(document.visibilityState=="visible")refreshDots()},30000)};     // red dots follow the live scoreboard while a page is open
 const trkState=(()=>{try{return JSON.parse(localStorage.trk||"{}")}catch(e){return{}}})();     // which Track record cards the viewer has folded away
-const trkOpen=k=>trkState[k]!==false;
+const foldOpen=(k,def)=>trkState[k]===undefined?def:!!trkState[k];        // def = how it starts the first time
+const trkOpen=k=>foldOpen(k,true),foldSet=(k,v)=>trkSet(k,v);
+const infoNote=(k,html)=>`<details class="note" ${foldOpen("i_"+k,false)?"open":""} ontoggle="foldSet('i_${k}',this.open)"><summary>ℹ Info</summary>${html}</details>`;
 function trkSet(k,v){trkState[k]=v;try{localStorage.trk=JSON.stringify(trkState)}catch(e){}}
 const usd=x=>(x<0?"-":"")+"$"+Math.abs(x).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 function bankrollHTML(b){if(!b)return"";const up=b.profit>=0,col=up?"var(--good)":"var(--bad)",n=b.won+b.lost;
@@ -455,7 +458,7 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
   a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today's picks</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Track record</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
   if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
-    $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
+    $("#bbody").innerHTML=`${infoNote("tp",`Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.`)}`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
   else{const [t,lv0]=await Promise.all([api("track"),quietLive()]),L=t.legs,C=t.combos,V=t.value;await slateP;LIVEIDS=liveSet(lv0);
     const gap=L.n>=20?L.won/L.n-L.avg_p:null;
     const verdict=L.n<20?`Too early to judge: about ${20-L.n} more graded picks are needed before the hit rate means much.`:gap<-0.07?"Picks are winning less often than the model expected, so its confidence has been too high.":gap>0.07?"Picks are winning more often than the model expected, so it has been cautious.":"Hit rate is close to what the model expected.";
@@ -468,18 +471,18 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
       ${V.n?`<h3>Value bets</h3><p class="mute" style="margin:0">${V.won} of ${V.n} won (model expected ${pc0(V.avg_p)})</p>`:""}
       ${t.closing&&t.closing.n?`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">On ${t.closing.n} value picks the price we showed was ${t.closing.avg_clv>=0?"better":"worse"} than the last price seen before tip-off by ${Math.abs(t.closing.avg_clv*100).toFixed(1)}% on average, and better on ${pc0(t.closing.share_beat)} of them. Consistently beating the closing price over hundreds of picks is the best sign of a real edge; wins and losses alone prove little. (Our last price check was on average ${Math.round(t.closing.avg_mins_before_tip)} min before tip-off.)</p>`:`<h3>Did we beat the closing price?</h3><p class="mute" style="margin:0">Collecting data: bookmaker prices are now saved every time they are fetched, and compared with each pick once its game has started.</p>`}
       <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></details>
-     ${t.days.length?t.days.map(d=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})}</b>${d.combo?`<span>Daily combo: ${resIcon(d.combo.result)} <span class="mute">(model ${pc0(d.combo.joint)})</span></span>`:""}</div>
+     ${t.days.length?t.days.map((d,di)=>{const all=[...d.legs,...d.value],w=all.filter(x=>x.result=="won").length,l=all.filter(x=>x.result=="lost").length,wt=all.filter(x=>x.result==null).length;return `<details class="card" ${foldOpen("day_"+d.day,di==0)?"open":""} ontoggle="foldSet('day_${d.day}',this.open)"><summary class="csum" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} <span class="mute" style="font-weight:400;font-size:13px">· ${w} won · ${l} lost${wt?` · ${wt} waiting`:""}</span></span>${d.combo?`<span style="font-weight:400;font-size:14px">Daily combo: ${resIcon(d.combo.result)}</span>`:""}</summary>
         ${d.legs.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}
-        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${trackWho(x)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</div>`).join(""):'<div class="card empty">Nothing recorded yet. Picks start being logged from the first time you open Today\'s picks.</div>'}`;
+        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${trackWho(x)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</details>`}).join(""):'<div class="card empty">Nothing recorded yet. Picks start being logged from the first time you open Today\'s picks.</div>'}`;
     dotTimer()}}
 
 /* ---------- friends' picks ---------- */
 const boardRows=(rows,fmt)=>rows.length?rows.map((r,i)=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>${i+1}. ${esc(r.user)}</span><b>${fmt(r)}</b></div>`).join(""):'<p class="mute" style="margin:2px 0">Nobody yet</p>';
-function leaderboardHTML(lb){return `<div class="card"><h2>Leaderboard</h2>
+function leaderboardHTML(lb){const top=(lb.most_won||[])[0];return `<details class="card" ${foldOpen("board",false)?"open":""} ontoggle="foldSet('board',this.open)"><summary class="csum">Leaderboard${top?` <span class="mute" style="font-weight:400;font-size:13px">· ${esc(top.user)} leads with ${top.won} won</span>`:""}</summary>
   <h3 style="margin-top:0">Most picks won</h3>${boardRows(lb.most_won,r=>`${r.won} won`)}
   <h3>Hardest pick won</h3>${boardRows(lb.hardest,r=>`won a ${pct(r.chance)} pick`)}
   <h3>Biggest price won <span class="mute">(bookmaker price when saved, about)</span></h3>${boardRows(lb.biggest_price||[],r=>`won at about ${r.price.toFixed(2)}`)}
-  <h3>% of picks won <span class="mute">(after ${lb.min_picks} finished picks)</span></h3>${boardRows(lb.rate,r=>`${pct(r.rate)} · ${r.picks} picks`)}</div>`}
+  <h3>% of picks won <span class="mute">(after ${lb.min_picks} finished picks)</span></h3>${boardRows(lb.rate,r=>`${pct(r.rate)} · ${r.picks} picks`)}</details>`}
 async function picks(a){const [ps,lb,lv0]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null),quietLive()]);LIVEIDS=liveSet(lv0);
   a.innerHTML=(lb?leaderboardHTML(lb):"")+(ps.length?ps.map(p=>`<div class="card"><b>${esc(p.user)}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span>
    ${p.legs.map(l=>`<div class="lg"><div>${esc(l.text||"")}${liveDot(l.game_id)}<small>${legDesc(l)}</small></div></div>`).join("")}
@@ -505,11 +508,11 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
       ${!["won","lost","open"].includes(b.result)?'<div class="mute">A tied result or a player who did not play stays out of the win/loss count.</div>':""}
       ${b.result=="open"?`<div style="margin-top:8px"><button class="btn" onclick="delPick(${b.id})">Delete</button></div>`:""}
       </div>`};
-  a.innerHTML=`<div class="note">Save a pick from Games or Best picks. This page shows whether it was right. Only completed picks with a clear result count.</div>
+  a.innerHTML=`${infoNote("mp","Save a pick from Games or Best picks. This page shows whether it was right. Only completed picks with a clear result count.")}
     <div class="tiles"><div class="tile"><div class="v">${u.bets}</div><div class="k">Picks saved</div></div><div class="tile"><div class="v">${u.wins}</div><div class="k">Won</div></div><div class="tile"><div class="v">${u.losses}</div><div class="k">Lost</div></div></div>
     ${open.length?`<div class="card"><h2>Waiting for the games</h2><div id="openPicks">${open.map(card).join("")}</div></div>`:""}
-    <div class="card"><h2>Pick results</h2>${s.users.length?`<table class="t"><tr><th style="text-align:left">Name</th><th>Won</th><th>Lost</th><th>Right</th></tr>${s.users.map(x=>`<tr><td style="text-align:left">${esc(x.user)}</td><td>${x.wins}</td><td>${x.losses}</td><td>${x.settled?pct(x.hit_rate):"–"}</td></tr>`).join("")}</table><p class="mute">Counted picks only. Results marked by hand are included.</p>`:'<p class="mute">Nobody has saved a pick yet.</p>'}</div>
-    ${done.length?`<div class="card"><h2>Past picks</h2>${done.map(card).join("")}</div>`:""}
+    <details class="card" ${foldOpen("results",false)?"open":""} ontoggle="foldSet('results',this.open)"><summary class="csum">Pick results <span class="mute" style="font-weight:400;font-size:13px">· everyone</span></summary>${s.users.length?`<table class="t"><tr><th style="text-align:left">Name</th><th>Won</th><th>Lost</th><th>Right</th></tr>${s.users.map(x=>`<tr><td style="text-align:left">${esc(x.user)}</td><td>${x.wins}</td><td>${x.losses}</td><td>${x.settled?pct(x.hit_rate):"–"}</td></tr>`).join("")}</table><p class="mute">Counted picks only. Results marked by hand are included.</p>`:'<p class="mute">Nobody has saved a pick yet.</p>'}</details>
+    ${done.length?`<details class="card" ${foldOpen("past",false)?"open":""} ontoggle="foldSet('past',this.open)"><summary class="csum">Past picks <span class="mute" style="font-weight:400;font-size:13px">(${done.length})</span></summary>${done.map(card).join("")}</details>`:""}
     ${!mine.length?'<div class="card empty">Your saved picks will appear here.</div>':""}`;
   // live numbers for picks still waiting: same figures as the Live tab, refreshed every 20 seconds
   const ids=[...new Set(open.flatMap(b=>JSON.parse(b.legs).map(l=>l.game_id)))];
@@ -525,7 +528,7 @@ const strip=()=>`<div class="pillrow" style="margin-top:10px">${slate.flatMap(g=
 async function players(a){
   if(!slate.length)await loadSlate();LIVEIDS=liveSet(await quietLive());
   a.innerHTML=`<div class="srch"><input class="inp" id="ps" placeholder="Search any player (e.g. Jokic)" oninput="psearch(this.value)" autocomplete="off"><div class="res" id="pres" style="display:none"></div></div><div id="pbody" style="margin-top:12px"></div>`;
-  if(!playerId){$("#pbody").innerHTML=`<div class="note">Pick a player to see how consistent they have been recently, or tap one playing soon.</div>`+
+  if(!playerId){$("#pbody").innerHTML=`${infoNote("pl",`Pick a player to see how consistent they have been recently, or tap one playing soon.`)}`+
      [...slate].sort((x,y)=>(LIVEIDS.has(y.game_id)?1:0)-(LIVEIDS.has(x.game_id)?1:0)).map(g=>Object.values(g.teams).map(t=>`<div class="card"><div class="th"><img src="${logo(t.team)}" alt="">${NAMES[t.team]||t.team}${liveDot(g.game_id)} <span>${NAMES[t.opp]?"vs "+NAMES[t.opp]:""}</span></div><div class="pillrow">${t.players.map(p=>`<button class="sl" onclick="go('players','${p.player_id}')"><div class="pt">${photo(p.player_id,p.player)}<div><b>${esc(p.player)}</b></div></div></button>`).join("")}</div></div>`).join("")).join("");dotTimer();return}
   pdata=await api("player/"+playerId);drawPlayer()}
 let pst;function psearch(q){clearTimeout(pst);pst=setTimeout(async()=>{const r=$("#pres");if(q.trim().length<2){r.style.display="none";return}
@@ -639,7 +642,7 @@ async function refreshLive(){if(tab!="live")return;try{LG=await api("live")}catc
   const ids=new Set(openLive);
   await Promise.all([...ids].filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
   if(tab=="live")drawLive()}
-async function liveTab(a){a.innerHTML=`<div class="note">Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. ⭐ marks the model's top-3 players.</div><div id="lbody"><p class="mute">Loading…</p></div>`;
+async function liveTab(a){a.innerHTML=`${infoNote("live","Scores and stats refresh by themselves every 20 seconds. Tap a game for the box score. ⭐ marks the model's top-3 players.")}<div id="lbody"><p class="mute">Loading…</p></div>`;
   await refreshLive();liveTimer=setInterval(refreshLive,20000)}
 
 /* ---------- lineups ---------- */
@@ -676,7 +679,7 @@ async function lineupsTab(a){
   if(luDay=="yesterday"){a.innerHTML=daySwitch(luDay,"setLuDay")+(startedHTML("yesterday","Who actually started yesterday's games (from the box scores).")||'<div class="card empty">No finished games from yesterday.</div>');return}
   LU=lu;
   a.innerHTML=daySwitch(luDay,"setLuDay")+`<div class="tools"><input id="luq" placeholder="Search team or player" value="${esc(luF.q)}" oninput="luF.q=this.value;drawLineups()"><button class="pill ${luF.conf?"on":""}" onclick="luF.conf=!luF.conf;render()">Confirmed only</button><button class="pill" onclick="luAll(true)">Expand all</button><button class="pill" onclick="luAll(false)">Collapse all</button></div>
-   <div class="note">Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.</div><div id="lubody"><p class="mute">Loading lineups…</p></div>`;
+   ${infoNote("lu",`Starting lineups and injury news, without the ads. Dot colour = chance to play (green likely, amber doubtful, red unlikely). <b>NEW</b> = starter who did not start that team's last game. ⭐ = the model's top-3 pick for that team.`)}<div id="lubody"><p class="mute">Loading lineups…</p></div>`;
   drawLineups();
   if(luDay=="today"){$("#lubody").insertAdjacentHTML("afterend",startedHTML("today","Finished today: who actually started."))}}
 

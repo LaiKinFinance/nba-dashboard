@@ -16,7 +16,7 @@ test('personal results render without a model, prices or money', async () => {
     bets: [{id:1, user:'mark', created:'2026-10-29T00:00Z', legs:'[{"stat":"reb","line":7.5}]', result:'won', model_prob:.6, manual:0}],
     users: [{user:'mark', bets:1, wins:1, losses:0, settled:1, hit_rate:1}],
   };
-  const render = new Function('api', 'localStorage', 'esc', 'pct', 'legDesc', source+';return bets')(
+  const render = new Function('api', 'localStorage', 'esc', 'pct', 'legDesc', 'const infoNote=()=>"",foldOpen=(k,d)=>d,foldSet=()=>{};'+source+';return bets')(
     async () => response, {user:'mark'}, x=>String(x), x=>`${Math.round(x*100)}%`, ()=> 'Over 7.5 rebounds');
   const app = {innerHTML:''}; await render(app);
   assert.match(app.innerHTML, /Past picks/);
