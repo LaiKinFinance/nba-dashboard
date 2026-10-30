@@ -47,3 +47,10 @@ def test_tabs_are_best_games_picks_players_only():
     html = open("static/index.html", encoding="utf-8").read()
     assert 'const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Players"]];' in html
     assert "async function liveTab" not in html and "async function lineupsTab" not in html          # Live and Lineups now live inside each game
+
+
+def test_choosing_a_pick_never_pops_the_pick_list_open():
+    html = open("static/index.html", encoding="utf-8").read()
+    for name in ("function addG3(", "function addBest(", "function addBestLeg(", "function pickTeam("):
+        line = html[html.index(name):].split("\n", 1)[0]
+        assert "slipMin=false" not in line, name

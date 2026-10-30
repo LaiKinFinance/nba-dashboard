@@ -219,9 +219,9 @@ function addLeg(l,quiet){const i=legs.findIndex(x=>key(x)==key(l));
     legs=legs.filter(x=>grp(l.stat)?!(x.game_id==l.game_id&&grp(x.stat)==grp(l.stat)):!(x.game_id==l.game_id&&x.player_id==l.player_id&&x.stat==l.stat));
     legs.push(l);if(legs.length>6)legs.shift();
     const p=l.player_id&&findP(l.game_id,l.player_id);if(p)snaps[l.player_id]={starting:p.starting,injury:(p.injury&&p.injury.status)||null}}}
-function pickTeam(g,stat,side,line,price,book,prob,text,team,lo,hi){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob,team:team||undefined,lo:lo||undefined,hi:hi||undefined});calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
+function pickTeam(g,stat,side,line,price,book,prob,text,team,lo,hi){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob,team:team||undefined,lo:lo||undefined,hi:hi||undefined});calc=null;paintSel();drawSlip();recalc()}
 function pick(g,pid,stat,line,price,book,prob,hit,n){const p=findP(g,pid);addLeg({game_id:g,player_id:pid,stat,line,side:"over",text:p?p.player:pid,price:price||null,book:book||null,p:prob,hit,n});
-  calc=null;if(innerWidth>960)slipMin=false;paintSel();drawSlip();recalc()}
+  calc=null;paintSel();drawSlip();recalc()}
 function paintSel(){const on=new Set(legs.map(key));document.querySelectorAll(".od[data-k]").forEach(b=>b.classList.toggle("on",on.has(b.dataset.k)))}
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
   try{const r=await post("parlay",{legs:legsPayload()});calc={r};drawSlip()}catch(x){}},250)}
@@ -353,7 +353,7 @@ function best3HTML(g){const b=g.best3||[];
   return `<p class="mute" style="margin:0 0 6px">The three strongest safe legs in this game, from three different players. Not advice: tap Evidence to see why each was chosen.</p>`+b.map((l,i)=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · bench/TBC"}</span></div><div style="text-align:right;flex:0 1 38%"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</div></div></div>
    <details><summary style="font-size:12px">Evidence</summary><ul class="why">${l.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>
    <div style="margin:4px 0 10px"><button class="btn" onclick="addG3('${g.game_id}',${i})">Add to pick list</button></div>`).join("")}
-function addG3(gid,i){const l=(gameIdx[gid]||{}).best3[i];if(!l)return;addLeg({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n},true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
+function addG3(gid,i){const l=(gameIdx[gid]||{}).best3[i];if(!l)return;addLeg({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n},true);calc=null;paintSel();drawSlip();recalc()}
 function gbodyHTML(g){const id=g.game_id,m=g.match;let h=oldPriceNote(g)+levelBlurb(g);
   if((g.best3||[]).length)h+=sec(id,"best3","Best 3 picks",best3HTML(g));
   const L=LG.find(x=>x.game_id==id);if(L&&L.state!="pre")h+=sec(id,"live",L.state=="in"?"Live score":"Final score",liveBodyHTML(g));
@@ -405,8 +405,8 @@ function bestHTML(){if(!best)return"";const c=best.combo;
    ${best.legs.length>c.legs.length?`<details><summary>More safe legs (${best.legs.length})</summary><div class="pillrow">${more}</div></details>`:""}
    <details><summary>How are these picked?</summary><p class="mute">The model looks for legs it rates between about 62% and 86% likely, where the player also cleared that line in at least 7 of the last 10 games. It uses lines a bookmaker was found to offer, takes the highest such line, and skips tiny lines such as 0.5. It then combines legs from different players and games until the fair odds reach about 2.0 or there are 3 legs. A leg with no bookmaker line found is never shown.</p></details></div>`}
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
-function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;slipMin=false;paintSel();drawSlip();recalc()}
-function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;slipMin=false;paintSel();drawSlip();recalc()}
+function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;paintSel();drawSlip();recalc()}
+function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;paintSel();drawSlip();recalc()}
 async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];STARTED=st||[];
   const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Prices shown are the model's fair odds. Connect an Odds API key to see Sportsbet prices.";
