@@ -369,11 +369,12 @@ function drawGames(){const q=filt.q.toLowerCase();let gs=slate.filter(g=>{
   if(filt.start)gs=gs.map(g=>({...g,teams:Object.fromEntries(Object.entries(g.teams).map(([k,t])=>[k,{...t,players:t.players.filter(p=>p.starting)}]))}));
   let h="",last="";for(const g of gs){const d=dayKey(g.start);if(d!=last){h+=`<div class="day">${d}</div>`;last=d}h+=gameHTML(g)}
   $("#glist").innerHTML=h||'<div class="empty">No games match.</div>';paintSel();centerStrips()}
+let playingOpen=true;
 const playingLegs=()=>(best&&best.playing||[]).filter(x=>LIVEIDS.has(x.game_id)).map(x=>({game_id:x.game_id,player_id:x.player_id,team:x.team,text:x.player,stat:x.stat,line:x.line,side:"over"}));
 async function loadPlayingBoxes(){const ids=[...new Set(playingLegs().map(l=>l.game_id))];
   await Promise.all(ids.map(async id=>{try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(r.ok)boxes[id]=await r.json()}catch(e){}}))}
 function playingHTML(){const ls=playingLegs();if(!ls.length)return"";
-  return `<div class="card"><h2>Playing now</h2>${ls.map(legProg).join("")}</div>`}
+  return `<details class="card" ${playingOpen?"open":""} ontoggle="playingOpen=this.open"><summary style="color:var(--ink);font-size:17px;font-weight:700;margin:0">Playing now <span class="mute" style="font-weight:400;font-size:14px">(${ls.length})</span></summary><div style="margin-top:6px">${ls.map(legProg).join("")}</div></details>`}
 async function refreshPlaying(){if(tab!="best"||bestView!="today"||document.visibilityState!="visible")return;
   LG=await quietLive();LIVEIDS=liveSet(LG);await loadPlayingBoxes();const w=$("#playingWrap");if(w)w.innerHTML=playingHTML()}
 function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.combo;
