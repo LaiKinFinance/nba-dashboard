@@ -92,3 +92,15 @@ def test_backup_code_is_not_in_the_deploy_logs_or_page():
 def test_backup_page_exists_and_never_stores_the_code():
     html = open("static/backup.html").read()
     assert "X-Backup-Code" in html and "localStorage" not in html and "sessionStorage" not in html and "cookie" not in html.lower()
+
+
+def test_restoring_an_old_backup_does_not_let_the_clean_start_wipe_the_restored_picks(live, tmp_path, monkeypatch):
+    b = tmp_path / "bundle"; br.make_bundle(str(live), str(b))
+    old = sqlite3.connect(b / "nba.db"); old.execute("DROP TABLE one_time_jobs"); old.commit(); old.close()      # a backup made before the clean start existed
+    # the bundle's checksum now differs from the manifest, so rebuild the manifest the way make_bundle does
+    shutil.rmtree(b); shutil.copytree(live, tmp_path / "olddata"); o = sqlite3.connect(tmp_path / "olddata" / "nba.db"); o.execute("DROP TABLE one_time_jobs"); o.commit(); o.close()
+    br.make_bundle(str(tmp_path / "olddata"), str(b))
+    new = tmp_path / "recovered.db"; br.restore(str(b), str(live / "nba.db"), str(new))
+    assert rows(new, "SELECT COUNT(*) FROM one_time_jobs WHERE id='2026-10-29-clear-saved-picks'") == [(1,)]
+    monkeypatch.setattr(app, "DB", str(new)); app.one_time_reset()
+    assert rows(new, "SELECT COUNT(*) FROM picks")[0][0] >= 1 and rows(new, "SELECT COUNT(*) FROM bets")[0][0] >= 1

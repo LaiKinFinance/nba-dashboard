@@ -105,7 +105,7 @@ def test_saving_a_pick_needs_no_money_or_bookmaker_price(db):
     r = client.post("/api/bets", json={"legs": [L("reb", 7.5)], "model_prob": .4}, headers={"X-User": "mark"})
     assert r.status_code == 200
     saved = _row(db, 1)
-    assert saved["stake"] is None and saved["odds"] is None and saved["model_prob"] == .4
+    assert saved["stake"] is None and saved["odds"] is None and saved["model_prob"] is None     # the chance comes from the server, not the phone
     score = client.get("/api/scorecard").json()
     assert score["users"][0]["wins"] == 1
     for financial in ("profit", "roi", "returned", "staked", "returned_amount", "payout_odds", "stake", "needs_amount"):
@@ -217,7 +217,7 @@ def test_a_pick_cannot_be_saved_or_deleted_once_its_game_has_started(db):
     assert c.delete(f"/api/bets/{b}", headers={"X-User": "mark"}).status_code == 409
 
 def test_leaderboard_boards(db):
-    for user, legs in (("ann", [L("pts", 24.5)]), ("ann", [L("pts", 24.5)]), ("bob", [L("pts", 24.5)]), ("bob", [L("pts", 30.5)])):
+    for user, legs in (("ann", [L("pts", 24.5)]), ("ann", [L("pts", 23.5)]), ("bob", [L("pts", 24.5)]), ("bob", [L("pts", 30.5)])):
         i = _bet(db, legs); db.execute("UPDATE bets SET user=?, model_prob=? WHERE id=?", (user, .2 if user == "ann" else .5, i)); db.commit()
     lb = TestClient(app.app).get("/api/leaderboard").json()
     assert [r["user"] for r in lb["most_won"]] == ["ann", "bob"] and lb["most_won"][0]["won"] == 2
@@ -233,3 +233,49 @@ def test_leaderboard_biggest_price_won(db):
     i = _bet(db, [dict(L("pts", 24.5), price=2.0), dict(L("pts", 24.5), price=1.5)]); db.execute("UPDATE bets SET user='ann' WHERE id=?", (i,))
     j = _bet(db, [L("pts", 24.5)]); db.execute("UPDATE bets SET user='bob' WHERE id=?", (j,)); db.commit()     # no saved price: not on this board
     assert TestClient(app.app).get("/api/leaderboard").json()["biggest_price"] == [dict(user="ann", price=3.0)]
+
+
+def test_the_same_pick_cannot_be_saved_twice_and_never_counts_twice(db):
+    c = TestClient(app.app); body = {"legs": [dict(L("pts", 24.5), game_id="future")]}
+    assert c.post("/api/bets", json=body, headers={"X-User": "mark"}).status_code == 200
+    assert c.post("/api/bets", json=body, headers={"X-User": "mark"}).status_code == 409
+    assert c.post("/api/bets", json=body, headers={"X-User": "other"}).status_code == 200        # another friend may save the same pick
+    a = _bet(db, [L("pts", 24.5)]); b = _bet(db, [L("pts", 24.5)]); app.grade_bets()               # older duplicates already in the database
+    assert TestClient(app.app).get("/api/leaderboard").json()["most_won"] == [dict(user="mark", won=1, picks=1)]
+
+def test_the_chance_and_price_sent_by_the_phone_are_not_trusted(db):
+    c = TestClient(app.app)
+    leg = dict(L("reb", 7.5), game_id="future", price=500.0)
+    assert c.post("/api/bets", json={"legs": [leg], "model_prob": 0.0001}, headers={"X-User": "mark"}).status_code == 200
+    saved = _row(db, 1); assert saved["model_prob"] is None and "price" not in json.loads(saved["legs"])[0]
+
+
+def test_a_skipped_check_does_not_restart_its_timer(db):
+    app._status_set("reconcile", "ok"); before = db.execute("SELECT ran_at FROM refresh_status WHERE stage='reconcile'").fetchone()[0]
+    import time; time.sleep(0.01)
+    assert app._stage("reconcile", lambda: dict(skipped=True, problem=None)) == "ok"
+    assert db.execute("SELECT ran_at FROM refresh_status WHERE stage='reconcile'").fetchone()[0] == before
+
+def test_no_retrain_when_the_missing_game_check_could_not_run(db, monkeypatch):
+    import repair, ingest
+    monkeypatch.setattr(repair, "run_all", lambda *a, **k: {}); monkeypatch.setattr(ingest, "run", lambda *a, **k: {})
+    monkeypatch.setattr(app, "weekly_reconcile", lambda: (_ for _ in ()).throw(RuntimeError("ESPN unreachable")))
+    monkeypatch.setattr(app, "_odds_on", lambda: False)
+    for name in ("grade_picks", "grade_bets", "log_picks", "store_served_check", "backup_db"): monkeypatch.setattr(app, name, lambda *a, **k: None)
+    trained = []; monkeypatch.setattr(app, "train_quietly", lambda: trained.append(1)); monkeypatch.setattr(app, "project_quietly", lambda: trained.append(2))
+    app.refresh_once()
+    assert trained == [] and db.execute("SELECT state FROM refresh_status WHERE stage='train'").fetchone()[0] == "skipped"
+
+def test_players_and_lineup_pages_use_the_current_roster_team(db):
+    db.executescript("""CREATE TABLE IF NOT EXISTS rosters(player_id TEXT PRIMARY KEY, team TEXT, name TEXT, fetched_at TEXT);
+        INSERT INTO rosters VALUES('p1','DAL','Santi Aldama','t'); INSERT INTO rosters VALUES('p2',NULL,'Waived Guy','t');""")
+    db.execute("ALTER TABLE player_games ADD COLUMN player TEXT"); db.execute("ALTER TABLE player_games ADD COLUMN team TEXT"); db.execute("ALTER TABLE player_games ADD COLUMN date TEXT")
+    for pid, nm in (("p1", "Santi Aldama"), ("p2", "Waived Guy"), ("p3", "Santi Other")): db.execute("INSERT INTO player_games(game_id,player_id,player,team,date) VALUES('g9',?,?,?,'2026-10-01')", (pid, nm, "MEM"))
+    db.commit(); c = TestClient(app.app)
+    got = {r["player"]: r["team"] for r in c.get("/api/players", params={"q": "Santi"}).json()}
+    assert got == {"Santi Aldama": "DAL", "Santi Other": "MEM"}                      # traded player shows the new team, an unlisted player keeps his last team
+    assert {r["player"]: r["team"] for r in c.get("/api/players", params={"q": "Waived"}).json()} == {"Waived Guy": ""}
+    import pandas as pd
+    df = pd.DataFrame([dict(player_id="p1", player="A", team="MEM"), dict(player_id="p2", player="B", team="MEM"), dict(player_id="p3", player="C", team="MEM")])
+    out = app._with_current_team(df, db)                                          # lineups use this: traded -> new team, off every roster -> left out, unlisted -> last team
+    assert dict(zip(out.player_id, out.team)) == {"p1": "DAL", "p3": "MEM"}

@@ -8,6 +8,8 @@ The live database is only read.  <new_db> must not exist yet."""
 import gzip, hashlib, json, os, shutil, sqlite3, sys, datetime as dt
 from contextlib import closing
 
+KNOWN_ONE_TIME_JOBS = ("2026-10-29-clear-saved-picks",)     # keep in step with RESET_ID in app.py
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -104,6 +106,13 @@ def restore(bundle_dir, live_db, new_db):
         added["odds_archive"] = _copy_new(live, dst, "odds_archive", ("fetched_at", "game_id", "player_id", "stat", "line", "side", "book"), skip_cols=())
         added["lines_archive"] = _copy_new(live, dst, "lines_archive", ("fetched_at", "game_id", "market", "side", "line", "book"), skip_cols=())
         added["unavailable_games"] = _copy_new(live, dst, "unavailable_games", ("game_id",), skip_cols=())
+        # one-time jobs the live site has already done (for example the clean start) must not run again on restored data and wipe the restored picks
+        dst.execute("CREATE TABLE IF NOT EXISTS one_time_jobs(id TEXT PRIMARY KEY, done_at TEXT)")
+        n = 0
+        if _exists(live, "one_time_jobs"):
+            for jid, at in live.execute("SELECT id, done_at FROM one_time_jobs").fetchall(): n += dst.execute("INSERT OR IGNORE INTO one_time_jobs VALUES(?,?)", (jid, at)).rowcount
+        for jid in KNOWN_ONE_TIME_JOBS: n += dst.execute("INSERT OR IGNORE INTO one_time_jobs VALUES(?,?)", (jid, "marked by restore")).rowcount
+        added["one_time_jobs"] = n
         dst.commit()
         r = dst.execute("PRAGMA integrity_check").fetchone()[0]
     if r != "ok": raise RuntimeError("restored database failed its check: " + r)

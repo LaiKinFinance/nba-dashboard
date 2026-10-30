@@ -52,6 +52,7 @@ def _stage(key, fn):
     except Exception as e:
         import odds, traceback
         logging.error("refresh stage %s failed: %s", key, odds.scrub(traceback.format_exc())); _status_set(key, "failed", f"{type(e).__name__}: {e}"); return "failed"
+    if isinstance(r, dict) and r.get("skipped"): return "ok"          # nothing was done, so nothing is recorded (a skipped run must not restart the weekly timer)
     problem = r.get("problem") if isinstance(r, dict) else None
     _status_set(key, "partial" if problem else "ok", problem); return "partial" if problem else "ok"
 
@@ -96,7 +97,7 @@ def refresh_once():
     with REFRESH_LOCK:
         t = dt.date.today()
         data_ok = _stage("repair", repair.run_all) == "ok"
-        _stage("reconcile", weekly_reconcile)
+        data_ok = (_stage("reconcile", weekly_reconcile) != "failed") and data_ok     # a check that could not run means the data was not verified: no retrain this round
         data_ok = (_stage("ingest", lambda: ingest.run(t - dt.timedelta(days=10), t)) == "ok") and data_ok
         if not data_ok:
             _status_set("train", "skipped", "data repair or download incomplete"); _status_set("project", "skipped", "data repair or download incomplete")
@@ -898,7 +899,7 @@ def lineups_tab(x_code: str = Header("")):
             logging.exception("lineups fetch failed")
             if not _lu_cache["data"]: raise HTTPException(502, "Lineups are temporarily unavailable")
     with closing(con()) as c:
-        roster = pd.read_sql("SELECT player_id, player, team, max(date) d FROM player_games GROUP BY player_id", c)
+        roster = _with_current_team(pd.read_sql("SELECT player_id, player, team, max(date) d FROM player_games GROUP BY player_id", c), c)
         pg = pd.read_sql("SELECT team, game_id, date, player, starter FROM player_games WHERE date >= date('now','-45 day')", c)
     last = pd.DataFrame(columns=["team", "player"])
     if not pg.empty:
@@ -938,13 +939,27 @@ def live_box(game_id: str, x_code: str = Header("")):
     box["tracked"] = {p["player_id"]: p["proj"] for p in projections_all() if p["game_id"] == game_id}
     return box
 
+def _roster_team_map(c):
+    """Who is on which team NOW (the rosters table the repair step keeps). Empty when that table does not exist yet."""
+    try: return {r[0]: r[1] for r in c.execute("SELECT player_id, team FROM rosters")}
+    except sqlite3.OperationalError: return {}
+
+def _with_current_team(df, c):
+    """Replace each player's last-played team with his current roster team; someone no longer on any roster is left out. Players with no roster row keep their last team."""
+    rm = _roster_team_map(c)
+    if not rm or df.empty: return df
+    df = df.copy(); known = df.player_id.isin(rm.keys())
+    df.loc[known, "team"] = df.loc[known, "player_id"].map(rm)
+    return df.dropna(subset=["team"])
+
 @app.get("/api/players")
 def players(q: str = "", x_code: str = Header("")):
     check(x_code)
     if len(q.strip()) < 2: return []
     with closing(con()) as c:
         rows = c.execute("""SELECT player_id, player, team, max(date) d FROM player_games WHERE player LIKE ? GROUP BY player_id ORDER BY d DESC, player LIMIT 12""", (f"%{q.strip()}%",)).fetchall()
-    return [dict(player_id=r["player_id"], player=r["player"], team=r["team"]) for r in rows]
+        rm = _roster_team_map(c)
+    return [dict(player_id=r["player_id"], player=r["player"], team=(rm[r["player_id"]] or "") if r["player_id"] in rm else r["team"]) for r in rows]
 
 @app.get("/api/player/{pid}")
 def player(pid: str, x_code: str = Header("")):
@@ -952,12 +967,13 @@ def player(pid: str, x_code: str = Header("")):
     check(x_code)
     with closing(con()) as c:
         d = pd.read_sql("SELECT date,opp,home,min,pts,reb,ast,season,player,team FROM player_games WHERE player_id=? ORDER BY date DESC", c, params=(pid,))
+        rm = _roster_team_map(c)
     if d.empty: raise HTTPException(404)
     d["dd"] = ((d.pts >= 10).astype(int) + (d.reb >= 10) + (d.ast >= 10) >= 2).astype(int)
     d["td"] = ((d.pts >= 10).astype(int) + (d.reb >= 10) + (d.ast >= 10) >= 3).astype(int)
     cur = d[d.season == d.season.iloc[0]]
     tonight = next((p for p in enriched() if p["player_id"] == pid), None)
-    return dict(player=d.player.iloc[0], team=d.team.iloc[0], games=d.head(20)[["date", "opp", "home", "min", "pts", "reb", "ast", "dd", "td"]].to_dict("records"),
+    return dict(player=d.player.iloc[0], team=((rm[pid] or "") if pid in rm else d.team.iloc[0]), games=d.head(20)[["date", "opp", "home", "min", "pts", "reb", "ast", "dd", "td"]].to_dict("records"),
                 season=dict(games=len(cur), dd=int(cur.dd.sum()), td=int(cur.td.sum()), pts=float(cur.pts.mean()), reb=float(cur.reb.mean()), ast=float(cur.ast.mean()), min=float(cur["min"].mean())),
                 last20=dict(dd=int(d.head(20).dd.sum()), td=int(d.head(20).td.sum())),
                 tonight=dict(game_id=tonight["game_id"], opp=tonight["opp"], home=tonight["home"], start=tonight["start"], proj=tonight["proj"], p_dd=tonight["p_dd"], p_td=tonight["p_td"]) if tonight else None)
@@ -987,9 +1003,11 @@ def team_leg_prob(l, gp):
 @app.post("/api/parlay")
 def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     check(x_code)
-    body = body.model_dump(exclude_none=True)
+    return _parlay_core(body.model_dump(exclude_none=True)["legs"])
+
+def _parlay_core(legs):
     preds = {(p["game_id"], p["player_id"]): p for p in projections()}
-    gps = game_preds(); legs = body["legs"]
+    gps = game_preds()
     if not 1 <= len(legs) <= 6: raise HTTPException(400, "1-6 legs")
     pl_legs = [l for l in legs if l["stat"] not in TEAM_STATS]; tm_legs = [l for l in legs if l["stat"] in TEAM_STATS]
     now_s = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
@@ -1065,11 +1083,34 @@ def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
     body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
-        if _any_started(c, body["legs"]): raise HTTPException(400, "A game in this pick has already started, so it can no longer be saved")
+        legs = body["legs"]
+        if _any_started(c, legs): raise HTTPException(400, "A game in this pick has already started, so it can no longer be saved")
+        key = _pick_key(legs)
+        for r in c.execute("SELECT legs FROM bets WHERE user=?", (user,)).fetchall():
+            if _pick_key(_safe(lambda: json.loads(r["legs"])) or []) == key: raise HTTPException(409, "You have already saved this pick")
+        # the chance and the bookmaker prices stored with a pick come from the server's own numbers, never from the phone
+        r = _safe(lambda: _parlay_core(legs))
+        chance = r.get("joint") if r and not r.get("unsupported") else None
+        _stamp_prices(legs)
         c.execute("INSERT INTO bets(user,created,legs,model_prob) VALUES(?,?,?,?)",
-                  (user, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(body["legs"]), body.get("model_prob")))
+                  (user, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(legs), chance))
         c.commit()
     return {"ok": True}
+
+def _pick_key(legs):
+    """Two saves of the same pick (same games, players, markets and lines) have the same key."""
+    return tuple(sorted((str(l.get("game_id")), str(l.get("player_id") or ""), str(l.get("stat")), float(l.get("line") or 0), str(l.get("side")),
+                         str(l.get("kind") or ""), str(l.get("team") or ""), int(l.get("lo") or 0), int(l.get("hi") or 0)) for l in legs))
+
+def _stamp_prices(legs):
+    """Keep a bookmaker price on a leg only when the server's own current price for that exact line matches; otherwise no price."""
+    preds = {(p["game_id"], p["player_id"]): p for p in (_safe(enriched) or [])}
+    for l in legs:
+        l.pop("price", None)
+        p = preds.get((l.get("game_id"), l.get("player_id")))
+        if not p or l["stat"] in TEAM_STATS or l.get("side") not in (None, "over") or l.get("kind") or is_stale(p.get("odds_age_h")): continue
+        e = next((x for x in (p.get("strip") or {}).get(l["stat"], []) if x.get("line") == l.get("line") and x.get("price")), None)
+        if e: l["price"] = e["price"]
 
 @app.delete("/api/bets/{bid}")
 def delete_bet(bid: int, x_user: str = Header(""), x_code: str = Header("")):
@@ -1100,9 +1141,12 @@ def leaderboard(x_code: str = Header("")):
     check(x_code)
     _safe(grade_bets)
     with closing(con()) as c:
-        rows = [dict(r) for r in c.execute("SELECT user, result, model_prob, legs FROM bets WHERE result IN ('won','lost')")]
-    by = {}
+        rows = [dict(r) for r in c.execute("SELECT id, user, result, model_prob, legs FROM bets WHERE result IN ('won','lost') ORDER BY id")]
+    by, seen = {}, set()
     for r in rows:
+        k = (r["user"], _pick_key(_safe(lambda: json.loads(r["legs"])) or []))
+        if k in seen: continue                 # the same pick saved twice counts once
+        seen.add(k)
         u = by.setdefault(r["user"], dict(user=r["user"], won=0, lost=0, hardest=None, price=None))
         if r["result"] == "won":
             u["won"] += 1
