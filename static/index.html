@@ -469,7 +469,7 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
   const mine=s.bets.filter(b=>b.user==me),open=mine.filter(b=>b.result=="open"),done=mine.filter(b=>b.result!="open");
   const u=s.users.find(x=>x.user==me)||{bets:0,settled:0,wins:0,losses:0};
   const pickPrice=(ls,prob)=>{const bp=ls.length&&ls.every(l=>l.price)?ls.reduce((a,l)=>a*l.price,1):null;if(!bp)return"";
-    const fair=prob>0&&!ls.some(l=>["pts","pra","pr","pa"].includes(l.stat))?` · model's fair price: about ${(1/prob).toFixed(2)}`:"";
+    const fair=prob>=0.05&&!ls.some(l=>["pts","pra","pr","pa"].includes(l.stat))?` · model's fair price: about ${(1/prob).toFixed(2)}`:"";
     return `<div class="mute">Bookmaker price when saved: about ${bp.toFixed(2)}${fair}</div>`};
   const card=b=>{const ls=JSON.parse(b.legs),label=b.result=="won"?"Won":b.result=="lost"?"Lost":b.result=="open"?"Waiting for the games":"Not counted";
     return `<div class="bet">${ls.map(l=>b.result=="open"?legProg(l):`<div>${legLine(l)}</div>`).join("")}${pickPrice(ls,b.model_prob)}<div class="mute" style="margin:6px 0">${esc(new Date(b.created).toLocaleString())}${b.model_prob!=null?` · estimated chance ${pct(b.model_prob)}`:""}</div>
@@ -495,10 +495,10 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
 let pstat="pts",pline={},pdata=null;
 const strip=()=>`<div class="pillrow" style="margin-top:10px">${slate.flatMap(g=>Object.values(g.teams).flatMap(t=>t.players)).filter((p,i,arr)=>arr.findIndex(x=>x.player_id==p.player_id)==i).map(p=>`<button class="sl ${p.player_id==playerId?"on":""}" style="min-width:0;${p.player_id==playerId?"border-color:var(--acc)":""}" onclick="go('players','${p.player_id}')"><div class="pt">${photo(p.player_id,p.player)}<b style="white-space:nowrap">${esc(p.player)}</b></div></button>`).join("")}</div>`;
 async function players(a){
-  if(!slate.length)await loadSlate();
+  if(!slate.length)await loadSlate();LIVEIDS=liveSet(await quietLive());
   a.innerHTML=`<div class="srch"><input class="inp" id="ps" placeholder="Search any player (e.g. Jokic)" oninput="psearch(this.value)" autocomplete="off"><div class="res" id="pres" style="display:none"></div></div><div id="pbody" style="margin-top:12px"></div>`;
   if(!playerId){$("#pbody").innerHTML=`<div class="note">Pick a player to see how consistent they have been recently, or tap one playing soon.</div>`+
-     slate.map(g=>Object.values(g.teams).map(t=>`<div class="card"><div class="th"><img src="${logo(t.team)}" alt="">${NAMES[t.team]||t.team} <span>${NAMES[t.opp]?"vs "+NAMES[t.opp]:""}</span></div><div class="pillrow">${t.players.map(p=>`<button class="sl" onclick="go('players','${p.player_id}')"><div class="pt">${photo(p.player_id,p.player)}<div><b>${esc(p.player)}</b></div></div></button>`).join("")}</div></div>`).join("")).join("");return}
+     [...slate].sort((x,y)=>(LIVEIDS.has(y.game_id)?1:0)-(LIVEIDS.has(x.game_id)?1:0)).map(g=>Object.values(g.teams).map(t=>`<div class="card"><div class="th"><img src="${logo(t.team)}" alt="">${NAMES[t.team]||t.team}${liveDot(g.game_id)} <span>${NAMES[t.opp]?"vs "+NAMES[t.opp]:""}</span></div><div class="pillrow">${t.players.map(p=>`<button class="sl" onclick="go('players','${p.player_id}')"><div class="pt">${photo(p.player_id,p.player)}<div><b>${esc(p.player)}</b></div></div></button>`).join("")}</div></div>`).join("")).join("");dotTimer();return}
   pdata=await api("player/"+playerId);drawPlayer()}
 let pst;function psearch(q){clearTimeout(pst);pst=setTimeout(async()=>{const r=$("#pres");if(q.trim().length<2){r.style.display="none";return}
   const rs=await api("players?q="+encodeURIComponent(q));r.innerHTML=rs.map(p=>`<div onclick="go('players','${p.player_id}')">${photo(p.player_id,p.player)}<span><b>${esc(p.player)}</b> <span class="mute">${p.team}</span></span></div>`).join("")||'<div class="mute">No match</div>';r.style.display="block"},200)}
