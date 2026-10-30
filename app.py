@@ -576,7 +576,6 @@ def stats_norm_cdf(x):
     return norm.cdf(x)
 
 _SLATE_DROP = {"ladders", "alphas", "opp_factor", "lineup_status", "model_id", "rest"}      # sent by the server before, never read by the page
-_lean_memo = {}
 
 def _lean(x):
     """A copy of the data with numbers rounded to 6 decimals (the page shows whole percents), so the Games page downloads less."""
@@ -586,10 +585,7 @@ def _lean(x):
     return x
 
 def _lean_player(p):
-    hit = _lean_memo.get(id(p))
-    if hit and hit[0] is p: return hit[1]
-    if len(_lean_memo) > 4000: _lean_memo.clear()
-    out = {k: _lean(v) for k, v in p.items() if k not in _SLATE_DROP}; _lean_memo[id(p)] = (p, out); return out
+    return {k: _lean(v) for k, v in p.items() if k not in _SLATE_DROP}
 
 @app.get("/api/slate")
 def get_slate(x_code: str = Header("")):

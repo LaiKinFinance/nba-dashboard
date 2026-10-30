@@ -31,3 +31,7 @@ def test_watchdog_waits_for_five_misses_and_never_restarts_twice_in_an_hour():
 def test_new_style_names_do_not_reuse_the_player_row_class():
     css = open("static/index.html", encoding="utf-8").read()
     assert css.count(".pl{") == 1 and ".pl.hit" not in css and ".pl.tg" not in css      # .pl is the Games tab player row; the number pill is .npl
+
+
+def test_slate_keeps_no_copies_in_memory_between_requests():
+    assert not hasattr(app, "_lean_memo")       # a memo of lean copies grew by about 140 KB per player per rebuild and could fill the 1 GB server
