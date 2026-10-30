@@ -151,7 +151,9 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 table.bx{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}table.bx th,table.bx td{padding:5px 4px;text-align:right;border-bottom:1px solid var(--line)}table.bx th{color:var(--mute);font-weight:500;font-size:11px}
 table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}table.ls2 td.qw{color:var(--ink);font-weight:700}table.ls2 td{color:var(--mute)}table.ls2 td:last-child{color:var(--ink)}table.ls2 td:first-child{color:var(--ink)}
 .ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--c-warn-fg)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:var(--c-warn-bg);color:var(--c-warn-fg)}
-.tbar{margin-top:5px}.tbar .pbar{position:relative;height:10px;margin:0}.tk{position:absolute;top:0;bottom:0;width:1px;background:var(--card)}.tlab{position:relative;height:14px;font-size:10.5px;color:var(--mute)}.tlab span{position:absolute;top:1px;transform:translateX(-100%)}
+.tbar{margin-top:6px}.tbar .trk{position:relative;height:26px}.tbar .pbar{position:absolute;left:0;right:0;top:10px;height:6px;margin:0}.tbar.cmp .trk{height:8px}.tbar.cmp .pbar{top:0;height:8px}
+.tk{position:absolute;top:0;bottom:0;width:1px;background:var(--card)}.pl{position:absolute;top:2px;height:22px;min-width:26px;padding:0 8px;border-radius:11px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;background:var(--acc);color:#fff;transform:translateX(-50%)}
+.pl.hit{background:var(--good)}.pl.tg{left:auto;right:0;transform:none;background:var(--btn);color:var(--mute)}.tlab{position:relative;height:14px;font-size:10.5px;color:var(--mute)}.tlab span{position:absolute;top:1px;transform:translateX(-100%)}
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
 </style>
@@ -575,9 +577,12 @@ function playerLegProgress(l,r){
 const legWho=l=>{const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(PT[l.player_id]||"")).toUpperCase();
   return `${l.player_id?photo(l.player_id,l.text||""):""}${t?`<img src="${logo(t)}" alt="${esc(t)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}`};
 // a bar with a tick for every unit (every 5 or 10 when the target is big) and the numbers underneath, so "6 or 7 rebounds" can be read at a glance
-function ticksBar(cur,tgt,hit,labels=true){tgt=Math.max(1,Math.round(tgt));const pct=Math.max(0,Math.min(100,cur/tgt*100)),step=tgt<=12?1:tgt<=30?5:10;let tk="",lb="";
+function ticksBar(cur,tgt,hit,compact=false){tgt=Math.max(1,Math.round(tgt));const pct=Math.max(0,Math.min(100,cur/tgt*100)),step=tgt<=12?1:tgt<=30?5:10;let tk="",lb="";
   for(let i=step;i<=tgt;i+=step){const left=i/tgt*100;if(i<tgt)tk+=`<span class="tk" style="left:${left}%"></span>`;lb+=`<span style="left:${left}%">${i}</span>`}
-  return `<div class="tbar"><div class="pbar ${hit?"hit":""}"><i style="width:${pct}%"></i>${tk}</div>${labels?`<div class="tlab">${lb}</div>`:""}</div>`}
+  const bar=`<div class="pbar ${hit?"hit":""}"><i style="width:${pct}%"></i>${tk}</div>`;
+  if(compact)return `<div class="tbar cmp"><div class="trk">${bar}</div></div>`;
+  // like Sportsbet: the number reached sits on the bar where the fill ends, and the target sits at the far end
+  return `<div class="tbar"><div class="trk">${bar}<span class="pl ${hit?"hit":""}" style="left:min(max(${pct}%,15px),calc(100% - 58px))">${Math.round(cur)}</span><span class="pl tg">${tgt}</span></div>${step>1?`<div class="tlab">${lb}</div>`:""}</div>`}
 function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||""),who=legWho(l);
   if(!g)return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
   if(g.state=="pre")return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
@@ -588,7 +593,7 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
   return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)}</span></span><span>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?`${progress.cur} of ${progress.tgt} categories at 10+`:txt}${verdict}</span></div>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?catBars(r):l.side!="under"&&progress.tgt>0?ticksBar(progress.cur,progress.tgt,hit):`<div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div>`}</div>`}
 // one bar per category for double-double and triple-double picks: points, rebounds, assists, plus steals or blocks once they reach 5
 function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||0],["STL",r.stl||0],["BLK",r.blk||0]].filter(([k,v],i)=>i<3||v>=5);
-  return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:62px;font-size:12px">${k} ${v}</span><div style="flex:1">${ticksBar(v,10,v>=10,false)}</div></div>`).join("")}
+  return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:62px;font-size:12px">${k} ${v}</span><div style="flex:1">${ticksBar(v,10,v>=10,true)}</div></div>`).join("")}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
   const liveN=LG.filter(g=>g.state=="in").length;
