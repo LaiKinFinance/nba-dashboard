@@ -211,6 +211,43 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)      # the page and the sl
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_refresh_loop, daemon=True).start()
 
+RESULTS_EVERY = 300           # seconds between looks at the scoreboard for games that have just finished
+
+def finished_not_stored():
+    """Games ESPN shows as Final that we have not stored yet (games known to have no box score are left to the normal catch-up)."""
+    import live
+    try: final = [g["game_id"] for g in live.scoreboard() if g["state"] == "post"]
+    except Exception: return []
+    if not final: return []
+    marks = ",".join("?" * len(final))
+    with closing(con()) as c:
+        have = {r[0] for r in c.execute(f"SELECT game_id FROM games WHERE game_id IN ({marks})", final)}
+        try: none = {r[0] for r in c.execute(f"SELECT game_id FROM unavailable_games WHERE game_id IN ({marks})", final)}
+        except sqlite3.OperationalError: none = set()
+    return [g for g in final if g not in have and g not in none]
+
+def fast_results():
+    """When a game turns Final, fetch just that result and mark the picks now instead of waiting for the 4-hour catch-up. Costs no Odds API credits."""
+    todo = finished_not_stored()
+    if not todo or not REFRESH_LOCK.acquire(blocking=False): return dict(skipped=True)      # busy: the big catch-up is running and will do it
+    try:
+        import ingest
+        t = dt.date.today()
+        ingest.run(t - dt.timedelta(days=2), t)          # stores only games it does not have yet
+        grade_picks(); grade_bets()
+    finally: REFRESH_LOCK.release()
+    return dict(games=len(todo))
+
+def _results_loop():
+    time.sleep(120)
+    while True:
+        try: _stage("fast_results", fast_results)
+        except Exception: logging.exception("fast results failed")
+        time.sleep(RESULTS_EVERY)
+
+if os.environ.get("AUTO_REFRESH") == "1":
+    threading.Thread(target=_results_loop, daemon=True).start()
+
 WATCHDOG_FAILS = 5            # answers missed in a row (one check a minute, 30 seconds each) before the site restarts itself
 WATCHDOG_MIN_GAP = 3600       # and never more than one self-restart an hour, so a restart can never turn into a loop
 
