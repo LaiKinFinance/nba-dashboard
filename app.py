@@ -696,7 +696,9 @@ def track_record(x_code: str = Header("")):
     for day, d in days.items():
         known = [starts[g] for g in gid.get(day, ()) if starts.get(g)]
         d["start"] = min(known) if known else None       # the page shows this day by the viewer's own clock
-    out["days"] = sorted(days.values(), key=lambda d: d["day"], reverse=True)[:21]
+    recent = sorted(days.values(), key=lambda d: d["day"], reverse=True)[:21]
+    waiting = [d for d in recent if any(x["result"] is None for x in d["legs"] + d["value"]) and not (d["start"] and has_started(d["start"]))]
+    out["days"] = sorted(waiting, key=lambda d: d["start"] or d["day"]) + [d for d in recent if d not in waiting]    # coming games first (soonest at the top), then finished days newest first
     return out
 
 @app.get("/api/value")
@@ -989,15 +991,65 @@ def scorecard(x_code: str = Header("")):
         except sqlite3.OperationalError: pass            # no roster table yet: pages then show the player without a team badge
     return dict(users=sorted(users.values(), key=lambda u: u["user"].casefold()), bets=shown, teams=teams)
 
+def _game_start(c, game_id):
+    """Tip-off time of a game (stored games first, then today's projections); None when it cannot be found."""
+    for sql in ("SELECT tip_utc FROM games WHERE game_id=? AND tip_utc IS NOT NULL",
+                "SELECT json_extract(payload, '$.start') FROM projections WHERE game_id=? LIMIT 1"):
+        try: r = c.execute(sql, (game_id,)).fetchone()
+        except sqlite3.OperationalError: continue
+        if r and r[0]: return r[0]
+    return None
+
+def _any_started(c, legs):
+    """True when a game in the pick is known to have started. A pick can be neither saved nor removed once play has begun."""
+    return any(_game_start(c, l.get("game_id")) and has_started(_game_start(c, l.get("game_id"))) for l in legs if l.get("game_id"))
+
 @app.post("/api/bets")
 def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
     body = body.model_dump(exclude_none=True)
     with closing(con()) as c:
+        if _any_started(c, body["legs"]): raise HTTPException(400, "A game in this pick has already started, so it can no longer be saved")
         c.execute("INSERT INTO bets(user,created,legs,model_prob) VALUES(?,?,?,?)",
                   (user, dt.datetime.now(dt.timezone.utc).isoformat(), json.dumps(body["legs"]), body.get("model_prob")))
         c.commit()
     return {"ok": True}
+
+@app.delete("/api/bets/{bid}")
+def delete_bet(bid: int, x_user: str = Header(""), x_code: str = Header("")):
+    """Remove your own pick, but only while it is still waiting and none of its games has started. Finished picks stay in the record."""
+    user = who(x_user, x_code)
+    with closing(con()) as c:
+        r = c.execute("SELECT legs, result FROM bets WHERE id=? AND user=?", (bid, user)).fetchone()
+        if not r: raise HTTPException(404, "Not your pick")
+        if r["result"] != "open": raise HTTPException(409, "A pick with a result stays in the record")
+        if _any_started(c, json.loads(r["legs"])): raise HTTPException(409, "A game in this pick has started, so it can no longer be removed")
+        c.execute("DELETE FROM bets WHERE id=? AND user=?", (bid, user)); c.commit()
+    return {"ok": True}
+
+MIN_FOR_RATE = 5
+
+@app.get("/api/leaderboard")
+def leaderboard(x_code: str = Header("")):
+    """Friends compared on saved picks that have a result: most won, hardest pick won (lowest model chance), and share won."""
+    check(x_code)
+    _safe(grade_bets)
+    with closing(con()) as c:
+        rows = [dict(r) for r in c.execute("SELECT user, result, model_prob FROM bets WHERE result IN ('won','lost')")]
+    by = {}
+    for r in rows:
+        u = by.setdefault(r["user"], dict(user=r["user"], won=0, lost=0, hardest=None))
+        if r["result"] == "won":
+            u["won"] += 1
+            if r["model_prob"] is not None and (u["hardest"] is None or r["model_prob"] < u["hardest"]): u["hardest"] = r["model_prob"]
+        else: u["lost"] += 1
+    for u in by.values(): u["picks"] = u["won"] + u["lost"]; u["rate"] = u["won"] / u["picks"]
+    us = list(by.values()); key = lambda u: u["user"].casefold()
+    return dict(
+        most_won=[dict(user=u["user"], won=u["won"], picks=u["picks"]) for u in sorted(us, key=lambda u: (-u["won"], key(u))) if u["won"]],
+        hardest=[dict(user=u["user"], chance=u["hardest"]) for u in sorted((u for u in us if u["hardest"] is not None), key=lambda u: (u["hardest"], key(u)))],
+        rate=[dict(user=u["user"], rate=u["rate"], picks=u["picks"]) for u in sorted((u for u in us if u["picks"] >= MIN_FOR_RATE), key=lambda u: (-u["rate"], -u["picks"], key(u)))],
+        min_picks=MIN_FOR_RATE)
 
 @app.get("/api/picks")
 def picks(x_code: str = Header("")):

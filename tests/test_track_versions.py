@@ -39,3 +39,16 @@ def test_todays_picks_cover_only_the_next_game_day():
     rows = [dict(start="2026-10-30T00:00Z", id=1), dict(start="2026-10-30T02:00Z", id=2), dict(start="2026-10-30T23:30Z", id=3), dict(start="2026-10-31T02:00Z", id=4)]
     assert [r["id"] for r in app.next_game_day(rows)] == [1, 2]
     assert app.next_game_day([]) == []
+
+
+def test_coming_days_come_first_soonest_at_the_top(client):
+    import sqlite3, json
+    c = sqlite3.connect(app.DB)
+    c.execute("CREATE TABLE IF NOT EXISTS projections(game_id TEXT, player_id TEXT, payload TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id))")
+    for g, start in (("gPast", "2020-01-02T00:00Z"), ("gSoon", "2998-01-01T00:00Z"), ("gLater", "2999-01-01T00:00Z")):
+        c.execute("INSERT INTO projections VALUES(?,?,?,?)", (g, "x", json.dumps({"start": start}), "t"))
+    for day, g, res in (("2020-01-01", "gPast", "won"), ("2999-01-01", "gLater", None), ("2998-01-01", "gSoon", None)):
+        c.execute("INSERT INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,created,result,model_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (day, g, "p" + g, "A", "T", "leg", "reb", 5.5, "over", .8, "t", res, "NEW"))
+    c.commit()
+    assert [d["day"] for d in client.get("/api/track").json()["days"]] == ["2998-01-01", "2999-01-01", "2020-01-01"]

@@ -190,3 +190,36 @@ def test_a_fresh_start_on_the_bundled_database_sets_itself_up():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env={**os.environ, "DATA_DIR": d, "AUTO_REFRESH": "0"},
                          cwd=os.path.dirname(os.path.dirname(__file__)))
     assert "ok" in out.stdout, out.stderr[-600:]
+
+
+# ---- delete a waiting pick, leaderboard, saving after tip-off ----
+def _api(headers=None): return TestClient(app.app)
+
+def test_owner_can_delete_a_waiting_pick_only(db):
+    b = _bet(db, [dict(game_id="future", player_id="p", stat="pts", line=10.5, side="over")]); c = TestClient(app.app)
+    assert c.delete(f"/api/bets/{b}", headers={"X-User": "other"}).status_code == 404
+    assert c.delete(f"/api/bets/{b}", headers={"X-User": "mark"}).status_code == 200
+    assert db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 0
+
+def test_a_pick_with_a_result_cannot_be_deleted(db):
+    b = _bet(db, [L("pts", 24.5)]); app.grade_bets()
+    assert TestClient(app.app).delete(f"/api/bets/{b}", headers={"X-User": "mark"}).status_code == 409
+    assert db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 1
+
+def test_a_pick_cannot_be_saved_or_deleted_once_its_game_has_started(db):
+    db.execute("CREATE TABLE IF NOT EXISTS projections(game_id TEXT, player_id TEXT, payload TEXT, made_at TEXT, PRIMARY KEY(game_id, player_id))")
+    db.execute("INSERT INTO projections VALUES('started','p','{\"start\":\"2020-01-01T00:00Z\"}','t')")
+    db.execute("INSERT INTO projections VALUES('later','p','{\"start\":\"2999-01-01T00:00Z\"}','t')"); db.commit()
+    c = TestClient(app.app); leg = lambda g: dict(game_id=g, player_id="p", stat="pts", line=10.5, side="over")
+    assert c.post("/api/bets", json=dict(legs=[leg("started")]), headers={"X-User": "mark"}).status_code == 400
+    assert c.post("/api/bets", json=dict(legs=[leg("later")]), headers={"X-User": "mark"}).status_code == 200
+    b = _bet(db, [leg("started")])
+    assert c.delete(f"/api/bets/{b}", headers={"X-User": "mark"}).status_code == 409
+
+def test_leaderboard_boards(db):
+    for user, legs in (("ann", [L("pts", 24.5)]), ("ann", [L("pts", 24.5)]), ("bob", [L("pts", 24.5)]), ("bob", [L("pts", 30.5)])):
+        i = _bet(db, legs); db.execute("UPDATE bets SET user=?, model_prob=? WHERE id=?", (user, .2 if user == "ann" else .5, i)); db.commit()
+    lb = TestClient(app.app).get("/api/leaderboard").json()
+    assert [r["user"] for r in lb["most_won"]] == ["ann", "bob"] and lb["most_won"][0]["won"] == 2
+    assert lb["hardest"][0] == dict(user="ann", chance=.2)
+    assert lb["rate"] == []          # nobody has 5 finished picks yet
