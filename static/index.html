@@ -151,6 +151,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 table.bx{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}table.bx th,table.bx td{padding:5px 4px;text-align:right;border-bottom:1px solid var(--line)}table.bx th{color:var(--mute);font-weight:500;font-size:11px}
 table.bx th:first-child,table.bx td:first-child{text-align:left}table.bx tr.trk td:first-child{font-weight:700}table.ls2 td.qw{color:var(--ink);font-weight:700}table.ls2 td{color:var(--mute)}table.ls2 td:last-child{color:var(--ink)}table.ls2 td:first-child{color:var(--ink)}
 .ch2{display:inline-block;font-size:9.5px;font-weight:800;border-radius:3px;padding:0 4px;margin-left:4px;vertical-align:1px}.ch2.dd{background:var(--btn);color:var(--c-warn-fg)}.ch2.td{background:var(--gold);color:#000}.ch2.w{background:var(--c-warn-bg);color:var(--c-warn-fg)}
+.tbar{margin-top:5px}.tbar .pbar{position:relative;height:10px;margin:0}.tk{position:absolute;top:0;bottom:0;width:1px;background:var(--card)}.tlab{position:relative;height:14px;font-size:10.5px;color:var(--mute)}.tlab span{position:absolute;top:1px;transform:translateX(-100%)}
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
 </style>
@@ -366,8 +367,13 @@ function drawGames(){const q=filt.q.toLowerCase();let gs=slate.filter(g=>{
   if(filt.start)gs=gs.map(g=>({...g,teams:Object.fromEntries(Object.entries(g.teams).map(([k,t])=>[k,{...t,players:t.players.filter(p=>p.starting)}]))}));
   let h="",last="";for(const g of gs){const d=dayKey(g.start);if(d!=last){h+=`<div class="day">${d}</div>`;last=d}h+=gameHTML(g)}
   $("#glist").innerHTML=h||'<div class="empty">No games match.</div>';paintSel();centerStrips()}
-function playingHTML(){const rows=(best&&best.playing||[]).filter(x=>LIVEIDS.has(x.game_id));if(!rows.length)return"";
-  return `<div class="card"><h2>Playing now</h2>${rows.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:"over"})} · model ${pc0(x.p)}</small></div></div>`).join("")}</div>`}
+const playingLegs=()=>(best&&best.playing||[]).filter(x=>LIVEIDS.has(x.game_id)).map(x=>({game_id:x.game_id,player_id:x.player_id,team:x.team,text:x.player,stat:x.stat,line:x.line,side:"over"}));
+async function loadPlayingBoxes(){const ids=[...new Set(playingLegs().map(l=>l.game_id))];
+  await Promise.all(ids.map(async id=>{try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(r.ok)boxes[id]=await r.json()}catch(e){}}))}
+function playingHTML(){const ls=playingLegs();if(!ls.length)return"";
+  return `<div class="card"><h2>Playing now</h2>${ls.map(legProg).join("")}</div>`}
+async function refreshPlaying(){if(tab!="best"||bestView!="today"||document.visibilityState!="visible")return;
+  LG=await quietLive();LIVEIDS=liveSet(LG);await loadPlayingBoxes();const w=$("#playingWrap");if(w)w.innerHTML=playingHTML()}
 function bestHTML(){if(!best||!best.combo.legs.length)return"";const c=best.combo;
   const L=l=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · bench/TBC"}</span></div><div style="text-align:right"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</div></div></div>`;
   return `<div class="card best"><h2>⭐ Today's best picks</h2><p class="mute" style="margin:0 0 6px">A safe-ish multi: each leg is likely and has hit in most of the player's last 10 games.</p>
@@ -418,8 +424,8 @@ const trackWho=x=>`${x.player_id?photo(x.player_id,x.player):""}${x.team?`<img s
 async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
   a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today's picks</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Track record</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
-  if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LIVEIDS=liveSet(lv0);
-    $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+playingHTML()+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML();dotTimer()}
+  if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
+    $("#bbody").innerHTML=`<div class="note">Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.</div>`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No safe picks right now. They appear once lineups are posted.</div>')+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
   else{const [t,lv0]=await Promise.all([api("track"),quietLive()]),L=t.legs,C=t.combos,V=t.value;await slateP;LIVEIDS=liveSet(lv0);
     const gap=L.n>=20?L.won/L.n-L.avg_p:null;
     const verdict=L.n<20?`Too early to judge: about ${20-L.n} more graded picks are needed before the hit rate means much.`:gap<-0.07?"Picks are winning less often than the model expected, so its confidence has been too high.":gap>0.07?"Picks are winning more often than the model expected, so it has been cautious.":"Hit rate is close to what the model expected.";
@@ -478,7 +484,7 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
   // live numbers for picks still waiting: same figures as the Live tab, refreshed every 20 seconds
   const ids=[...new Set(open.flatMap(b=>JSON.parse(b.legs).map(l=>l.game_id)))];
   const paint=()=>{const el=$("#openPicks");if(el)el.innerHTML=open.map(card).join("")};
-  const refresh=async()=>{if(tab!="bets"||!ids.length)return;try{LG=await api("live")}catch(e){return}
+  const refresh=async()=>{if(tab!="bets"||!ids.length)return;try{LG=await api("live")}catch(e){return}LIVEIDS=liveSet(LG);
     await Promise.all(ids.filter(id=>LG.some(g=>g.game_id==id&&g.state!="pre")).map(async id=>{try{boxes[id]=await api("live/"+id)}catch(e){}}));
     if(tab=="bets")paint()};
   if(ids.length){await refresh();liveTimer=setInterval(()=>{if(document.visibilityState=="visible")refresh()},20000)}}
@@ -568,17 +574,21 @@ function playerLegProgress(l,r){
 // END playerLegProgress
 const legWho=l=>{const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(PT[l.player_id]||"")).toUpperCase();
   return `${l.player_id?photo(l.player_id,l.text||""):""}${t?`<img src="${logo(t)}" alt="${esc(t)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}`};
+// a bar with a tick for every unit (every 5 or 10 when the target is big) and the numbers underneath, so "6 or 7 rebounds" can be read at a glance
+function ticksBar(cur,tgt,hit,labels=true){tgt=Math.max(1,Math.round(tgt));const pct=Math.max(0,Math.min(100,cur/tgt*100)),step=tgt<=12?1:tgt<=30?5:10;let tk="",lb="";
+  for(let i=step;i<=tgt;i+=step){const left=i/tgt*100;if(i<tgt)tk+=`<span class="tk" style="left:${left}%"></span>`;lb+=`<span style="left:${left}%">${i}</span>`}
+  return `<div class="tbar"><div class="pbar ${hit?"hit":""}"><i style="width:${pct}%"></i>${tk}</div>${labels?`<div class="tlab">${lb}</div>`:""}</div>`}
 function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))return teamProg(l);const g=LG.find(x=>x.game_id==l.game_id),r=legNow(l),name=esc(l.text||""),who=legWho(l);
-  if(!g)return `<div class="prog">${who}<b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
-  if(g.state=="pre")return `<div class="prog">${who}<b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
-  if(!r)return `<div class="prog">${who}<b>${name}</b> <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
-  const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog">${who}<b>${name}</b> <span class="mute">Stats are temporarily unavailable</span></div>`;
+  if(!g)return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
+  if(g.state=="pre")return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
+  if(!r)return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)} · has not played yet</span></div>`;
+  const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">Stats are temporarily unavailable</span></div>`;
   const {hit,txt,percent,level}=progress;
   const done=g.state=="post",verdict=done?(level?' <b>Level</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
-  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b> <span class="mute">${legDesc(l)}</span></span><span>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?`${progress.cur} of ${progress.tgt} categories at 10+`:txt}${verdict}</span></div>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?catBars(r):`<div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div>`}</div>`}
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)}</span></span><span>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?`${progress.cur} of ${progress.tgt} categories at 10+`:txt}${verdict}</span></div>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?catBars(r):l.side!="under"&&progress.tgt>0?ticksBar(progress.cur,progress.tgt,hit):`<div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div>`}</div>`}
 // one bar per category for double-double and triple-double picks: points, rebounds, assists, plus steals or blocks once they reach 5
 function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||0],["STL",r.stl||0],["BLK",r.blk||0]].filter(([k,v],i)=>i<3||v>=5);
-  return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:62px;font-size:12px">${k} ${v}</span><div class="pbar ${v>=10?"hit":""}" style="flex:1;margin:0"><i style="width:${Math.min(100,v*10)}%"></i></div></div>`).join("")}
+  return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:62px;font-size:12px">${k} ${v}</span><div style="flex:1">${ticksBar(v,10,v>=10,false)}</div></div>`).join("")}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);refreshLive()}
 function drawLive(){const el=$("#lbody");if(!el)return;
   const liveN=LG.filter(g=>g.state=="in").length;
