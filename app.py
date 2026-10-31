@@ -429,6 +429,28 @@ def enriched():
         if _enr["key"] == key and _enr["val"] is not None: return _enr["val"]
         val = _enriched_build(); _enr.update(key=key, val=val, at=time.time()); return val
 
+RETURN_MIN_MISSED = 3     # missing this many team games in a row counts as a real absence (study: first 2 games back run about 1.5 PRA below the model)
+
+def returning_status(c, pids):
+    """{player_id: dict(game_back=1|2, missed=n)} for players about to play their 1st or 2nd game back after missing 3+ of their team's games this season."""
+    out = {}
+    for pid in {x for x in pids if x}:
+        try:
+            last = c.execute("SELECT game_id, date, team, season FROM player_games WHERE player_id=? ORDER BY date DESC, game_id DESC LIMIT 2", (pid,)).fetchall()
+            if not last: continue
+            l1 = last[0]
+            tg = c.execute("SELECT game_id, date FROM games WHERE (home=? OR away=?) AND season=? AND home_pts IS NOT NULL ORDER BY date, game_id", (l1["team"], l1["team"], l1["season"])).fetchall()
+            ids = [g["game_id"] for g in tg]
+            if l1["game_id"] not in ids: continue
+            after = len(ids) - 1 - ids.index(l1["game_id"])          # team games since his last appearance
+            if after >= RETURN_MIN_MISSED:
+                out[pid] = dict(game_back=1, missed=after)
+            elif after == 0 and len(last) == 2 and last[1]["season"] == l1["season"] and last[1]["game_id"] in ids:
+                gap = ids.index(l1["game_id"]) - ids.index(last[1]["game_id"]) - 1
+                if gap >= RETURN_MIN_MISSED: out[pid] = dict(game_back=2, missed=gap)
+        except sqlite3.OperationalError: return {}
+    return out
+
 def _enriched_build():
     """Projections + last-10 games, consistency counts per line, and bookmaker prices/edges where available."""
     import odds
@@ -442,6 +464,7 @@ def _enriched_build():
                 rows.setdefault(r["player_id"], [])
                 if len(rows[r["player_id"]]) < 20: rows[r["player_id"]].append(dict(r))
         book = odds.load(c); ages = odds.fetch_ages(c); times = odds.fetch_times(c)
+        ret = returning_status(c, ids)
     # who realistically gets double-/triple-doubles: full stored history (this and last season) plus recent near-misses
     hist = {}
     if ids:
@@ -460,6 +483,7 @@ def _enriched_build():
         p["show_dd"] = bool(h["dd20"] >= 2 or p["p_dd"] >= 0.15)
         g = rows.get(p["player_id"], []); l10 = g[:10]; n = len(l10)
         p["last10"] = l10
+        p["returning"] = ret.get(p["player_id"])
         for s in ("pts", "reb", "ast"):
             for l in p["ladders"][s]: l["hit"] = sum(1 for r in l10 if r[s] > l["line"]); l["n"] = n
         p["dd_hit"] = dict(k=sum(_dd(r) for r in l10), n=n); p["td_hit"] = dict(k=h["td"], n=h["games"])
@@ -930,6 +954,7 @@ def _best_candidates(preds):
     cands = []
     for p in preds:
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
+        if p.get("returning"): continue                     # first 2 games back after a 3+ game absence: minutes and stats run low, so no safe-pick claims
         for s in ("pts", "reb", "ast"):
             if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue        # no "safe leg" claims for points until checked
             # only lines a bookmaker really offers (a price found recently for exactly that line). No bookmaker line found = no pick.
@@ -953,6 +978,7 @@ def _steady_pra_candidates(preds):
         if not st or st[0] <= 0 or st[1] / st[0] > STEADY_CV: continue
         if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
         if is_stale(p.get("odds_age_h")): continue
+        if p.get("returning"): continue
         mean_, sd = sum(p["proj"][k] for k in ("pts", "reb", "ast")), st[1]
         last = [r["pts"] + r["reb"] + r["ast"] for r in p.get("last10", [])]
         if len(last) < 5 or sd <= 0: continue
