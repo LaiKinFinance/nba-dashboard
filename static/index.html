@@ -27,6 +27,7 @@ header{position:sticky;top:0;z-index:20;background:var(--hdr-bg);color:#fff;bord
 .hw{max-width:1280px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .brand{font-weight:800;font-size:18px;letter-spacing:.3px}.brand b{color:var(--gold)}
 nav{display:flex;gap:2px;overflow-x:auto}nav button{background:none;border:0;color:var(--hdr-mute);padding:8px 12px;border-radius:6px;font-weight:600;white-space:nowrap}
+@media(max-width:420px){nav button{padding:8px 8px}}
 nav button.on{background:rgba(255,255,255,.14);color:#fff}
 .who{margin-left:auto;font-size:12.5px;color:var(--hdr-mute);display:flex;gap:8px;align-items:center}.who button{background:none;border:0;color:var(--gold);padding:0 2px}
 .inst{background:var(--gold);color:#101010;border:0;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12.5px}
@@ -173,7 +174,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Teams"]];
+const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Teams"],["model","Model"]];
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
 let tab="best";   // the app always opens on Best picks (the home tab)
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,snaps={},alerts=[],live={};
@@ -206,13 +207,13 @@ let picksView="mine";
 function go(t,pid){if(t=="players"&&!pid)ptTeam=null;if(t=="bets"){picksView="mine";t="pk"}else if(t=="picks"){picksView="friends";t="pk"}else if(t=="live"||t=="lineups")t="today";      // old links still land somewhere sensible
   tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
 /* phone Back button: every page change adds a history step, and Back restores the previous page instead of closing the app */
-const navSnap=()=>({tab,playerId,ptTeam,picksView});
+const navSnap=()=>({tab,playerId,ptTeam,picksView,modelView});
 let navFromBack=false;
 function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.replaceState({nba:1,...s},"");
-  else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView))history.pushState({nba:1,...s},"")}catch(e){}}
-addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;nav();render();scrollTo(0,0)}finally{navFromBack=false}});
+  else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView||c.modelView!=s.modelView))history.pushState({nba:1,...s},"")}catch(e){}}
+addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"how";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
 async function render(){navSync();const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
-  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
+  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -559,6 +560,46 @@ function teamTilesHTML(){
 async function teamPageHTML(t){let rows=[];try{rows=await api("team/"+t)}catch(e){}
   return `<div style="display:flex;align-items:center;gap:10px;margin:0 0 10px"><button class="btn" onclick="ptTeam=null;render()">← All teams</button><img src="${logo(t)}" alt="" style="width:30px;height:30px"><b style="font-size:17px">${NAMES[t]||t}</b>${LG.some(g=>g.state=="in"&&(g.home.team==t||g.away.team==t))?'<span class="live-dot" title="Playing now"></span>':""}</div>`+
     (rows.length?`<div class="card" style="padding:4px 10px"><table class="t tm2"><tr><th style="text-align:left">Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th></tr>${rows.map(r=>`<tr onclick="go('players','${esc(r.player_id)}')" style="cursor:pointer"><td style="text-align:left"><div style="display:flex;align-items:center;gap:8px;min-width:0">${photo(r.player_id,r.player,"s")}<div style="min-width:0"><b style="overflow-wrap:anywhere">${esc(r.player)}</b>${steadyIcons(r.icons,r.crown)}<div class="mute" style="font-size:11px;font-weight:400">${r.games} games</div></div></div></td><td>${r.min}</td><td>${r.pts}</td><td>${r.reb}</td><td>${r.ast}</td></tr>`).join("")}</table></div><p class="mute" style="margin:6px 0 0;font-size:12.5px">Season averages. Tap a player for his recent games.</p>`:'<div class="card empty">No players found for this team yet.</div>')}
+/* ---------- Model tab: what the model uses, and what we tested (plain words) ---------- */
+let modelView="how";
+const MODEL_HOW=[
+ ["Recent form","His averages over his last 5, 10 and 20 games, and over all the games we have for him. Recent games count more, but one big night can't swing it.",[]],
+ ["Minutes","How many minutes he usually plays and how much that jumps around. Minutes drive everything else.",["A sharper minutes guess was tested: it did not make the final chances better, so it was not added."]],
+ ["How steady he is","How much his points, rebounds, assists and minutes swing from game to game. Steady players get more confident chances.",["Steadiness carries over from year to year, so the Consistent players list uses it."]],
+ ["Starting or bench","Whether he starts tonight (from the lineup news) and how often he has started lately.",[]],
+ ["Home or away and rest","Home or away, days of rest, and back-to-back games.",["The other team's rest and travel were tested: no effect."]],
+ ["The opponent","How many points, rebounds and assists the other team has allowed lately, kept gentle so one odd week doesn't swing it.",[]],
+ ["The game's expected score","The bookmakers' expected total and who is favoured, which hints at a fast game or a blowout.",[]],
+ ["Teammates who are out","Which regular teammates are missing tonight and how much scoring, rebounding and passing that frees up for him.",[]],
+ ["Safety checks","Some players get no Best pick even when the numbers look good.",["Returning: first 2 games back after missing 3+ games.","New team: a traded veteran's first 10 games with his new team.","Injury listed Out or Doubtful."]],
+ ["How chances are made","The expected numbers plus how much each stat usually swings give the chance of going over a line. Combined bets account for stats moving together.",["Best picks only use lines a bookmaker really offers."]],
+ ["What isn't modelled","Things we can't measure well enough yet.",["How bad an injury is (we now save injury reports every hour to test it later).","Who guards whom (needs tracking data).","Anything off the court."]]];
+const MODEL_MYTHS=[
+ ["Holidays change how players play","Busted","Do players do better or worse on Christmas, MLK Day, Halloween, Thanksgiving and other holidays?","4 seasons, about 61,000 player games.",["Every holiday was within 1 point+rebound+assist of normal (a normal game swings about 8).","The few odd-looking days had only 2-4 game days each: luck."],"Nothing changed."],
+ ["Day of the week matters","Busted","Do weekend or weekday games change results?","4 seasons.",["Differences were about 0.2 or less."],"Nothing changed."],
+ ["Players come back rusty","Confirmed","Do players do worse just after missing games?","4 seasons; players back after missing 3+ team games.",["Game 1 back: about 3 fewer minutes and 1.5 fewer points+rebounds+assists.","Game 2 back: still about 1.7 lower. Back to normal by game 4."],"Returning label added; no Best pick in the first 2 games back."],
+ ["Traded players need time to settle","Confirmed","Do veterans do worse in their first games with a new team?","4 seasons; about 2,100 such games.",["First 10 games with a new team: about 1 point+rebound+assist below what the model expects.","Games 10-25: close to normal. Rookies: too few to tell."],"New team label added; no Best pick in the first 10 games."],
+ ["Steady players are really steady","Confirmed","Does a player who was steady last season stay steady?","5 seasons.",["Yes: steadiness carries over strongly from year to year.","For steady players, using their own swing gave honest chances (said 82%, came true 82%)."],"Consistent players list and steady-player picks added."],
+ ["Good defenders shut players down","Too small to matter","Do players score less against strong or taller defenders?","4 seasons; opposing starter in the same position as the likely defender.",["Taller defender: about 0.2 less. Strong defender: about 0.06 less.","Trae Young's opponents scored about 1 point more; Dillon Brooks's about 0.5 less."],"Not added: the model got no better with it."],
+ ["Players feast when the other team's stars are out","Busted","Do players do better when the opponent is missing regulars?","4 seasons.",["About 0.1 difference, with no steady pattern.","The model got no better with it."],"Nothing changed."],
+ ["Referees change scoring","Too small to matter","Do some referee crews lead to more points?","4 seasons; about 6,100 games with known crews.",["Yes, a little: crews that call more fouls give about 3 more free throws a game.","Top scorers get about 1 point more with those crews than with the strictest ones.","The model got no better with it."],"Not added."],
+ ["Blowouts cost starters","Too small to matter","Do starters lose out in lopsided games?","Seasons with bookmaker spreads.",["Real blowouts cost starters about 3 minutes, but nobody knows beforehand which games blow out.","Games expected to be big mismatches cost about 1 point+rebound+assist."],"Not added: the model barely improved."],
+ ["Fast games mean bigger numbers","Too small to matter","Do players do more in fast-paced games?","4 seasons.",["Fastest games: about 0.4 more points+rebounds+assists."],"Not added."],
+ ["Tired opponents and long trips","Busted","Does the other team's back-to-back or a long flight help?","4 seasons; distance between arenas.",["All within about 0.2: no real effect."],"Nothing changed."],
+ ["Late season tanking","Too small to matter","Do players on losing teams fade late in the season?","4 seasons; last 17 games.",["Losing teams: about 0.6 lower late in the season."],"Not added."],
+ ["Altitude in Denver and Utah","Busted","Do visiting players struggle at altitude?","4 seasons.",["No difference from other away games."],"Nothing changed."],
+ ["Revenge games","Busted","Do players do more against a team they used to play for?","4 seasons; about 1,100 games.",["About 0.25 more, well inside luck."],"Nothing changed."],
+ ["The model's chances are honest","Mostly true","When the app says 70%, does it come true about 70% of the time?","2 full seasons.",["Rebounds, assists and game totals: honest within about 1%.","Points: honest overall, but about 5-7% too high when it says 70%+, so points are not used for safe picks.","Our own handicap margin was slightly too bold, so it was toned down 20%."],"Handicap fix added."],
+ ["Combined bets (points+rebounds+assists)","Confirmed","Are chances for combined stats honest?","5 seasons.",["About 65% came true where the app said about 65%."],"Steady-player combined picks added."]];
+const mvBadge=v=>`<span class="chip ${v=="Confirmed"?"s":v=="Busted"?"i":"q"}" style="margin-left:6px">${esc(v)}</span>`;
+function modelCard(k,title,head,body){return `<details class="card" ${foldOpen(k,false)?"open":""} ontoggle="foldSet('${k}',this.open)"><summary class="csum">${head}</summary>${body}</details>`}
+function setModelView(v){modelView=v;render()}
+async function modelTab(a){
+  const how=MODEL_HOW.map(([t,d,pts],i)=>modelCard("m_h"+i,t,esc(t),`<p style="margin:0 0 6px">${esc(d)}</p>${pts.length?`<ul class="why">${pts.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}`)).join("");
+  const myth=MODEL_MYTHS.map(([t,v,q,how,found,did],i)=>modelCard("m_m"+i,t,`${esc(t)}${mvBadge(v)}`,`<p style="margin:0 0 6px"><b>Question:</b> ${esc(q)}</p><p style="margin:0 0 6px"><b>How we tested:</b> ${esc(how)}</p><b>What we found:</b><ul class="why">${found.map(x=>`<li>${esc(x)}</li>`).join("")}</ul><p style="margin:6px 0 0"><b>What we did:</b> ${esc(did)}</p><p class="mute" style="margin:6px 0 0;font-size:12px">Tested Oct 2026</p>`)).join("");
+  a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${modelView=="how"?"on":""}" onclick="setModelView('how')">How it works</button><button class="${modelView=="myth"?"on":""}" onclick="setModelView('myth')">MythBusters</button></div>`+
+   (modelView=="how"?`<p class="mute" style="margin:0 0 8px">What the model looks at to predict each player's points, rebounds and assists. Tap a card to open it.</p>${how}`:`<p class="mute" style="margin:0 0 8px">Ideas we tested on past seasons. Busted = no real effect · Too small to matter = real but tiny · Confirmed = real and acted on.</p>${myth}`)}
+
 async function players(a){
   LG=await quietLive();LIVEIDS=liveSet(LG);
   a.innerHTML=`<div class="srch"><input class="inp" id="ps" placeholder="Search any player (e.g. Jokic)" oninput="psearch(this.value)" autocomplete="off"><div class="res" id="pres" style="display:none"></div></div><div id="pbody" style="margin-top:12px"></div>`;
