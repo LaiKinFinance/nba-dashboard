@@ -77,3 +77,19 @@ def test_steady_pra_leg_can_be_one_of_a_games_best_three_with_its_evidence(monke
     p = _steady_player("steady", [dict(line=26.5, price=1.8, p_over=.5, hit=9, n=10)]); p["last10"] = [dict(pts=15, reb=8, ast=7)] * 10
     out = app.best3_for_game([p])
     assert len(out) == 1 and out[0]["stat"] == "pra" and any("Consistent" in e for e in out[0]["evidence"]) and "own game-to-game swing" in out[0]["evidence"][0]
+
+
+def test_the_calculator_gives_a_consistent_players_pra_leg_the_same_chance_as_best_picks():
+    rec = {"steady": (30.0, 5.0, 20), "streaky": (30.0, 12.0, 20)}
+    preds = {("g1", "steady"): _steady_player("steady", []), ("g1", "streaky"): _steady_player("streaky", [])}
+    legs = [dict(game_id="g1", player_id="steady", stat="pra", line=26.5, side="over"), dict(game_id="g1", player_id="streaky", stat="pra", line=26.5, side="over"),
+            dict(game_id="g1", player_id="steady", stat="reb", line=3.5, side="over"), dict(game_id="g1", player_id="steady", stat="pra", line=26.5, side="under")]
+    out = app._own_pra_chances(legs, preds, rec)
+    assert list(out) == [0] and abs(out[0] - 0.758) < 0.005                      # only the consistent player's over-leg; streaky, other stats and unders keep the engine's number
+
+def test_ids_that_could_run_as_page_code_are_refused():
+    from fastapi.testclient import TestClient
+    c = TestClient(app.app)
+    bad = {"legs": [dict(game_id="g", player_id='x" onerror="alert(1)', stat="reb", line=3.5, side="over")]}
+    assert c.post("/api/picks", json=bad, headers={"X-User": "mark"}).status_code == 422 and c.post("/api/bets", json=bad, headers={"X-User": "mark"}).status_code == 422
+    assert c.post("/api/parlay", json=bad).status_code == 422

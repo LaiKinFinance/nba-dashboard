@@ -346,3 +346,14 @@ def test_friends_picks_carry_the_players_team_for_the_badge(db):
     db.execute("INSERT INTO picks(user,created,game_id,legs) VALUES('mark','t','',?)", (json.dumps([dict(game_id='future', player_id='p', stat='reb', line=3.5, side='over', text='X')]),)); db.commit()
     out = TestClient(app.app).get("/api/picks").json()
     assert out[0]["legs"][0]["team"] == "DAL"
+
+
+def test_a_player_released_from_every_roster_is_not_ranked_on_his_old_team(db):
+    db.executescript("CREATE TABLE IF NOT EXISTS rosters(player_id TEXT PRIMARY KEY, team TEXT, name TEXT, fetched_at TEXT); INSERT INTO rosters VALUES('gone',NULL,'Gone','t'); INSERT INTO rosters VALUES('here','AAA','Here','t');")
+    for col in ("player TEXT", "team TEXT", "season TEXT", "min REAL"): db.execute(f"ALTER TABLE player_games ADD COLUMN {col}")
+    for pid in ("gone", "here"):
+        for i in range(14): db.execute("INSERT INTO player_games(game_id,player_id,player,team,season,min,pts,reb,ast) VALUES(?,?,?,'AAA','2027',30,?,0,0)", (f"g{pid}{i}", pid, pid, 28 + (2 if i % 2 else -2)))
+    db.commit(); app._steady_cache.update(t=0.0, data=None)
+    from contextlib import closing
+    with closing(app.con()) as c: b = app.steady_board(c)
+    assert [t["player"] for t in b["top3"]] == ["here"]

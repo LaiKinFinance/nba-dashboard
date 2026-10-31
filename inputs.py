@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field, FiniteFloat, model_validator
 
 
 class Leg(BaseModel):
-    game_id: str = Field(min_length=1, max_length=64)
-    player_id: str | None = Field(default=None, max_length=64)
+    game_id: str = Field(min_length=1, max_length=64, pattern=r'^[A-Za-z0-9_.-]+$')              # ids are plain letters, digits and - _ . only: nothing that could run as page code
+    player_id: str | None = Field(default=None, max_length=64, pattern=r'^[A-Za-z0-9_.-]+$')
     stat: Literal['pts', 'reb', 'ast', 'fg3m', 'stl', 'blk', 'pra', 'pr', 'pa', 'dd', 'td', 'ml', 'spread', 'total', 'tt', 'band']
     line: FiniteFloat = Field(default=0, ge=-1000, le=1000)
     side: Literal['over', 'under', 'home', 'away'] = 'over'

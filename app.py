@@ -1143,7 +1143,8 @@ def steady_board(c):
         old = table(seasons[1], 30)             # a whole season needs 30 games, so a long injury cannot make someone look steady
         if old is not None and len(old): cur, fallback, used = old, True, seasons[1]
     if cur is None or cur.empty: return dict(top3=[], players={}, qualified=0, season=used, fallback=fallback)
-    cur = cur.copy(); cur["team"] = [rm.get(pid) or t if pid in rm else t for pid, t in zip(cur.player_id, cur.team)]
+    cur = cur[~cur.player_id.map(lambda pid: pid in rm and rm[pid] is None)].copy()          # someone released from every roster is not ranked on his old team
+    cur["team"] = [rm.get(pid) or t if pid in rm else t for pid, t in zip(cur.player_id, cur.team)]
     for k in ("pts", "reb", "ast"): cur[k + "_rk"] = cur[k].rank(pct=True)
     cur["crown"] = False
     for team, d in cur.groupby("team"):
@@ -1221,6 +1222,17 @@ def parlay_calc(body: ParlayInput, x_code: str = Header("")):
     check(x_code)
     return _parlay_core(body.model_dump(exclude_none=True)["legs"])
 
+def _own_pra_chances(legs, preds, rec):
+    """{leg index: chance} for 'over' PRA legs of consistent players, from the player's OWN game-to-game swing (the same rule Best picks use)."""
+    out = {}
+    for i, l in enumerate(legs):
+        if l["stat"] != "pra" or l.get("side") != "over": continue
+        st, p = rec.get(l.get("player_id")), preds.get((l["game_id"], l.get("player_id")))
+        if not st or not p or st[0] <= 0 or st[1] <= 0 or st[1] / st[0] > STEADY_CV: continue
+        line = float(l["line"]) - (0.5 if l.get("kind") == "atleast" else 0)
+        out[i] = 1 - _norm_cdf((line - sum(p["proj"][k] for k in ("pts", "reb", "ast"))) / st[1])
+    return out
+
 def _parlay_core(legs):
     preds = {(p["game_id"], p["player_id"]): p for p in projections()}
     gps = game_preds()
@@ -1248,6 +1260,9 @@ def _parlay_core(legs):
     pi, ti = iter(rp["leg_probs"]), iter(tp)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
     joint = rp["joint"] * float(np.prod(tp) if tp else 1.0); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
+    with closing(con()) as c: rec = recent_pra(c, [l.get("player_id") for l in legs if l["stat"] == "pra"])
+    for i, own in _own_pra_chances(legs, preds, rec).items():        # same chance as Best picks for a consistent player's PRA leg (his own spread); the combined chance moves with it
+        ratio = own / max(probs[i], 1e-6); probs[i] = own; joint = min(joint * ratio, 0.999); indep = min(indep * ratio, 0.999)
     r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None), value=None)
     mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
     r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
@@ -1403,8 +1418,10 @@ def add_pick(body: PickInput, x_user: str = Header(""), x_code: str = Header("")
         key = _pick_key(body["legs"])
         for r in c.execute("SELECT legs FROM picks WHERE user=?", (user,)).fetchall():
             if _pick_key(_safe(lambda: json.loads(r["legs"])) or []) == key: raise HTTPException(409, "You have already shared this pick")
+        legs = body["legs"]; r = _safe(lambda: _parlay_core(legs)); chance = r.get("joint") if r and not r.get("unsupported") else None
+        _stamp_prices(legs); price = bookmaker_price(legs)                  # shown to friends: both come from the server, never from the phone
         c.execute("INSERT INTO picks(user,created,game_id,legs,note,odds,model_prob) VALUES(?,?,?,?,?,?,?)",
-                  (user, dt.datetime.now(dt.timezone.utc).isoformat(), "", json.dumps(body["legs"]), body.get("note", "")[:500], body.get("odds"), body.get("model_prob"))); c.commit()
+                  (user, dt.datetime.now(dt.timezone.utc).isoformat(), "", json.dumps(legs), body.get("note", "")[:500], round(price, 2) if price else None, chance)); c.commit()
     return {"ok": True}
 
 @app.delete("/api/picks/{pid}")
