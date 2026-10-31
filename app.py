@@ -554,8 +554,8 @@ def _insight(h, home, away, date):
     h = h[h.date < date]
     def form(t):
         x = h[(h.home == t) | (h.away == t)].tail(5)
-        return [dict(r="W" if (r.home_pts > r.away_pts) == (r.home == t) else "L", opp=(r.away if r.home == t else r.home), date=r.date,
-                     score=f"{int(r.home_pts)}-{int(r.away_pts)}") for r in x.itertuples()]
+        return [dict(r="W" if (r.home_pts > r.away_pts) == (r.home == t) else "L", opp=(r.away if r.home == t else r.home), date=r.date, at=(r.home != t),
+                     score=(f"{int(r.home_pts)}-{int(r.away_pts)}" if r.home == t else f"{int(r.away_pts)}-{int(r.home_pts)}")) for r in x.itertuples()]    # the team's own score first
     m = h[((h.home == home) & (h.away == away)) | ((h.home == away) & (h.away == home))].tail(5).iloc[::-1]
     return dict(form={home: form(home), away: form(away)},
                 h2h=[dict(date=r.date, home=r.home, away=r.away, home_pts=int(r.home_pts), away_pts=int(r.away_pts)) for r in m.itertuples()])
