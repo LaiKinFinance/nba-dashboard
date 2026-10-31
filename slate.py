@@ -99,6 +99,7 @@ def lineups_full():
                     if "hide" in li.get("class", []): continue
                     inj = li.select_one(".lineup__inj"); t = inj.get_text(strip=True) if inj else "Out"
                     row["status"] = {"Ques": "Questionable", "GTD": "Game-time decision", "Prob": "Probable", "Doubt": "Doubtful"}.get(t, t)
+                    if any(o["name"] == name for o in out): continue      # Rotowire lists a questionable starter twice (his slot, then "may not play"): show him once
                     out.append(row)
                 else:
                     starters.append(row)
