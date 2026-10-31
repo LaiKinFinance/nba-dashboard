@@ -205,7 +205,13 @@ function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"o
 let picksView="mine";
 function go(t,pid){if(t=="players"&&!pid)ptTeam=null;if(t=="bets"){picksView="mine";t="pk"}else if(t=="picks"){picksView="friends";t="pk"}else if(t=="live"||t=="lineups")t="today";      // old links still land somewhere sensible
   tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
-async function render(){const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
+/* phone Back button: every page change adds a history step, and Back restores the previous page instead of closing the app */
+const navSnap=()=>({tab,playerId,ptTeam,picksView});
+let navFromBack=false;
+function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.replaceState({nba:1,...s},"");
+  else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView))history.pushState({nba:1,...s},"")}catch(e){}}
+addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;nav();render();scrollTo(0,0)}finally{navFromBack=false}});
+async function render(){navSync();const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
   clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
 /* ---------- finding players on the slate ---------- */
