@@ -1385,8 +1385,11 @@ def picks(x_code: str = Header("")):
     _safe(grade_bets)
     with closing(con()) as c:
         ps = [dict(r) for r in c.execute("SELECT * FROM picks ORDER BY id DESC LIMIT 100")]
+        rm = _roster_team_map(c)
         for p in ps:
             p["legs"] = json.loads(p["legs"]); p["result"] = p.get("result") or "open"; p["leg_results"] = _safe(lambda: json.loads(p["leg_results"])) if p.get("leg_results") else None
+            for l in p["legs"]:                                           # a team badge next to each player pick
+                if l.get("player_id") and not l.get("team") and rm.get(l["player_id"]): l["team"] = rm[l["player_id"]]
             p["comments"] = [dict(r) for r in c.execute("SELECT * FROM comments WHERE pick_id=? ORDER BY id", (p["id"],))]
             v = c.execute("SELECT coalesce(sum(v),0) s, count(*) n FROM votes WHERE pick_id=?", (p["id"],)).fetchone(); p["score"], p["voters"] = v["s"], v["n"]
     return ps

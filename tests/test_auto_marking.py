@@ -339,3 +339,10 @@ def test_steadiness_board_icons_crowns_and_top_three(db):
     assert not b["fallback"] and b["qualified"] == 4                                          # the 8-point player and the 5-game player are not ranked
     assert [t["player"] for t in b["top3"]] == ["lonely_c", "steady_a", "steady_b"]            # smallest swing first
     assert b["players"]["steady_a"]["crown"] and not b["players"]["streaky_a"]["crown"] and not b["players"]["lonely_c"]["crown"]    # a crown needs 2+ ranked players on the team
+
+
+def test_friends_picks_carry_the_players_team_for_the_badge(db):
+    db.executescript("CREATE TABLE IF NOT EXISTS rosters(player_id TEXT PRIMARY KEY, team TEXT, name TEXT, fetched_at TEXT); INSERT INTO rosters VALUES('p','DAL','X','t');")
+    db.execute("INSERT INTO picks(user,created,game_id,legs) VALUES('mark','t','',?)", (json.dumps([dict(game_id='future', player_id='p', stat='reb', line=3.5, side='over', text='X')]),)); db.commit()
+    out = TestClient(app.app).get("/api/picks").json()
+    assert out[0]["legs"][0]["team"] == "DAL"
