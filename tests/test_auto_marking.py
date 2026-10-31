@@ -324,3 +324,18 @@ def test_team_page_lists_the_current_roster_with_season_averages(db):
     db.commit()
     out = TestClient(app.app).get("/api/team/dal").json()
     assert [p["player"] for p in out] == ["Aldama", "Bench"] and out[0]["pts"] == 16.0 and out[0]["games"] == 2 and out[0]["min"] == 32.0
+
+
+def test_steadiness_board_icons_crowns_and_top_three(db):
+    import random
+    for col in ("player TEXT", "team TEXT", "season TEXT", "min REAL"): db.execute(f"ALTER TABLE player_games ADD COLUMN {col}")
+    random.seed(1)
+    def add(pid, team, avg, swing, n=14):
+        for i in range(n): db.execute("INSERT INTO player_games(game_id,player_id,player,team,season,min,pts,reb,ast) VALUES(?,?,?,?,'2027',30,?,0,0)", (f"g{pid}{i}", pid, pid, team, round(avg + swing * (1 if i % 2 else -1))))
+    add("steady_a", "AAA", 30, 3); add("streaky_a", "AAA", 30, 12); add("steady_b", "BBB", 28, 4); add("lonely_c", "CCC", 30, 2); add("tiny_d", "DDD", 8, 1); add("short_e", "EEE", 30, 1, n=5)
+    db.commit(); app._steady_cache.update(t=0.0, data=None)
+    from contextlib import closing
+    with closing(app.con()) as c: b = app.steady_board(c)
+    assert not b["fallback"] and b["qualified"] == 4                                          # the 8-point player and the 5-game player are not ranked
+    assert [t["player"] for t in b["top3"]] == ["lonely_c", "steady_a", "steady_b"]            # smallest swing first
+    assert b["players"]["steady_a"]["crown"] and not b["players"]["streaky_a"]["crown"] and not b["players"]["lonely_c"]["crown"]    # a crown needs 2+ ranked players on the team

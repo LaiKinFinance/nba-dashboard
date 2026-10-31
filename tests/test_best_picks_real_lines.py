@@ -53,3 +53,27 @@ def test_no_picks_for_a_game_that_has_started():
 def test_no_picks_at_all_when_no_bookmaker_line_was_found():
     p = player("x", "g1", ladder_reb=[entry(3.5, .70)])                       # only the model's own ladder, no bookmaker price
     p["book"] = {}; assert app.best3_for_game([p]) == [] and app._best_candidates([p]) == []
+
+
+def _steady_player(pid, lines):
+    p = player(pid, "g1"); p["book"]["pra"] = list(lines); p["proj"] = {"pts": 15., "reb": 8., "ast": 7.}
+    p["last10"] = [dict(pts=15, reb=8, ast=7)] * 10; return p
+
+def test_pra_picks_only_for_steady_players_on_real_lines_with_their_own_spread(monkeypatch):
+    monkeypatch.setattr(app, "recent_pra", lambda c, pids: {"steady": (30.0, 5.0, 20), "streaky": (30.0, 12.0, 20)})
+    line = lambda L, price=1.8: dict(line=L, price=price, p_over=.5, hit=9, n=10)
+    players = [_steady_player("steady", [line(26.5), line(28.5), line(24.5, None)]), _steady_player("streaky", [line(26.5)]), _steady_player("nodata", [line(26.5)])]
+    out = app._steady_pra_candidates(players)
+    assert [(c["player_id"], c["line"]) for c in out] == [("steady", 26.5)]                      # the highest line still >= 75% likely; the streaky and unknown players get nothing
+    assert abs(out[0]["p"] - 0.758) < 0.005 and out[0]["stat"] == "pra" and out[0]["price"] == 1.8 and out[0]["steady_cv"] < app.STEADY_CV
+
+def test_a_pra_pick_needs_a_real_fresh_price(monkeypatch):
+    monkeypatch.setattr(app, "recent_pra", lambda c, pids: {"steady": (30.0, 5.0, 20)})
+    p = _steady_player("steady", [dict(line=26.5, price=None, p_over=.5, hit=9, n=10)]); assert app._steady_pra_candidates([p]) == []
+    p = _steady_player("steady", [dict(line=26.5, price=1.8, p_over=.5, hit=9, n=10)]); p["odds_age_h"] = 30.0; assert app._steady_pra_candidates([p]) == []
+
+def test_steady_pra_leg_can_be_one_of_a_games_best_three_with_its_evidence(monkeypatch):
+    monkeypatch.setattr(app, "recent_pra", lambda c, pids: {"steady": (30.0, 5.0, 20)})
+    p = _steady_player("steady", [dict(line=26.5, price=1.8, p_over=.5, hit=9, n=10)]); p["last10"] = [dict(pts=15, reb=8, ast=7)] * 10
+    out = app.best3_for_game([p])
+    assert len(out) == 1 and out[0]["stat"] == "pra" and any("Steady" in e for e in out[0]["evidence"]) and "own game-to-game swing" in out[0]["evidence"][0]

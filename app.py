@@ -1,5 +1,5 @@
 """NBA top-3 dashboard API + static UI.  Run: uvicorn app:app --host 0.0.0.0 --port 8000"""
-import json, os, sqlite3, datetime as dt
+import json, math, os, sqlite3, datetime as dt
 from contextlib import closing
 import numpy as np, pandas as pd
 from fastapi import FastAPI, HTTPException, Header, Body
@@ -902,6 +902,26 @@ def best(x_code: str = Header("")):
     except Exception: logging.exception("pick logging failed")
     return res
 
+STEADY_CV = 0.265        # a player whose PRA swings less than this (as a share of his average) over his last 20 games is among the steadiest third (5 seasons of tests)
+STEADY_MIN_P = 0.75      # for steady players, PRA picks use lines at least this likely: with his own spread those chances were honest (said 82%, came true 82%)
+STEADY_MIN_GAMES = 15    # games with 15+ minutes needed in the last 20
+
+def _norm_cdf(x): return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+def recent_pra(c, pids):
+    """{player_id: (mean, standard deviation, games)} of points+rebounds+assists over each player's last 20 games with 15+ minutes."""
+    pids = [x for x in set(pids) if x]
+    if not pids: return {}
+    marks = ",".join("?" * len(pids)); out = {}
+    try: rows = c.execute(f"""SELECT player_id, pra FROM (SELECT player_id, pts+reb+ast AS pra, ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY date DESC, game_id DESC) rn
+                              FROM player_games WHERE player_id IN ({marks}) AND min>=15) WHERE rn<=20""", pids).fetchall()
+    except sqlite3.OperationalError: return {}
+    by = {}
+    for r in rows: by.setdefault(r[0], []).append(float(r[1]))
+    for pid, v in by.items():
+        if len(v) >= STEADY_MIN_GAMES: out[pid] = (float(np.mean(v)), float(np.std(v, ddof=1)), len(v))
+    return out
+
 MIN_BEST_LINE = 1.5       # a line like "over 0.5 rebounds" is so close to certain that bookmakers rarely list it, so it is never suggested
 
 def _best_candidates(preds):
@@ -920,7 +940,33 @@ def _best_candidates(preds):
             if o["p"] > 0.86: continue  # too short to be worth a leg (pays almost nothing)
             cands.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
                               p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], real=True, starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
+    cands += _steady_pra_candidates(preds)
     return cands
+
+def _steady_pra_candidates(preds):
+    """PRA (points+rebounds+assists) picks for the steadiest players only, on real bookmaker lines. The chance uses the player's OWN game-to-game swing
+    (last 20 games), which five seasons of tests showed is honest for steady players. Streaky players get no PRA pick."""
+    out = []
+    with closing(con()) as c: rec = recent_pra(c, [p["player_id"] for p in preds])
+    for p in preds:
+        st = rec.get(p["player_id"])
+        if not st or st[0] <= 0 or st[1] / st[0] > STEADY_CV: continue
+        if p["injury"] and p["injury"].get("status") in ("Out", "Doubtful"): continue
+        if is_stale(p.get("odds_age_h")): continue
+        mean_, sd = sum(p["proj"][k] for k in ("pts", "reb", "ast")), st[1]
+        last = [r["pts"] + r["reb"] + r["ast"] for r in p.get("last10", [])]
+        if len(last) < 5 or sd <= 0: continue
+        ok = []
+        for b in (p["book"].get("pra") or []):
+            if not b.get("price"): continue
+            chance = 1 - _norm_cdf((b["line"] - mean_) / sd); hit = sum(1 for v in last if v > b["line"])
+            if chance >= STEADY_MIN_P and hit / len(last) >= 0.7: ok.append(dict(line=b["line"], p=chance, hit=hit, n=len(last), price=b["price"]))
+        if not ok: continue
+        o = max(ok, key=lambda x: x["line"])
+        if o["p"] > 0.86: continue
+        out.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat="pra", line=o["line"], side="over", p=o["p"], hit=o["hit"], n=o["n"],
+                        price=o["price"], real=True, starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"], steady_cv=st[1] / st[0]))
+    return out
 
 def best3_for_game(players):
     """The three strongest safe legs in one game, from three different players, each with the evidence behind it. Nothing for a game that has started."""
@@ -932,7 +978,10 @@ def best3_for_game(players):
     for c in cands:
         if c["player_id"] in used: continue
         used.add(c["player_id"]); p = by_id[c["player_id"]]
-        out.append(dict(c, evidence=[f"Model gives a {c['p']*100:.0f}% chance of going over {c['line']} {c['stat']}"] + _evidence(p, c["stat"], c["line"], c["p"], 1.0, 0.0, 0.0)[1:]))
+        head = (f"About {c['p']*100:.0f}% chance of going over {c['line']} PRA, using his own game-to-game swing" if c["stat"] == "pra" else f"Model gives a {c['p']*100:.0f}% chance of going over {c['line']} {c['stat']}")
+        ev = [head] + _evidence(p, c["stat"], c["line"], c["p"], 1.0, 0.0, 0.0)[1:]
+        if c.get("steady_cv") is not None: ev.append(f"Steady: his PRA swings only about {c['steady_cv']*100:.0f}% from game to game over his last 20 games")
+        out.append(dict(c, evidence=ev))
         if len(out) == 3: break
     return out
 
@@ -1067,6 +1116,50 @@ def players(q: str = "", x_code: str = Header("")):
         rm = _roster_team_map(c)
     return [dict(player_id=r["player_id"], player=r["player"], team=(rm[r["player_id"]] or "") if r["player_id"] in rm else r["team"]) for r in rows]
 
+STEADY_BOARD_MIN_GAMES = 10     # games (15+ minutes) a player needs this season before he can be ranked
+STEADY_BOARD_MIN_PRA = 20.0     # and a PRA average that makes him a main player
+STEADY_ICON_SHARE = 0.25        # an icon for a stat = among the steadiest quarter of ranked players for that stat
+_steady_cache = dict(t=0.0, data=None)
+
+def steady_board(c):
+    """Season-long steadiness for every ranked player: swing = standard deviation / average, so smaller is steadier. Icons for points, rebounds and assists
+    (steadiest quarter of ranked players in that stat), a crown for the steadiest ranked player of a team (teams with 2+ ranked players), and the league's top 3 by PRA.
+    Until 12 players have 10 games this season, last season's table is shown instead and says so."""
+    if time.time() - _steady_cache["t"] < 300 and _steady_cache["data"]: return _steady_cache["data"]
+    try: seasons = [r[0] for r in c.execute("SELECT DISTINCT season FROM player_games ORDER BY season DESC LIMIT 2")]
+    except sqlite3.OperationalError: return dict(top3=[], players={}, qualified=0)
+    rm = _roster_team_map(c)
+    def table(season, min_games):
+        df = pd.read_sql("SELECT player_id, player, team, pts, reb, ast FROM player_games WHERE season=? AND min>=15", c, params=(season,))
+        if df.empty: return None
+        df["pra"] = df.pts + df.reb + df.ast
+        g = df.groupby("player_id").agg(player=("player", "first"), team=("team", lambda x: x.mode().iat[0]), games=("pra", "size"), **{f"{k}_m": (k, "mean") for k in ("pts", "reb", "ast", "pra")},
+                                          **{f"{k}_s": (k, "std") for k in ("pts", "reb", "ast", "pra")}).reset_index()
+        g = g[(g.games >= min_games) & (g.pra_m >= STEADY_BOARD_MIN_PRA)].copy()
+        for k in ("pts", "reb", "ast", "pra"): g[k] = g[k + "_s"] / g[k + "_m"]
+        return g
+    cur = table(seasons[0], STEADY_BOARD_MIN_GAMES) if seasons else None; fallback = False; used = seasons[0] if seasons else None
+    if (cur is None or len(cur) < 12) and len(seasons) > 1:
+        old = table(seasons[1], 30)             # a whole season needs 30 games, so a long injury cannot make someone look steady
+        if old is not None and len(old): cur, fallback, used = old, True, seasons[1]
+    if cur is None or cur.empty: return dict(top3=[], players={}, qualified=0, season=used, fallback=fallback)
+    cur = cur.copy(); cur["team"] = [rm.get(pid) or t if pid in rm else t for pid, t in zip(cur.player_id, cur.team)]
+    for k in ("pts", "reb", "ast"): cur[k + "_rk"] = cur[k].rank(pct=True)
+    cur["crown"] = False
+    for team, d in cur.groupby("team"):
+        if team and len(d) >= 2: cur.loc[d.pra.idxmin(), "crown"] = True
+    players = {r.player_id: dict(icons=[k for k in ("pts", "reb", "ast") if getattr(r, k + "_rk") <= STEADY_ICON_SHARE], crown=bool(r.crown), games=int(r.games), swing=float(r.pra), avg=float(r.pra_m))
+               for r in cur.itertuples()}
+    top3 = [dict(player_id=r.player_id, player=r.player, team=r.team, **players[r.player_id]) for r in cur.sort_values("pra").head(3).itertuples()]
+    label = f"{int(used) - 1}-{str(used)[-2:]}" if str(used).isdigit() else str(used)
+    out = dict(top3=top3, players=players, qualified=int(len(cur)), season=label, fallback=fallback, min_games=(30 if fallback else STEADY_BOARD_MIN_GAMES))
+    _steady_cache.update(t=time.time(), data=out); return out
+
+@app.get("/api/steady")
+def steady(x_code: str = Header("")):
+    check(x_code)
+    with closing(con()) as c: return steady_board(c)
+
 @app.get("/api/team/{abbr}")
 def team_players(abbr: str, x_code: str = Header("")):
     """The players on one team's current roster who have played this season, most minutes first, with their season averages."""
@@ -1080,7 +1173,9 @@ def team_players(abbr: str, x_code: str = Header("")):
         marks = ",".join("?" * len(ids))
         rows = c.execute(f"""SELECT player_id, player, COUNT(*) g, AVG(min) mn, AVG(pts) pts, AVG(reb) reb, AVG(ast) ast FROM player_games
                              WHERE player_id IN ({marks}) AND season=(SELECT MAX(season) FROM player_games) AND min > 0 GROUP BY player_id ORDER BY AVG(min) DESC LIMIT 20""", ids).fetchall()
-    return [dict(player_id=r["player_id"], player=r["player"], games=r["g"], min=round(r["mn"], 1), pts=round(r["pts"], 1), reb=round(r["reb"], 1), ast=round(r["ast"], 1)) for r in rows]
+        flags = steady_board(c)["players"]
+    return [dict(player_id=r["player_id"], player=r["player"], games=r["g"], min=round(r["mn"], 1), pts=round(r["pts"], 1), reb=round(r["reb"], 1), ast=round(r["ast"], 1),
+                 icons=(flags.get(r["player_id"]) or {}).get("icons", []), crown=(flags.get(r["player_id"]) or {}).get("crown", False)) for r in rows]
 
 @app.get("/api/player/{pid}")
 def player(pid: str, x_code: str = Header("")):
