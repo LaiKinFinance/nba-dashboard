@@ -22,6 +22,7 @@ def _rolling(L):
     return L
 
 K_ELO, CARRY, HCA = 0.06, 0.5, 2.6  # tuned on pre-cut seasons; ratings are "points above average"
+MODEL_MARGIN_SHRINK = 0.8  # our own margin was ~1.3 points too confident on handicaps (2 test seasons); 80% of it made the chances exact. The market line is left as is.
 
 def elo(g):
     """Margin-based Elo, regressed toward average between seasons. Returns (pre-game expectations per game, final ratings)."""
@@ -92,7 +93,7 @@ def predict(upcoming):
             continue
         h, a = ew.get(u["home"]), ew.get(u["away"])
         if not h or not a or u["home"] not in R or u["away"] not in R: continue
-        out[u["game_id"]] = dict(margin=R[u["home"]] - R[u["away"]] + HCA, total=(h["off"] + a["dfn"] + a["off"] + h["dfn"]) / 2,
+        out[u["game_id"]] = dict(margin=MODEL_MARGIN_SHRINK * (R[u["home"]] - R[u["away"]] + HCA), total=(h["off"] + a["dfn"] + a["off"] + h["dfn"]) / 2,
                                  sigma_margin=sig["margin"], sigma_total=sig["total"], source="model", p_home_ml=None)
     return out
 

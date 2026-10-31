@@ -41,6 +41,17 @@ def injuries():
                                                     detail=i.get("shortComment", "")[:200])
     return res
 
+def injuries_full():
+    """Every ESPN injury entry with its details (body part, injury, side, expected return), for the daily injury log."""
+    js = requests.get(INJ, headers=H, timeout=30).json(); out = []
+    for t in js.get("injuries", []):
+        for i in t.get("injuries", []):
+            a = i.get("athlete") or {}; d = i.get("details") or {}
+            out.append(dict(player_id=str(a.get("id") or (a.get("links") or [{}])[0].get("href", "").split("/id/")[-1].split("/")[0] or ""), player=a.get("displayName", ""),
+                            team=(a.get("team") or {}).get("abbreviation", ""), status=i.get("status", ""), body=d.get("type", ""), injury=d.get("detail", ""),
+                            side=d.get("side", ""), return_date=d.get("returnDate", ""), note=(i.get("shortComment") or "")[:300], reported=i.get("date", "")))
+    return out
+
 def lineups():
     """{espn_team_abbr: {status, starters:[names], out:[(name,status)]}} from Rotowire (names are abbreviated)."""
     s = BeautifulSoup(requests.get(RW, headers=H, timeout=30).text, "lxml")
