@@ -76,4 +76,4 @@ def test_steady_pra_leg_can_be_one_of_a_games_best_three_with_its_evidence(monke
     monkeypatch.setattr(app, "recent_pra", lambda c, pids: {"steady": (30.0, 5.0, 20)})
     p = _steady_player("steady", [dict(line=26.5, price=1.8, p_over=.5, hit=9, n=10)]); p["last10"] = [dict(pts=15, reb=8, ast=7)] * 10
     out = app.best3_for_game([p])
-    assert len(out) == 1 and out[0]["stat"] == "pra" and any("Steady" in e for e in out[0]["evidence"]) and "own game-to-game swing" in out[0]["evidence"][0]
+    assert len(out) == 1 and out[0]["stat"] == "pra" and any("Consistent" in e for e in out[0]["evidence"]) and "own game-to-game swing" in out[0]["evidence"][0]

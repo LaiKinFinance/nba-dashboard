@@ -980,7 +980,7 @@ def best3_for_game(players):
         used.add(c["player_id"]); p = by_id[c["player_id"]]
         head = (f"About {c['p']*100:.0f}% chance of going over {c['line']} PRA, using his own game-to-game swing" if c["stat"] == "pra" else f"Model gives a {c['p']*100:.0f}% chance of going over {c['line']} {c['stat']}")
         ev = [head] + _evidence(p, c["stat"], c["line"], c["p"], 1.0, 0.0, 0.0)[1:]
-        if c.get("steady_cv") is not None: ev.append(f"Steady: his PRA swings only about {c['steady_cv']*100:.0f}% from game to game over his last 20 games")
+        if c.get("steady_cv") is not None: ev.append(f"Consistent: his PRA swings only about {c['steady_cv']*100:.0f}% from game to game over his last 20 games")
         out.append(dict(c, evidence=ev))
         if len(out) == 3: break
     return out
