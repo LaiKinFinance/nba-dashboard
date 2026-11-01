@@ -543,7 +543,8 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
     const fair=prob>=0.05&&!ls.some(l=>["pts","pra","pr","pa"].includes(l.stat))?` · model's fair price: about ${(1/prob).toFixed(2)}`:"";
     return `<div class="mute">Bookmaker price when saved: about ${bp.toFixed(2)}${fair}</div>`};
   const card=b=>{const ls=JSON.parse(b.legs),label=b.result=="won"?"Won":b.result=="lost"?"Lost":b.result=="open"?"Waiting for the games":"Not counted";
-    return `<div class="bet">${ls.map(l=>b.result=="open"?legProg(l):`<div>${legLine(l)}</div>`).join("")}${pickPrice(ls,b.model_prob)}<div class="mute" style="margin:6px 0">${esc(new Date(b.created).toLocaleString())}${b.model_prob!=null?` · estimated chance ${pct(b.model_prob)}`:""}</div>
+    const lr=(()=>{try{return JSON.parse(b.leg_results||"null")}catch(e){return null}})();
+    return `<div class="bet">${ls.map((l,i)=>b.result=="open"?legProg(l):`<div class="lg"><div>${legWho(l)}${esc(l.text||"")}<small>${legDesc(l)}</small></div><div>${legMark(lr&&lr[i])}</div></div>`).join("")}${pickPrice(ls,b.model_prob)}<div class="mute" style="margin:6px 0">${esc(new Date(b.created).toLocaleString())}${b.model_prob!=null?` · estimated chance ${pct(b.model_prob)}`:""}</div>
       <b class="${b.result=="won"?"good":b.result=="lost"?"bad":""}">${label}</b> <span class="mute">${b.manual?"marked by you":b.result=="open"?"marked when the games finish":"from the game results"}</span>
       ${!["won","lost","open"].includes(b.result)?'<div class="mute">A tied result or a player who did not play stays out of the win/loss count.</div>':""}
       ${b.result=="open"?`<div style="margin-top:8px"><button class="btn" onclick="delPick(${b.id})">Delete</button></div>`:""}
