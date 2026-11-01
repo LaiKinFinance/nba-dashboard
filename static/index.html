@@ -28,6 +28,7 @@ header{position:sticky;top:0;z-index:20;background:var(--hdr-bg);color:#fff;bord
 .brand{font-weight:800;font-size:18px;letter-spacing:.3px}.brand b{color:var(--gold)}
 nav{display:flex;gap:2px;overflow-x:auto}nav button{background:none;border:0;color:var(--hdr-mute);padding:8px 12px;border-radius:6px;font-weight:600;white-space:nowrap}
 @media(max-width:420px){nav button{padding:8px 8px}}
+#mlogo.glow{animation:lglow 1.6s ease-out 3}@keyframes lglow{0%{box-shadow:0 0 0 0 rgba(255,214,0,.85)}70%{box-shadow:0 0 0 12px rgba(255,214,0,0)}100%{box-shadow:0 0 0 0 rgba(255,214,0,0)}}
 nav button.on{background:rgba(255,255,255,.14);color:#fff}
 .who{margin-left:auto;font-size:12.5px;color:var(--hdr-mute);display:flex;gap:8px;align-items:center}.who button{background:none;border:0;color:var(--gold);padding:0 2px}
 .inst{background:var(--gold);color:#101010;border:0;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12.5px}
@@ -165,7 +166,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 </head>
 <body>
 <header><div class="hw">
-  <div class="brand" style="display:flex;align-items:center;gap:9px"><img src="/icon-v2-192.png" alt="" style="width:30px;height:30px;border-radius:7px">NBA <b>TOP-3</b></div>
+  <div class="brand" style="display:flex;align-items:center;gap:9px"><img id="mlogo" src="/icon-v2-192.png" alt="Model" title="Model: track record, how it works, MythBusters" onclick="go('model')" style="width:30px;height:30px;border-radius:7px;cursor:pointer">NBA <b>TOP-3</b></div>
   <nav id="nav"></nav>
   <div class="who"><button id="thm" onclick="toggleTheme()" title="Switch light / dark theme"></button><button class="inst" id="inst" style="display:none" onclick="installApp()">Install app</button><span id="me"></span><button onclick="showLogin()">change</button></div>
 </div></header>
@@ -174,7 +175,8 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 
 <script>
 const $=s=>document.querySelector(s);
-const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Teams"],["model","Model"]];
+const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Teams"]];      // the Model page opens from the logo
+try{if(!localStorage.seenModel)document.getElementById("mlogo").classList.add("glow")}catch(e){}      // the logo glows a few times until the Model page has been opened once
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
 let tab="best";   // the app always opens on Best picks (the home tab)
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,snaps={},alerts=[],live={};
@@ -211,7 +213,7 @@ const navSnap=()=>({tab,playerId,ptTeam,picksView,modelView});
 let navFromBack=false;
 function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.replaceState({nba:1,...s},"");
   else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView||c.modelView!=s.modelView))history.pushState({nba:1,...s},"")}catch(e){}}
-addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"how";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
+addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"track";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
 async function render(){navSync();const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
   clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip()}
 
@@ -467,22 +469,24 @@ function bankrollHTML(b){if(!b)return"";const up=b.profit>=0,col=up?"var(--good)
    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:28px;font-weight:800;color:${col}">${usd(b.balance)}</span><b style="color:${col}">${up?"+":""}${usd(b.profit)}${b.roi!=null?` (${up?"+":""}${(b.roi*100).toFixed(1)}% of money bet)`:""}</b></div>
    ${chart}<p class="mute" style="margin:6px 0 0;font-size:12.5px">${n} settled · ${b.won} won · ${b.lost} lost${b.void?` · ${b.void} void`:""}${b.waiting?` · ${b.waiting} waiting`:""}${b.no_price?` · ${b.no_price} not counted (no bookmaker price)`:""}. Pretend money, to see whether the picks would have paid.</p></details>`}
 const trackWho=x=>`${x.player_id?photo(x.player_id,x.player):""}${x.team?`<img src="${logo(x.team)}" alt="${esc(x.team)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}${esc(x.player)}${liveDot(x.game_id)}`;
-async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
-  const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
-  a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today's picks</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Track record</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
-  if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
-    $("#bbody").innerHTML=`${infoNote("tp",`Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="bestView='track';render();return false">Track record</a> for how they have done.`)}`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No picks right now. A pick only appears once a bookmaker line has been found for it, and once lineups are posted.</div>')+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
-  else{const [t,lv0]=await Promise.all([api("track"),quietLive()]),L=t.legs,C=t.combos,V=t.value;await slateP;LIVEIDS=liveSet(lv0);
+function trackSummaryHTML(t){const L=t.legs,C=t.combos;
     const gap=L.n>=20?L.won/L.n-L.avg_p:null;
     const verdict=L.n<20?`Too early to judge: about ${20-L.n} more graded picks are needed before the hit rate means much.`:gap<-0.07?"Picks are winning less often than the model expected, so its confidence has been too high.":gap>0.07?"Picks are winning more often than the model expected, so it has been cautious.":"Hit rate is close to what the model expected.";
-    $("#bbody").innerHTML=`<div class="tiles"><div class="tile"><div class="v">${L.n?pc0(L.won/L.n):"–"}</div><div class="k">Legs won (${L.won} of ${L.n}${L.pending?`, ${L.pending} pending`:""})</div></div>
+      return `<div class="tiles"><div class="tile"><div class="v">${L.n?pc0(L.won/L.n):"–"}</div><div class="k">Legs won (${L.won} of ${L.n}${L.pending?`, ${L.pending} pending`:""})</div></div>
       <div class="tile"><div class="v">${pc0(L.avg_p)}</div><div class="k">Model expected</div></div>
       <div class="tile"><div class="v">${C.n?C.won+"/"+C.n:"–"}</div><div class="k">Daily combos won${C.n?` (model expected ${pc0(C.avg_p)})`:""}</div></div></div>
      ${bankrollHTML(t.bankroll)}<details class="card" ${trkOpen("tells")?"open":""} ontoggle="trkSet('tells',this.open)"><summary class="csum">What this tells us</summary><p style="margin:0">${verdict}</p>
-      <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></details>
-     ${t.days.length?t.days.map((d,di)=>{const all=[...d.legs,...d.value],w=all.filter(x=>x.result=="won").length,l=all.filter(x=>x.result=="lost").length,wt=all.filter(x=>x.result==null).length;return `<details class="card" ${foldOpen("day_"+d.day,di==0)?"open":""} ontoggle="foldSet('day_${d.day}',this.open)"><summary class="csum" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} <span class="mute" style="font-weight:400;font-size:13px">· ${w} won · ${l} lost${wt?` · ${wt} waiting`:""}</span></span>${d.combo?`<span style="font-weight:400;font-size:14px">Daily combo: ${resIcon(d.combo.result)}</span>`:""}</summary>
+      <p class="mute" style="margin:8px 0 0">Every pick is recorded before the game and never edited. This log is how we find out if the model is any good, and it is the data used to improve it.</p></details>`}
+async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
+  const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
+  a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Yesterday</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
+  if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
+    $("#bbody").innerHTML=`${infoNote("tp",`Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="modelView='track';go('model');return false">Track record</a> (tap the logo) for how they have done.`)}`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No picks right now. A pick only appears once a bookmaker line has been found for it, and once lineups are posted.</div>')+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
+  else{const [t,lv0]=await Promise.all([api("track"),quietLive()]);await slateP;LIVEIDS=liveSet(lv0);
+    const days=t.days.filter(d=>[...d.legs,...d.value].some(x=>x.result!=null));      // only days with results: today's waiting picks belong on Today
+    $("#bbody").innerHTML=`${days.length?days.map((d,di)=>{const all=[...d.legs,...d.value],w=all.filter(x=>x.result=="won").length,l=all.filter(x=>x.result=="lost").length,wt=all.filter(x=>x.result==null).length;return `<details class="card" ${foldOpen("day_"+d.day,di==0)?"open":""} ontoggle="foldSet('day_${d.day}',this.open)"><summary class="csum" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} <span class="mute" style="font-weight:400;font-size:13px">· ${w} won · ${l} lost${wt?` · ${wt} waiting`:""}</span></span>${d.combo?`<span style="font-weight:400;font-size:14px">Daily combo: ${resIcon(d.combo.result)}</span>`:""}</summary>
         ${d.legs.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}
-        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${trackWho(x)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</details>`}).join(""):'<div class="card empty">Nothing recorded yet. Picks start being logged from the first time you open Today\'s picks.</div>'}`;
+        ${d.value.length?`<div class="mute" style="margin-top:8px">Value bets</div>`+d.value.map(x=>`<div class="lg"><div>${trackWho(x)}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · price ${x.price?x.price.toFixed(2):"–"} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join(""):""}</details>`}).join(""):'<div class="card empty">No finished picks yet. Results appear here the morning after the games.</div>'}`;
     dotTimer()}}
 
 /* ---------- friends' picks ---------- */
@@ -561,7 +565,7 @@ async function teamPageHTML(t){let rows=[];try{rows=await api("team/"+t)}catch(e
   return `<div style="display:flex;align-items:center;gap:10px;margin:0 0 10px"><button class="btn" onclick="ptTeam=null;render()">← All teams</button><img src="${logo(t)}" alt="" style="width:30px;height:30px"><b style="font-size:17px">${NAMES[t]||t}</b>${LG.some(g=>g.state=="in"&&(g.home.team==t||g.away.team==t))?'<span class="live-dot" title="Playing now"></span>':""}</div>`+
     (rows.length?`<div class="card" style="padding:4px 10px"><table class="t tm2"><tr><th style="text-align:left">Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th></tr>${rows.map(r=>`<tr onclick="go('players','${esc(r.player_id)}')" style="cursor:pointer"><td style="text-align:left"><div style="display:flex;align-items:center;gap:8px;min-width:0">${photo(r.player_id,r.player,"s")}<div style="min-width:0"><b style="overflow-wrap:anywhere">${esc(r.player)}</b>${steadyIcons(r.icons,r.crown)}<div class="mute" style="font-size:11px;font-weight:400">${r.games} games</div></div></div></td><td>${r.min}</td><td>${r.pts}</td><td>${r.reb}</td><td>${r.ast}</td></tr>`).join("")}</table></div><p class="mute" style="margin:6px 0 0;font-size:12.5px">Season averages. Tap a player for his recent games.</p>`:'<div class="card empty">No players found for this team yet.</div>')}
 /* ---------- Model tab: what the model uses, and what we tested (plain words) ---------- */
-let modelView="how";
+let modelView="track";
 const MODEL_HOW=[
  ["Recent form","His averages over his last 5, 10 and 20 games, and over all the games we have for him. Recent games count more, but one big night can't swing it.",[]],
  ["Minutes","How many minutes he usually plays and how much that jumps around. Minutes drive everything else.",["A sharper minutes guess was tested: it did not make the final chances better, so it was not added."]],
@@ -594,10 +598,13 @@ const MODEL_MYTHS=[
 const mvBadge=v=>`<span class="chip ${v=="Confirmed"?"s":v=="Busted"?"i":"q"}" style="margin-left:6px">${esc(v)}</span>`;
 function modelCard(k,title,head,body){return `<details class="card" ${foldOpen(k,false)?"open":""} ontoggle="foldSet('${k}',this.open)"><summary class="csum">${head}</summary>${body}</details>`}
 function setModelView(v){modelView=v;render()}
+const modelSeg=()=>`<div class="seg" style="margin:0 0 12px">${[["track","Track record"],["how","How it works"],["myth","MythBusters"]].map(([k,l])=>`<button class="${modelView==k?"on":""}" onclick="setModelView('${k}')">${l}</button>`).join("")}</div>`;
 async function modelTab(a){
   const how=MODEL_HOW.map(([t,d,pts],i)=>modelCard("m_h"+i,t,esc(t),`<p style="margin:0 0 6px">${esc(d)}</p>${pts.length?`<ul class="why">${pts.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}`)).join("");
   const myth=MODEL_MYTHS.map(([t,v,q,how,found,did],i)=>modelCard("m_m"+i,t,`${esc(t)}${mvBadge(v)}`,`<p style="margin:0 0 6px"><b>Question:</b> ${esc(q)}</p><p style="margin:0 0 6px"><b>How we tested:</b> ${esc(how)}</p><b>What we found:</b><ul class="why">${found.map(x=>`<li>${esc(x)}</li>`).join("")}</ul><p style="margin:6px 0 0"><b>What we did:</b> ${esc(did)}</p><p class="mute" style="margin:6px 0 0;font-size:12px">Tested Oct 2026</p>`)).join("");
-  a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${modelView=="how"?"on":""}" onclick="setModelView('how')">How it works</button><button class="${modelView=="myth"?"on":""}" onclick="setModelView('myth')">MythBusters</button></div>`+
+  try{localStorage.seenModel="1"}catch(e){};const lg=$("#mlogo");if(lg)lg.classList.remove("glow");
+  if(modelView=="track"){a.innerHTML=modelSeg()+'<p class="mute">Loading…</p>';const t=await api("track");a.innerHTML=modelSeg()+trackSummaryHTML(t);return}
+  a.innerHTML=modelSeg()+
    (modelView=="how"?`<p class="mute" style="margin:0 0 8px">What the model looks at to predict each player's points, rebounds and assists. Tap a card to open it.</p>${how}`:`<p class="mute" style="margin:0 0 8px">Ideas we tested on past seasons. Busted = no real effect · Too small to matter = real but tiny · Confirmed = real and acted on.</p>${myth}`)}
 
 async function players(a){
