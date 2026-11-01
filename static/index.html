@@ -118,7 +118,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--acc);font-size:13.5px
 .thr{position:absolute;left:0;right:0;border-top:2px dashed var(--gold);pointer-events:none}
 .step{display:flex;align-items:center;gap:8px}.step button{width:34px;height:34px;border-radius:50%;font-size:18px;padding:0}
 .srch{position:relative}.res{position:absolute;left:0;right:0;top:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;z-index:10;max-height:300px;overflow:auto}.res div{padding:9px 12px;cursor:pointer;display:flex;gap:10px;align-items:center}.res div:hover{background:var(--card2)}
-.modal{position:fixed;inset:0;background:rgba(5,9,16,.85);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}.modal .card{max-width:380px;width:100%}
+.modal .card.wel{max-height:86vh;overflow:auto}.modal{position:fixed;inset:0;background:rgba(5,9,16,.85);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}.modal .card{max-width:380px;width:100%}
 .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1 1 280px}
 .foot{font-size:12px;color:var(--mute);margin-top:6px}
 .sec{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
@@ -210,6 +210,21 @@ function showLogin(msg){$("#modal").innerHTML=`<div class="modal"><form class="c
   <label class="mute">Your name</label><input class="inp" id="ln" value="${esc(localStorage.user||"")}" autocomplete="nickname" style="margin:4px 0 10px">
   <label class="mute">Access code</label><input class="inp" id="lc" value="${esc(localStorage.code||"")}" autocomplete="off" style="margin:4px 0 14px"><button class="btn p" style="width:100%">Continue</button></form></div>`;setTimeout(()=>$("#ln").focus(),50)}
 function saveLogin(e){e.preventDefault();const n=$("#ln").value.trim(),c=$("#lc").value.trim();if(n.length<2){return}localStorage.user=n;localStorage.code=c;location.reload()}
+/* ---------- welcome: shown once on each phone, and kept as "About this app" on the Model page ---------- */
+const welcomeBody=()=>`<p style="margin:0 0 10px">This app predicts how NBA players will do in tonight's games.</p>
+  <b>How it works</b><ul class="why" style="margin:4px 0 10px">
+  <li>A computer model studies every player's recent games, minutes, opponent and which teammates are out, then estimates their points, rebounds and assists and the chance they go over a number.</li>
+  <li>Each night it shows the safest picks, only for players who usually hit the number, and only on lines a real bookmaker is offering.</li>
+  <li>Every pick is saved before tip-off and marked won or lost automatically after the game, so you can always see how the app is really doing.</li></ul>
+  <b>What you can do</b><ul class="why" style="margin:4px 0 10px">
+  <li><b>Best picks</b>: today's top picks and yesterday's results.</li>
+  <li><b>Games</b>: live scores, lineups and the best 3 picks for each game.</li>
+  <li><b>Picks</b>: save your own picks and compare with friends.</li>
+  <li><b>Teams</b>: rosters, player averages and the most consistent players.</li>
+  <li><b>Tap the logo</b>: the app's track record and how the model works.</li></ul>
+  <p class="mute" style="margin:0">A prediction app for fun. No real money is involved.</p>`;
+function showWelcome(){$("#modal").innerHTML=`<div class="modal"><div class="card wel"><h2 style="display:flex;align-items:center;gap:10px;margin-top:0"><img src="/icon-v2-192.png" alt="" style="width:30px;height:30px;border-radius:7px">Welcome to NBA Dashboard</h2>${welcomeBody()}<button class="btn p" style="width:100%;margin-top:14px" onclick="closeWelcome()">Let's go</button></div></div>`}
+function closeWelcome(){try{localStorage.welcomed="1"}catch(e){}$("#modal").innerHTML=""}
 function needName(){if(!localStorage.user){showLogin();return false}return true}
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct=x=>x==null?"–":(x*100).toFixed(x<0.1?1:0)+"%";
@@ -622,7 +637,8 @@ function modelCard(k,title,head,body){return `<details class="card" ${foldOpen(k
 function setModelView(v){modelView=v;render()}
 const modelSeg=()=>`<div class="seg" style="margin:0 0 12px">${[["track","Track record"],["how","How it works"],["myth","MythBusters"]].map(([k,l])=>`<button class="${modelView==k?"on":""}" onclick="setModelView('${k}')">${l}</button>`).join("")}</div>`;
 async function modelTab(a){
-  const how=MODEL_HOW.map(([t,d,pts],i)=>modelCard("m_h"+i,t,esc(t),`<p style="margin:0 0 6px">${esc(d)}</p>${pts.length?`<ul class="why">${pts.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}`)).join("");
+  const about=`<details class="card" ${foldOpen("m_about",true)?"open":""} ontoggle="foldSet('m_about',this.open)"><summary class="csum">About this app</summary>${welcomeBody()}</details>`;
+  const how=about+MODEL_HOW.map(([t,d,pts],i)=>modelCard("m_h"+i,t,esc(t),`<p style="margin:0 0 6px">${esc(d)}</p>${pts.length?`<ul class="why">${pts.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}`)).join("");
   const myth=MODEL_MYTHS.map(([t,v,q,how,found,did],i)=>modelCard("m_m"+i,t,`${esc(t)}${mvBadge(v)}`,`<p style="margin:0 0 6px"><b>Question:</b> ${esc(q)}</p><p style="margin:0 0 6px"><b>How we tested:</b> ${esc(how)}</p><b>What we found:</b><ul class="why">${found.map(x=>`<li>${esc(x)}</li>`).join("")}</ul><p style="margin:6px 0 0"><b>What we did:</b> ${esc(did)}</p><p class="mute" style="margin:6px 0 0;font-size:12px">Tested Oct 2026</p>`)).join("");
   try{localStorage.seenModel="1"}catch(e){};const lg=$("#mlogo");if(lg)lg.classList.remove("glow");
   if(modelView=="track"){a.innerHTML=modelSeg()+'<p class="mute">Loading…</p>';const t=await api("track");a.innerHTML=modelSeg()+trackSummaryHTML(t);return}
@@ -785,7 +801,7 @@ if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this 
 (async()=>{paintTheme();$("#me").textContent=localStorage.user||"Sign in";nav();
   if(!localStorage.user){showLogin()}
   try{meta=await api("meta")}catch(e){}
-  render().finally(()=>endIntro())})();
+  render().finally(()=>{endIntro();if(localStorage.user&&!localStorage.welcomed)setTimeout(showWelcome,1100)})})();
 </script>
 </body>
 </html>
