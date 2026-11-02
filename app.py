@@ -1450,7 +1450,24 @@ def scorecard(x_code: str = Header("")):
     with closing(con()) as c:
         try: teams = {r[0]: r[1] for r in c.execute("SELECT player_id, team FROM rosters WHERE team IS NOT NULL") if r[0] in pids} if pids else {}
         except sqlite3.OperationalError: pass            # no roster table yet: pages then show the player without a team badge
-    return dict(users=sorted(users.values(), key=lambda u: u["user"].casefold()), bets=shown, teams=teams)
+        tg = {l.get("game_id") for b in shown for l in _safe(lambda: json.loads(b["legs"])) or [] if l.get("stat") in TEAM_STATS}
+        gt = _safe(lambda: game_teams(c, tg)) or {}
+    return dict(users=sorted(users.values(), key=lambda u: u["user"].casefold()), bets=shown, teams=teams, game_teams=gt)
+
+TEAM_STATS = ("ml", "spread", "total", "tt", "band")
+
+def game_teams(c, gids):
+    """{game_id: {home, away}} for team picks (to win, handicap, totals), from saved games first, then today's projections."""
+    gids = {g for g in gids if g}; out = {}
+    if not gids: return out
+    marks = ",".join("?" * len(gids))
+    try:
+        for r in c.execute(f"SELECT game_id, home, away FROM games WHERE game_id IN ({marks})", list(gids)): out[r[0]] = dict(home=r[1], away=r[2])
+    except sqlite3.OperationalError: pass
+    for p in projections_all():
+        if p.get("game_id") in gids and p["game_id"] not in out and p.get("team") and p.get("opp"):
+            out[p["game_id"]] = dict(home=p["team"], away=p["opp"]) if p.get("home") else dict(home=p["opp"], away=p["team"])
+    return out
 
 def _game_start(c, game_id):
     """Tip-off time of a game (stored games first, then today's projections); None when it cannot be found."""
@@ -1577,6 +1594,7 @@ def picks(x_code: str = Header("")):
             p["legs"] = json.loads(p["legs"]); p["result"] = p.get("result") or "open"; p["leg_results"] = _safe(lambda: json.loads(p["leg_results"])) if p.get("leg_results") else None
             for l in p["legs"]:                                           # a team badge next to each player pick
                 if l.get("player_id") and not l.get("team") and rm.get(l["player_id"]): l["team"] = rm[l["player_id"]]
+            p["game_teams"] = _safe(lambda: game_teams(c, {l.get("game_id") for l in p["legs"] if l.get("stat") in TEAM_STATS})) or {}
             p["comments"] = [dict(r) for r in c.execute("SELECT * FROM comments WHERE pick_id=? ORDER BY id", (p["id"],))]
             v = c.execute("SELECT coalesce(sum(v),0) s, count(*) n FROM votes WHERE pick_id=?", (p["id"],)).fetchone(); p["score"], p["voters"] = v["s"], v["n"]
     return ps

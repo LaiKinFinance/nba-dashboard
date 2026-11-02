@@ -555,15 +555,15 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
     dotTimer()}}
 
 /* ---------- friends' picks ---------- */
-const boardRows=(rows,fmt)=>rows.length?rows.map((r,i)=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>${i+1}. ${esc(r.user)}</span><b>${fmt(r)}</b></div>`).join(""):'<p class="mute" style="margin:2px 0">Nobody yet</p>';
-function leaderboardHTML(lb){const top=(lb.most_won||[])[0];return `<details class="card" ${foldOpen("board",false)?"open":""} ontoggle="foldSet('board',this.open)"><summary class="csum">Leaderboard${top?` <span class="mute" style="font-weight:400;font-size:13px">· ${esc(top.user)} leads with ${top.won} won</span>`:""}</summary>
-  <h3 style="margin-top:0">Most picks won</h3>${boardRows(lb.most_won,r=>`${r.won} won`)}
+const boardRows=(rows,fmt,crown)=>rows.length?rows.map((r,i)=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span>${i+1}. ${esc(r.user)}${crown&&i==0?" 👑":""}</span><b>${fmt(r)}</b></div>`).join(""):'<p class="mute" style="margin:2px 0">Nobody yet</p>';
+function leaderboardHTML(lb){const top=(lb.most_won||[])[0];return `<details class="card" ${foldOpen("board",false)?"open":""} ontoggle="foldSet('board',this.open)"><summary class="csum">Leaderboard${top?` <span class="mute" style="font-weight:400;font-size:13px">· 👑 ${esc(top.user)} leads with ${top.won} won</span>`:""}</summary>
+  <h3 style="margin-top:0">Most picks won</h3>${boardRows(lb.most_won,r=>`${r.won} won`,true)}
   <h3>Hardest pick won</h3>${boardRows(lb.hardest,r=>`won a ${pct(r.chance)} pick`)}
   <h3>Biggest price won <span class="mute">(bookmaker price when saved, about)</span></h3>${boardRows(lb.biggest_price||[],r=>`won at about ${r.price.toFixed(2)}`)}
   <h3>% of picks won <span class="mute">(after ${lb.min_picks} finished picks)</span></h3>${boardRows(lb.rate,r=>`${pct(r.rate)} · ${r.picks} picks`)}</details>`}
 const sharedResult=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Not counted</span>':'<span class="mute">Waiting for the games</span>';
 const legMark=r=>r=="won"?'<b class="good">✔</b>':r=="lost"?'<b class="bad">✖</b>':'<span class="mute">–</span>';
-async function friendsPicks(a){const [ps,lb,lv0]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null),quietLive()]);LIVEIDS=liveSet(lv0);
+async function friendsPicks(a){const [ps,lb,lv0]=await Promise.all([api("picks"),api("leaderboard").catch(()=>null),quietLive()]);LIVEIDS=liveSet(lv0);ps.forEach(p=>{GT={...GT,...(p.game_teams||{})}});
   a.innerHTML=(lb?leaderboardHTML(lb):"")+(ps.length?ps.map(p=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><b>${esc(p.user)}</b> <span class="mute">${new Date(p.created).toLocaleString()}</span></span>${sharedResult(p.result)}</div>
    ${p.legs.map((l,i)=>`<div class="lg"><div>${legWho(l)}${esc(l.text||"")}${liveDot(l.game_id)}<small>${legDesc(l)}</small></div>${p.leg_results&&p.leg_results[i]?`<div>${legMark(p.leg_results[i])}</div>`:""}</div>`).join("")}
    <div class="mute" style="margin:6px 0">${p.odds?`Odds ${esc(p.odds)} · `:""}${p.model_prob!=null?`Model chance ${pct(p.model_prob)}`:""}</div>${p.note?`<p>${esc(p.note)}</p>`:""}
@@ -580,7 +580,7 @@ async function delPick(id){if(!confirm("Delete this pick? It cannot be brought b
 function setPicksView(v){picksView=v;render()}
 async function picksTab(a){a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${picksView=="mine"?"on":""}" onclick="setPicksView('mine')">Mine</button><button class="${picksView=="friends"?"on":""}" onclick="setPicksView('friends')">Friends</button></div><div id="pkbody"><p class="mute">Loading…</p></div>`;
   await (picksView=="mine"?bets:friendsPicks)($("#pkbody"))}
-async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.teams||{};
+async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.teams||{};GT={...GT,...(s.game_teams||{})};
   const mine=s.bets.filter(b=>b.user==me),open=mine.filter(b=>b.result=="open"),done=mine.filter(b=>b.result!="open");
   const u=s.users.find(x=>x.user==me)||{bets:0,settled:0,wins:0,losses:0};
   const pickPrice=(ls,prob)=>{const bp=ls.length&&ls.every(l=>l.price)?ls.reduce((a,l)=>a*l.price,1):null;if(!bp)return"";
@@ -589,7 +589,7 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
   const card=b=>{const ls=JSON.parse(b.legs),label=b.result=="won"?"Won":b.result=="lost"?"Lost":b.result=="open"?"Waiting for the games":"Not counted";
     const lr=(()=>{try{return JSON.parse(b.leg_results||"null")}catch(e){return null}})();
     return `<div class="bet">${ls.map((l,i)=>b.result=="open"?legProg(l):`<div class="lg"><div>${legWho(l)}${esc(l.text||"")}<small>${legDesc(l)}</small></div><div>${legMark(lr&&lr[i])}</div></div>`).join("")}${pickPrice(ls,b.model_prob)}<div class="mute" style="margin:6px 0">${esc(new Date(b.created).toLocaleString())}${b.model_prob!=null?` · estimated chance ${pct(b.model_prob)}`:""}</div>
-      <b class="${b.result=="won"?"good":b.result=="lost"?"bad":""}">${label}</b> <span class="mute">${b.manual?"marked by you":b.result=="open"?"marked when the games finish":"from the game results"}</span>
+      <b class="${b.result=="won"?"good":b.result=="lost"?"bad":""}">${label}</b>${b.result=="open"?"":` <span class="mute">${b.manual?"marked by you":"from the game results"}</span>`}
       ${!["won","lost","open"].includes(b.result)?'<div class="mute">A tied result or a player who did not play stays out of the win/loss count.</div>':""}
       ${b.result=="open"?`<div style="margin-top:8px"><button class="btn" onclick="delPick(${b.id})">Delete</button></div>`:""}
       </div>`};
@@ -733,7 +733,7 @@ function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.s
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
   return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+boxHTML(g):""}</div></div>`}
 function legNow(l){const b=boxes[l.game_id];if(!b)return null;for(const t of b.teams){const r=t.players.find(p=>p.player_id==l.player_id);if(r)return r}return null}
-function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=esc(l.text||"");
+function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=teamLegLogos(l)+esc(l.text||"");
   if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
   if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
   const hm=g.home.score-g.away.score,tot=g.home.score+g.away.score;let hit,txt,frac;
@@ -768,7 +768,10 @@ function playerLegProgress(l,r){
   return{cur,tgt,hit,level,txt,percent:Math.max(0,Math.min(100,progress*100))};
 }
 // END playerLegProgress
-const legWho=l=>{const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(PT[l.player_id]||"")).toUpperCase();
+let GT={};const teamLogo=t=>`<img src="${logo(t)}" alt="${esc(t)}" style="width:22px;height:22px;vertical-align:middle;margin:0 6px 0 0">`;
+const teamLegLogos=l=>{const g=GT[l.game_id]||(()=>{const s=gameIdx[l.game_id];if(!s)return null;const t=Object.values(s.teams||{});const h=t.find(x=>x.home),a=t.find(x=>!x.home);return h&&a?{home:h.team,away:a.team}:null})();
+  if(!g)return"";if(l.stat=="total")return teamLogo(g.away)+teamLogo(g.home);const side=l.stat=="tt"||l.stat=="band"?l.team:l.side;return side=="home"||side=="away"?teamLogo(g[side]):""};      // team picks show the team's logo; a game total shows both
+const legWho=l=>{if(["ml","spread","total","tt","band"].includes(l.stat))return teamLegLogos(l);const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(PT[l.player_id]||"")).toUpperCase();
   return `${l.player_id?photo(l.player_id,l.text||""):""}${t?`<img src="${logo(t)}" alt="${esc(t)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}`};
 // a bar with a tick for every unit (every 5 or 10 when the target is big) and the numbers underneath, so "6 or 7 rebounds" can be read at a glance
 function ticksBar(cur,tgt,hit,compact=false){tgt=Math.max(1,Math.round(tgt));const pct=Math.max(0,Math.min(100,cur/tgt*100)),step=tgt<=12?1:tgt<=30?5:10;let tk="",lb="";
