@@ -13,9 +13,11 @@ def test_lean_rounds_numbers_without_touching_the_original():
     assert out == dict(p=0.880842, n=10, xs=[0.123457, None], nested=dict(v=1.0)) and src["p"] == 0.8808422703731392
 
 def test_lean_player_drops_unused_fields_and_keeps_the_original():
-    p = dict(player_id="1", ladders={"pts": []}, alphas={}, strip={"pts": [dict(p_over=0.123456789)]}, team="NO")
+    p = dict(player_id="1", ladders={"pts": []}, alphas={}, combo={"pra": {}}, strip={"pts": [dict(p_over=0.123456789, price=1.9), dict(p_over=0.5)]},
+             book={"pts": [1], "dd": {"price": 3.0}}, team="NO")
     out = app._lean_player(p)
-    assert "ladders" not in out and "alphas" not in out and out["strip"]["pts"][0]["p_over"] == 0.123457 and "ladders" in p
+    assert "ladders" not in out and "alphas" not in out and "combo" not in out and out["strip"]["pts"] == [dict(p_over=0.123457, price=1.9)] and "ladders" in p
+    assert out["book"] == {"dd": {"price": 3.0}} and len(p["strip"]["pts"]) == 2          # only bookmaker lines are sent; the original is untouched
 
 def test_ping_needs_nothing():
     assert TestClient(app.app).get("/api/ping").json() == {"ok": True}

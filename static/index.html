@@ -202,10 +202,13 @@ const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:
 let tab="best";   // the app always opens on Best picks (the home tab)
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,snaps={},alerts=[],live={};
 const hdr=()=>({"Content-Type":"application/json","X-User":localStorage.user||"","X-Code":localStorage.code||""});
-async function api(p,o={}){const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});
+const TIMES=[];const tnote=(p,ms)=>{if(TIMES.length<60)TIMES.push({p,ms:Math.round(ms)})};
+setInterval(()=>{if(!TIMES.length||!localStorage.code&&!localStorage.user)return;const t=TIMES.splice(0);fetch("/api/timing",{method:"POST",headers:hdr(),body:JSON.stringify({t})}).catch(()=>{})},20e3);      // page timings, so slowness can be measured
+async function api(p,o={}){const t0=performance.now();const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});if(!o.method)tnote(p.split("/")[0],performance.now()-t0);
   if(r.status==401){showLogin("That access code isn't right. Try again.");throw"auth"}
   if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||"Something went wrong");throw e}return r.json()}
 const post=(p,b)=>api(p,{method:"POST",body:JSON.stringify(b)});
+const memo={};const apiMemo=(p,ms=30e3)=>{const m=memo[p];if(m&&Date.now()-m.t<ms)return m.v;const v=api(p);memo[p]={t:Date.now(),v};v.catch(()=>{delete memo[p]});return v};      // switching back to a tab within 30 s shows what was just loaded
 function showLogin(msg){$("#modal").innerHTML=`<div class="modal"><form class="card" onsubmit="saveLogin(event)"><h2>Welcome</h2>${msg?`<p class="bad">${msg}</p>`:`<p class="mute">Enter your name (shown on your picks) and the access code you were given.</p>`}
   <label class="mute">Your name</label><input class="inp" id="ln" value="${esc(localStorage.user||"")}" autocomplete="nickname" style="margin:4px 0 10px">
   <label class="mute">Access code</label><input class="inp" id="lc" value="${esc(localStorage.code||"")}" autocomplete="off" style="margin:4px 0 14px"><button class="btn p" style="width:100%">Continue</button></form></div>`;setTimeout(()=>$("#ln").focus(),50)}
@@ -250,8 +253,8 @@ let navFromBack=false;
 function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.replaceState({nba:1,...s},"");
   else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView||c.modelView!=s.modelView))history.pushState({nba:1,...s},"")}catch(e){}}
 addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"track";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
-async function render(){navSync();const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
-  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip()}
+async function render(){navSync();const T0=performance.now(),T_TAB=tab+(tab=="best"?"/"+bestView:"");const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
+  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip();tnote("tab:"+T_TAB,performance.now()-T0)}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -316,9 +319,9 @@ setInterval(pollStatus,180000);
 
 /* ---------- games tab ---------- */
 let lastLoad=Date.now();
-async function loadSlate(){slate=await api("slate");lastLoad=Date.now()}
+async function loadSlate(force){if(!force&&slate.length&&Date.now()-lastLoad<60e3)return;slate=await api("slate");lastLoad=Date.now()}      // reuse the games data for a minute instead of downloading it on every tab change
 const oldAt=iso=>!!iso&&(Date.now()-new Date(iso).getTime())/36e5>8;     // price older than 8 hours, re-checked every time the page draws
-setInterval(()=>{if(document.visibilityState!="visible"||Date.now()-lastLoad<5*60e3)return;if(tab=="today")loadSlate().then(()=>drawGames()).catch(()=>{});else if(tab=="best"&&!legs.length)render()},60e3);
+setInterval(()=>{if(document.visibilityState!="visible"||Date.now()-lastLoad<5*60e3)return;if(tab=="today")loadSlate(true).then(()=>drawGames()).catch(()=>{});else if(tab=="best"&&!legs.length)render()},60e3);
 function hitTxt(h,n){if(!n)return"";const c=h/n>=.8?"hg":h/n<=.3?"hb":"";return `<span class="${c}">${h}/${n}</span>`}
 function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
   const val=o.price&&!o.stale&&!oldAt(p.odds_at)&&!o.no_claim&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
@@ -518,9 +521,9 @@ function trackSummaryHTML(t){const L=t.legs,C=t.combos;
 async function bestTab(a){const slateP=loadSlate();     // load the games list alongside the picks instead of before them
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
   a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Yesterday</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
-  if(bestView=="today"){const [b,v,lv0]=await Promise.all([api("best"),api("value"),quietLive(),slateP]);best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
+  if(bestView=="today"){const [b,v,lv0]=await Promise.all([apiMemo("best"),apiMemo("value"),quietLive(),slateP]);best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
     $("#bbody").innerHTML=`${infoNote("tp",`Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="modelView='track';go('model');return false">Track record</a> (tap the logo) for how they have done.`)}`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No picks right now. A pick only appears once a bookmaker line has been found for it, and once lineups are posted.</div>')+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
-  else{const [t,lv0]=await Promise.all([api("track"),quietLive()]);await slateP;LIVEIDS=liveSet(lv0);
+  else{const [t,lv0]=await Promise.all([apiMemo("track",60e3),quietLive()]);await slateP;LIVEIDS=liveSet(lv0);
     const days=t.days.filter(d=>[...d.legs,...d.value].some(x=>x.result!=null));      // only days with results: today's waiting picks belong on Today
     $("#bbody").innerHTML=`${days.length?days.map((d,di)=>{const all=[...d.legs,...d.value],w=all.filter(x=>x.result=="won").length,l=all.filter(x=>x.result=="lost").length,wt=all.filter(x=>x.result==null).length;return `<details class="card" ${foldOpen("day_"+d.day,di==0)?"open":""} ontoggle="foldSet('day_${d.day}',this.open)"><summary class="csum" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} <span class="mute" style="font-weight:400;font-size:13px">· ${w} won · ${l} lost${wt?` · ${wt} waiting`:""}</span></span>${d.combo?`<span style="font-weight:400;font-size:14px">Daily combo: ${resIcon(d.combo.result)}</span>`:""}</summary>
         ${d.legs.map(x=>`<div class="lg"><div>${trackWho(x)}${x.in_combo?' <span class="chip s">In combo</span>':""}<small>${legDesc({stat:x.stat,line:x.line,side:x.side})} · model ${pc0(x.p)}${x.actual!=null?` · actual ${x.actual}`:""}</small></div><div>${resIcon(x.result)}</div></div>`).join("")}

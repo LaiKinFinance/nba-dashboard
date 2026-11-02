@@ -666,7 +666,11 @@ def _lean(x):
     return x
 
 def _lean_player(p):
-    return {k: _lean(v) for k, v in p.items() if k not in _SLATE_DROP}
+    """What the page needs for one player. Lines no bookmaker offers are not shown, so they are not sent (they were most of the download)."""
+    out = {k: _lean(v) for k, v in p.items() if k not in _SLATE_DROP and k not in ("strip", "book", "combo")}      # a player's "combo" chances are never read by the page
+    out["strip"] = {s: [_lean(o) for o in L if o.get("price")] for s, L in (p.get("strip") or {}).items()}
+    out["book"] = {s: _lean(v) for s, v in (p.get("book") or {}).items() if s in ("dd", "td")}
+    return out
 
 @app.get("/api/slate")
 def get_slate(x_code: str = Header("")):
@@ -1439,6 +1443,22 @@ def _any_started(c, legs):
     """True when a game in the pick is known to have started. A pick can be neither saved nor removed once play has begun."""
     return any(_game_start(c, l.get("game_id")) and has_started(_game_start(c, l.get("game_id"))) for l in legs if l.get("game_id"))
 
+PHONE_TIMES = deque(maxlen=400)     # how long pages took on people's phones (path, milliseconds, time), so slowness can be measured, not guessed
+
+@app.post("/api/timing")
+def phone_timing(body: dict = Body(...), x_code: str = Header("")):
+    check(x_code)
+    now = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
+    for e in (body.get("t") or [])[:50]:
+        try: PHONE_TIMES.append((str(e["p"])[:40], int(e["ms"]), now))
+        except Exception: pass
+    return {"ok": True}
+
+def phone_speed():
+    by = {}
+    for p, ms, _ in PHONE_TIMES: by.setdefault(p, []).append(ms)
+    return {p: dict(n=len(v), median_ms=int(np.median(v)), worst_ms=max(v)) for p, v in sorted(by.items())}
+
 @app.post("/api/bets")
 def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)
@@ -1683,6 +1703,6 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED))
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), phones=phone_speed(), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
