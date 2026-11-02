@@ -915,10 +915,10 @@ def value_picks(x_code: str = Header("")):
     return res
 
 _calc, _calc_lock = {}, threading.Lock()
-def cached_calc(name, fn):
+def cached_calc(name, fn, extra=None):
     """Best picks and Value bets are worked out once per change of data (or per minute, like enriched()) and shared by every request,
     instead of each tab and each pick log recomputing both. One at a time, so two tabs opening together never do the same work twice."""
-    k = _enriched_key(); hit = _calc.get(name)
+    k = (_enriched_key(), extra); hit = _calc.get(name)
     if hit and (hit[0] == k or _serve_last()):
         if hit[0] != k: _warm_evt.set()
         return hit[1]
@@ -934,6 +934,7 @@ def _warmer():
         _warm_evt.wait(30); _warm_evt.clear()
         try:
             t = time.time(); enriched(); cached_calc("best", compute_best); cached_calc("value", compute_value); cached_calc("slate", _slate_bytes)
+            if _lu_cache["data"]: cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])
             SPEED.update(warm_s=round(time.time() - t, 2), warm_at=dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S"))
         except Exception: logging.exception("warm-up failed")
 
@@ -1175,6 +1176,9 @@ def lineups_tab(x_code: str = Header("")):
             try: fetch()
             except Exception:
                 logging.exception("lineups fetch failed"); raise HTTPException(502, "Lineups are temporarily unavailable")
+    return cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])     # matched once per new lineups or data change, shared by every phone
+
+def _lineups_build():
     with closing(con()) as c:
         roster = _with_current_team(pd.read_sql("SELECT player_id, player, team, max(date) d FROM player_games GROUP BY player_id", c), c)
         pg = pd.read_sql("SELECT team, game_id, date, player, starter FROM player_games WHERE date >= date('now','-45 day')", c)
