@@ -889,10 +889,20 @@ def track_record(x_code: str = Header("")):
 def value_picks(x_code: str = Header("")):
     """Legs where the model's chance clearly beats the bookmaker's price, each with the evidence behind it. Needs bookmaker prices."""
     check(x_code)
-    res = compute_value()
-    try: log_picks(value=res)
+    res = cached_calc("value", compute_value)
+    try: log_picks(best=cached_calc("best", compute_best), value=res)
     except Exception: logging.exception("pick logging failed")
     return res
+
+_calc, _calc_lock = {}, threading.Lock()
+def cached_calc(name, fn):
+    """Best picks and Value bets are worked out once per change of data (or per minute, like enriched()) and shared by every request,
+    instead of each tab and each pick log recomputing both. One at a time, so two tabs opening together never do the same work twice."""
+    k = _enriched_key()
+    with _calc_lock:
+        hit = _calc.get(name)
+        if hit and hit[0] == k: return hit[1]
+        v = fn(); _calc[name] = (k, v); return v
 
 
 def min_edge(p):
@@ -963,8 +973,8 @@ def compute_value():
 def best(x_code: str = Header("")):
     """Safest legs of the day plus a suggested 2-3 leg combo aiming for fair odds of ~2.0+ while staying likely. Also locks them into the track record."""
     check(x_code)
-    res = compute_best()
-    try: log_picks(best=res)
+    res = cached_calc("best", compute_best)
+    try: log_picks(best=res, value=cached_calc("value", compute_value))
     except Exception: logging.exception("pick logging failed")
     return res
 
