@@ -43,6 +43,7 @@ nav button.on{background:rgba(255,255,255,.14);color:#fff}
 #intro .tip{opacity:0;animation:ifade .15s .88s forwards}@keyframes ifade{to{opacity:1}}
 #intro .it{font:800 24px system-ui,-apple-system,sans-serif;color:#fff;letter-spacing:.4px;opacity:0;transform:translateY(8px);animation:islide .3s .6s ease-out forwards}#intro .it b{color:#ffd400}@keyframes islide{to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){#intro *{animation:none!important;opacity:1!important;stroke-dashoffset:0!important;transform:none!important}}
+button.rm{background:var(--btn)!important;color:var(--ink)!important;border:1px solid var(--line)!important}
 .inst{background:var(--gold);color:#101010;border:0;border-radius:6px;padding:4px 10px;font-weight:700;font-size:12.5px}
 .wrap{max-width:1280px;margin:0 auto;padding:14px 16px 90px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start}
 .wrap.nos{grid-template-columns:minmax(0,1fr)}
@@ -255,7 +256,7 @@ function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.r
   else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView||c.modelView!=s.modelView))history.pushState({nba:1,...s},"")}catch(e){}}
 addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"track";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
 async function render(){navSync();const T0=performance.now(),T_TAB=tab+(tab=="best"?"/"+bestView:"");const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
-  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip();tnote("tab:"+T_TAB,performance.now()-T0)}
+  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip();paintAddBtns();tnote("tab:"+T_TAB,performance.now()-T0)}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -274,7 +275,7 @@ function addLeg(l,quiet){const i=legs.findIndex(x=>key(x)==key(l));
 function pickTeam(g,stat,side,line,price,book,prob,text,team,lo,hi){addLeg({game_id:g,stat,line,side,text,price:price||null,book:book||null,p:prob,team:team||undefined,lo:lo||undefined,hi:hi||undefined});calc=null;paintSel();drawSlip();recalc()}
 function pick(g,pid,stat,line,price,book,prob,hit,n){const p=findP(g,pid);addLeg({game_id:g,player_id:pid,stat,line,side:"over",text:p?p.player:pid,price:price||null,book:book||null,p:prob,hit,n});
   calc=null;paintSel();drawSlip();recalc()}
-function paintSel(){const on=new Set(legs.map(key));document.querySelectorAll(".od[data-k]").forEach(b=>b.classList.toggle("on",on.has(b.dataset.k)))}
+function paintSel(){paintAddBtns();const on=new Set(legs.map(key));document.querySelectorAll(".od[data-k]").forEach(b=>b.classList.toggle("on",on.has(b.dataset.k)))}
 let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.length){calc=null;drawSlip();return}
   try{const r=await post("parlay",{legs:legsPayload()});calc={r};drawSlip()}catch(x){}},250)}
 const SLIPTABS=["today","best"];
@@ -286,7 +287,7 @@ function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHT
   w.innerHTML=`<div class="slip ${slipMin?"min":""}"><h2 onclick="slipMin=!slipMin;drawSlip()"><span>Pick list <span class="badge">${legs.length}</span></span><span class="mute" style="font-weight:400">${r&&r.joint!=null&&legs.length?pct(r.joint)+" estimated chance · "+(slipMin?"tap to open":"tap to close"):""}</span></h2><div class="sb">
   ${mine.map(a=>`<div class="alert"><span>⚠ ${esc(a.msg)}</span><a onclick="alerts=alerts.filter(x=>x!==alerts[${alerts.indexOf(a)}]);drawSlip()">dismiss</a></div>`).join("")}
   ${legs.length>1?`<div style="text-align:right;margin:2px 0 6px"><button class="btn" onclick="clearSlip()">Clear picks</button></div>`:""}
-  ${legs.length?legs.map((l,i)=>`<div class="lg"><div>${esc(l.text)}<small>${legDesc(l)}${r&&r.legs[i]&&r.legs[i].p!=null?` · model ${pct(r.legs[i].p)}`:""}</small></div><a onclick="legs.splice(${i},1);calc=null;paintSel();drawSlip();recalc()">×</a></div>`).join(""):'<p class="mute">Choose player or team picks to see their chances and track the results.</p>'}
+  ${legs.length?legs.map((l,i)=>`<div class="lg"><div>${legWho(l)}${esc(l.text)}<small>${legDesc(l)}${r&&r.legs[i]&&r.legs[i].p!=null?` · model ${pct(r.legs[i].p)}`:""}</small></div><a onclick="legs.splice(${i},1);calc=null;paintSel();drawSlip();recalc()">×</a></div>`).join(""):'<p class="mute">Choose player or team picks to see their chances and track the results.</p>'}
   ${legs.length&&r&&r.unsupported?`<div class="note" style="margin:10px 0"><b>No advice for this slip.</b> ${esc(r.explanation)}<br><span class="mute">Lines affected: ${r.level_legs.map(x=>esc(x.text||x.stat)+" "+legDesc(x)).join("; ")}</span></div>`:""}
   ${legs.length&&!(r&&r.unsupported)?`<div style="margin:10px 0"><div class="mute">Estimated chance all picks are right</div><div class="big">${r?pct(r.joint):"…"}</div>
    ${r&&legs.length>1?`<div class="kv"><span class="mute">If picks were unrelated</span><span>${pct(r.independent)}</span></div>`:""}</div>
@@ -406,8 +407,8 @@ function levelBlurb(g){const n=((g.match&&g.match.level_lines)||[]).length+Objec
 function best3HTML(g){const b=g.best3||[];
   return `<p class="mute" style="margin:0 0 6px">The three strongest safe legs in this game, from three different players. Not advice: tap Evidence to see why each was chosen.</p>`+b.map((l,i)=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · bench/TBC"}</span></div><div style="text-align:right;flex:0 1 38%"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</div></div></div>
    <details><summary style="font-size:12px">Evidence</summary><ul class="why">${l.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>
-   <div style="margin:4px 0 10px"><button class="btn" onclick="addG3('${g.game_id}',${i})">Add to pick list</button></div>`).join("")}
-function addG3(gid,i){const l=(gameIdx[gid]||{}).best3[i];if(!l)return;addLeg({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n},true);calc=null;paintSel();drawSlip();recalc()}
+   <div style="margin:4px 0 10px"><button class="btn" data-lks="${lks([g3Leg(l)])}" onclick="addG3('${g.game_id}',${i})">Add to pick list</button></div>`).join("")}
+function addG3(gid,i){const l=(gameIdx[gid]||{}).best3[i];if(!l)return;toggleLegs([g3Leg(l)])}
 function gbodyHTML(g){const id=g.game_id,m=g.match;let h=oldPriceNote(g)+levelBlurb(g);
   if((g.best3||[]).length)h+=sec(id,"best3","Best 3 picks",best3HTML(g));
   const L=LG.find(x=>x.game_id==id);if(L&&L.state!="pre")h+=sec(id,"live",L.state=="in"?"Live score":"Final score",liveBodyHTML(g));
@@ -449,18 +450,26 @@ function playingHTML(){const ls=playingLegs();if(!ls.length)return"";
 async function refreshPlaying(){if(tab!="best"||bestView!="today"||document.visibilityState!="visible")return;
   LG=await quietLive();LIVEIDS=liveSet(LG);await loadPlayingBoxes();const w=$("#playingWrap");if(w)w.innerHTML=playingHTML()}
 function bestHTML(){if(!best)return"";const c=best.combo;
-  const more=best.legs.map((l,i)=>`<button class="sl" onclick="addBestLeg(${i})"><b>${esc(l.player)}</b><small>Over ${l.line} ${statName[l.stat]} · ${pct(l.p)} · ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</small></button>`).join("");
+  const more=best.legs.map((l,i)=>`<button class="sl" data-lks="${lks([bestLeg(l)])}" data-rem="<b>Remove</b><small>${esc(l.player)} · Over ${l.line} ${statName[l.stat]}</small>" onclick="addBestLeg(${i})"><b>${esc(l.player)}</b><small>Over ${l.line} ${statName[l.stat]} · ${pct(l.p)} · ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</small></button>`).join("");
   if(!c.legs.length)return"";
   const L=l=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · bench/TBC"}</span></div><div style="text-align:right"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</div></div></div>`;
   return `<div class="card best"><h2>⭐ Today's best picks</h2><p class="mute" style="margin:0 0 6px">A safe-ish multi: each leg is likely, has hit in most of the player's last 10 games, and has a bookmaker line.</p>
    ${c.legs.map(L).join("")}
    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px;flex-wrap:wrap"><div><span class="mute">All ${c.legs.length} win:</span> <b style="font-size:18px">${pct(c.joint)}</b> <span class="mute">· fair odds ${c.fair_odds?c.fair_odds.toFixed(2):"–"}</span></div>
-   <button class="btn p" onclick="addBest()">Add to bet slip</button></div>
+   <button class="btn p" data-lks="${lks(c.legs.map(bestLeg))}" onclick="addBest()">Add to pick list</button></div>
    ${best.legs.length>c.legs.length?`<details><summary>More safe legs (${best.legs.length})</summary><div class="pillrow">${more}</div></details>`:""}
    <details><summary>How are these picked?</summary><p class="mute">The model looks for legs it rates between about 62% and 86% likely, where the player also cleared that line in at least 7 of the last 10 games. It uses lines a bookmaker was found to offer, takes the highest such line, and skips tiny lines such as 0.5. It then combines legs from different players and games until the fair odds reach about 2.0 or there are 3 legs. A leg with no bookmaker line found is never shown.</p></details></div>`}
-function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
-function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;paintSel();drawSlip();recalc()}
-function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;paintSel();drawSlip();recalc()}
+function bestLeg(l){return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n,tm:l.team}}      // tm: team badge on the pick list only
+/* Add buttons turn into Remove once their pick is on the pick list, and undo it from here */
+const lks=ls=>esc(ls.map(key).join("~~"));
+function toggleLegs(ls){const ks=ls.map(key),all=ks.every(k=>legs.some(x=>key(x)==k));
+  if(all)legs=legs.filter(x=>!ks.includes(key(x)));else ls.forEach(l=>addLeg(l,true));calc=null;paintSel();drawSlip();recalc()}
+function paintAddBtns(){const on=new Set(legs.map(key));document.querySelectorAll("[data-lks]").forEach(b=>{const ks=b.dataset.lks.split("~~"),all=ks.every(k=>on.has(k));
+  if(!b.dataset.lab)b.dataset.lab=b.innerHTML;b.innerHTML=all?(b.dataset.rem||"Remove"):b.dataset.lab;b.classList.toggle("rm",all)})}
+const valueLeg=o=>o.kind=="team"?{game_id:o.game_id,stat:o.stat,line:o.line,side:o.side,text:o.text,price:o.price||null,book:o.book||null,p:o.p}:{game_id:o.game_id,player_id:o.player_id,stat:o.stat,line:o.line,side:"over",text:(findP(o.game_id,o.player_id)||{}).player||o.player||o.player_id,price:o.price||null,book:o.book||null,p:o.p,hit:o.hit,n:o.n};
+const g3Leg=l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n,tm:l.team});
+function addBest(){toggleLegs(best.combo.legs.map(bestLeg))}
+function addBestLeg(i){toggleLegs([bestLeg(best.legs[i])])}
 async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];luAt=Date.now();STARTED=st||[];
   const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Bookmaker prices are not connected, so no lines are shown.";
@@ -480,10 +489,9 @@ function valueHTML(){if(!VAL)return"";
    ${VAL.picks.map((o,i)=>`<div class="bl" style="align-items:flex-start">${o.kind=="player"?photo(o.player_id,o.player):'<span class="ph"></span>'}<div class="x"><b>${esc(o.kind=="player"?o.player:o.text)}</b><span class="mute">${o.kind=="player"?legDesc(o)+" · "+(NAMES[o.team]||o.team):"Match winner"}</span>
      <div style="margin-top:3px"><span class="conf ${o.confidence}">${o.confidence}</span> <span class="mute">hit ${o.n?o.hit+"/"+o.n:"–"}</span>${o.price_age_h!=null?` <span class="mute" style="${o.price_age_h>6?"color:#b45309":""}">· price ${o.price_age_h<1?"under 1h":Math.round(o.price_age_h)+"h"} old${o.price_age_h>6?" — check Sportsbet":""}</span>`:""}</div>
      <details><summary style="font-size:12px">Evidence</summary><ul class="why">${o.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details></div>
-     <div style="text-align:right"><div class="good" style="font-weight:800">${o.edge>0?"+":""}${(o.edge*100).toFixed(0)} pts</div><div class="mute">${o.price.toFixed(2)} ${bkName(o.book)}</div><button class="btn p" style="margin-top:4px;padding:4px 10px" onclick="addValue(${i})">Add</button></div></div>`).join("")}
+     <div style="text-align:right"><div class="good" style="font-weight:800">${o.edge>0?"+":""}${(o.edge*100).toFixed(0)} pts</div><div class="mute">${o.price.toFixed(2)} ${bkName(o.book)}</div><button class="btn p" style="margin-top:4px;padding:4px 10px" data-lks="${lks([valueLeg(o)])}" onclick="addValue(${i})">Add</button></div></div>`).join("")}
    <details style="margin:8px 0 0"><summary>How are these picked?</summary><p class="mute" style="margin:6px 0 0;font-size:11.5px">Not advice: the model beats a plain average only slightly. Treat these as leads to check. You can save a pick and see how it went on the My picks tab.</p></details></details>`}
-function addValue(i){const o=VAL.picks[i];if(o.kind=="team")pickTeam(o.game_id,o.stat,o.side,o.line,o.price,o.book,o.p,o.text);
-  else pick(o.game_id,o.player_id,o.stat,o.line,o.price,o.book,o.p,o.hit,o.n)}
+function addValue(i){toggleLegs([valueLeg(VAL.picks[i])])}
 
 /* ---------- best picks tab: today's picks + track record ---------- */
 let bestView="today";      // always open on today's picks
@@ -772,7 +780,7 @@ function playerLegProgress(l,r){
 let GT={};const teamLogo=t=>`<img src="${logo(t)}" alt="${esc(t)}" style="width:22px;height:22px;vertical-align:middle;margin:0 6px 0 0">`;
 const teamLegLogos=l=>{const g=GT[l.game_id]||(()=>{const s=gameIdx[l.game_id];if(!s)return null;const t=Object.values(s.teams||{});const h=t.find(x=>x.home),a=t.find(x=>!x.home);return h&&a?{home:h.team,away:a.team}:null})();
   if(!g)return"";if(l.stat=="total")return teamLogo(g.away)+teamLogo(g.home);const side=l.stat=="tt"||l.stat=="band"?l.team:l.side;return side=="home"||side=="away"?teamLogo(g[side]):""};      // team picks show the team's logo; a game total shows both
-const legWho=l=>{if(["ml","spread","total","tt","band"].includes(l.stat))return teamLegLogos(l);const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(PT[l.player_id]||"")).toUpperCase();
+const legWho=l=>{if(["ml","spread","total","tt","band"].includes(l.stat))return teamLegLogos(l);const t=(l.team&&l.team.length<=4&&!["home","away"].includes(l.team)?l.team:(l.tm||PT[l.player_id]||(l.player_id&&(findP(l.game_id,l.player_id)||{}).team)||"")).toUpperCase();
   return `${l.player_id?photo(l.player_id,l.text||""):""}${t?`<img src="${logo(t)}" alt="${esc(t)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}`};
 // a bar with a tick for every unit (every 5 or 10 when the target is big) and the numbers underneath, so "6 or 7 rebounds" can be read at a glance
 function ticksBar(cur,tgt,hit,compact=false){tgt=Math.max(1,Math.round(tgt));const pct=Math.max(0,Math.min(100,cur/tgt*100)),step=tgt<=12?1:tgt<=30?5:10;let tk="",lb="";
