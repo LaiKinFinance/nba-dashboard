@@ -935,10 +935,9 @@ def _warmer():
         try:
             t = time.time(); enriched(); cached_calc("best", compute_best); cached_calc("value", compute_value); cached_calc("slate", _slate_bytes)
             if _lu_cache["data"]: cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])
-            if time.time() - _steady_cache["t"] >= 300:
-                t1 = time.time()
-                with closing(con()) as c: steady_board(c)
-                SPEED["steady_s"] = round(time.time() - t1, 2)
+            with closing(con()) as c:
+                if _steady_cache.get("stamp") != results_stamp(c):          # Teams tab: only when new game results or roster moves are saved
+                    t1 = time.time(); steady_board(c); SPEED["steady_s"] = round(time.time() - t1, 2)
             SPEED.update(warm_s=round(time.time() - t, 2), warm_at=dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S"))
         except Exception: logging.exception("warm-up failed")
 
@@ -1236,6 +1235,14 @@ def live_box(game_id: str, x_code: str = Header("")):
     box["tracked"] = {p["player_id"]: p["proj"] for p in projections_all() if p["game_id"] == game_id}
     return box
 
+def results_stamp(c):
+    """Changes only when new game results or roster moves are saved: the Teams tab is rebuilt then, and not otherwise."""
+    try: pg = c.execute("SELECT count(*), max(date) FROM player_games").fetchone()
+    except sqlite3.OperationalError: return ("every 5 minutes", int(time.time() // 300))
+    try: ro = c.execute("SELECT count(*), group_concat(team, '') FROM (SELECT team FROM rosters ORDER BY player_id)").fetchone()
+    except sqlite3.OperationalError: ro = None
+    return (tuple(pg), hash(tuple(ro)) if ro else None)
+
 def _roster_team_map(c):
     """Who is on which team NOW (the rosters table the repair step keeps). Empty when that table does not exist yet."""
     try: return {r[0]: r[1] for r in c.execute("SELECT player_id, team FROM rosters")}
@@ -1261,13 +1268,14 @@ def players(q: str = "", x_code: str = Header("")):
 STEADY_BOARD_MIN_GAMES = 10     # games (15+ minutes) a player needs this season before he can be ranked
 STEADY_BOARD_MIN_PRA = 20.0     # and a PRA average that makes him a main player
 STEADY_ICON_SHARE = 0.25        # an icon for a stat = among the steadiest quarter of ranked players for that stat
-_steady_cache = dict(t=0.0, data=None)
+_steady_cache = dict(t=0.0, data=None); _team_cache = {}
 
 def steady_board(c):
     """Season-long steadiness for every ranked player: swing = standard deviation / average, so smaller is steadier. Icons for points, rebounds and assists
     (steadiest quarter of ranked players in that stat), a crown for the steadiest ranked player of a team (teams with 2+ ranked players), and the league's top 3 by PRA.
     Until 12 players have 10 games this season, last season's table is shown instead and says so."""
-    if time.time() - _steady_cache["t"] < 300 and _steady_cache["data"]: return _steady_cache["data"]
+    stamp = results_stamp(c)
+    if _steady_cache["data"] and _steady_cache.get("stamp") == stamp: return _steady_cache["data"]      # nothing new since last time: no work
     try: seasons = [r[0] for r in c.execute("SELECT DISTINCT season FROM player_games ORDER BY season DESC LIMIT 2")]
     except sqlite3.OperationalError: return dict(top3=[], players={}, qualified=0)
     rm = _roster_team_map(c)
@@ -1296,14 +1304,12 @@ def steady_board(c):
     top3 = [dict(player_id=r.player_id, player=r.player, team=r.team, **players[r.player_id]) for r in cur.sort_values("pra").head(3).itertuples()]
     label = f"{int(used) - 1}-{str(used)[-2:]}" if str(used).isdigit() else str(used)
     out = dict(top3=top3, players=players, qualified=int(len(cur)), season=label, fallback=fallback, min_games=(30 if fallback else STEADY_BOARD_MIN_GAMES))
-    _steady_cache.update(t=time.time(), data=out); return out
+    _steady_cache.update(t=time.time(), data=out, stamp=stamp); _team_cache.clear(); return out
 
 @app.get("/api/steady")
 def steady(x_code: str = Header("")):
     check(x_code)
-    if _steady_cache["data"] and _serve_last():
-        if time.time() - _steady_cache["t"] >= 300: _warm_evt.set()
-        return _steady_cache["data"]                   # the background warmer keeps this ready (it takes several seconds to work out)
+    if _steady_cache["data"] and _serve_last(): return _steady_cache["data"]      # the background warmer rebuilds it when new results arrive
     with closing(con()) as c: return steady_board(c)
 
 @app.get("/api/team/{abbr}")
@@ -1312,14 +1318,19 @@ def team_players(abbr: str, x_code: str = Header("")):
     check(x_code)
     abbr = abbr.upper()[:5]
     with closing(con()) as c:
-        rm = _roster_team_map(c); ids = [pid for pid, t in rm.items() if t == abbr]
-        if not ids:                                           # no roster table yet: the team's players of the last six weeks
-            ids = [r[0] for r in c.execute("SELECT DISTINCT player_id FROM player_games WHERE team=? AND date >= date('now','-45 day')", (abbr,))]
-        if not ids: return []
-        marks = ",".join("?" * len(ids))
-        rows = c.execute(f"""SELECT player_id, player, COUNT(*) g, AVG(min) mn, AVG(pts) pts, AVG(reb) reb, AVG(ast) ast FROM player_games
-                             WHERE player_id IN ({marks}) AND season=(SELECT MAX(season) FROM player_games) AND min > 0 GROUP BY player_id ORDER BY AVG(min) DESC LIMIT 20""", ids).fetchall()
-        flags = steady_board(c)["players"]
+        stamp = results_stamp(c); hit = _team_cache.get(abbr)
+        if hit and hit[0] == stamp: return hit[1]                       # same results as last time: the page is already worked out
+        out = _team_rows(c, abbr); _team_cache[abbr] = (stamp, out); return out
+
+def _team_rows(c, abbr):
+    rm = _roster_team_map(c); ids = [pid for pid, t in rm.items() if t == abbr]
+    if not ids:                                           # no roster table yet: the team's players of the last six weeks
+        ids = [r[0] for r in c.execute("SELECT DISTINCT player_id FROM player_games WHERE team=? AND date >= date('now','-45 day')", (abbr,))]
+    if not ids: return []
+    marks = ",".join("?" * len(ids))
+    rows = c.execute(f"""SELECT player_id, player, COUNT(*) g, AVG(min) mn, AVG(pts) pts, AVG(reb) reb, AVG(ast) ast FROM player_games
+                         WHERE player_id IN ({marks}) AND season=(SELECT MAX(season) FROM player_games) AND min > 0 GROUP BY player_id ORDER BY AVG(min) DESC LIMIT 20""", ids).fetchall()
+    flags = steady_board(c)["players"]
     return [dict(player_id=r["player_id"], player=r["player"], games=r["g"], min=round(r["mn"], 1), pts=round(r["pts"], 1), reb=round(r["reb"], 1), ast=round(r["ast"], 1),
                  icons=(flags.get(r["player_id"]) or {}).get("icons", []), crown=(flags.get(r["player_id"]) or {}).get("crown", False)) for r in rows]
 
