@@ -501,14 +501,37 @@ const trkOpen=k=>foldOpen(k,true),foldSet=(k,v)=>trkSet(k,v);
 const infoNote=(k,html)=>`<details class="note" ${foldOpen("i_"+k,false)?"open":""} ontoggle="foldSet('i_${k}',this.open)"><summary>ℹ Info</summary>${html}</details>`;
 function trkSet(k,v){trkState[k]=v;try{localStorage.trk=JSON.stringify(trkState)}catch(e){}}
 const usd=x=>(x<0?"-":"")+"$"+Math.abs(x).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-function bankrollHTML(b){if(!b)return"";const up=b.profit>=0,col=up?"var(--good)":"var(--bad)",n=b.won+b.lost;
-  let chart="";const sr=b.series||[];
-  if(sr.length>=2){const W=300,H=64,vals=[b.start,...sr.map(x=>x.balance)],lo=Math.min(...vals),hi=Math.max(...vals),sp=(hi-lo)||1,pts=vals.map((v,i)=>`${(i/(vals.length-1)*W).toFixed(1)},${(H-4-(v-lo)/sp*(H-8)).toFixed(1)}`),y0=(H-4-(b.start-lo)/sp*(H-8)).toFixed(1);
-    chart=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:64px;margin-top:8px" role="img" aria-label="Balance over time"><line x1="0" x2="${W}" y1="${y0}" y2="${y0}" stroke="var(--line)" stroke-dasharray="4 3"/><polyline fill="none" stroke="${col}" stroke-width="2" points="${pts.join(" ")}"/></svg>`}
+let bankRange=(()=>{try{return localStorage.bankRange||"month"}catch(e){return"month"}})(),BANK=null,BANKPTS=[];
+const BANK_RANGES=[["week","Week",7],["month","Month",30],["6m","6 months",182],["all","All",0]];
+function setBankRange(r){bankRange=r;try{localStorage.bankRange=r}catch(e){}const el=$("#bankbox");if(el&&BANK)el.innerHTML=bankChart(BANK)}
+function bankChart(b){const sr=b.series||[],days=(BANK_RANGES.find(x=>x[0]==bankRange)||[0,0,0])[2];
+  const from=days?new Date(Date.now()-days*864e5).toISOString().slice(0,10):"";
+  const inR=sr.filter(x=>!from||x.day>=from),before=sr.filter(x=>from&&x.day<from),open=before.length?before[before.length-1].balance:b.start;
+  const seg=`<div class="seg mini" style="margin:8px 0 4px">${BANK_RANGES.map(([k,l])=>`<button class="${bankRange==k?"on":""}" onclick="setBankRange('${k}')">${l}</button>`).join("")}</div>`;
+  if(!inR.length)return seg+'<p class="mute" style="margin:6px 0">No settled picks in this period yet.</p>';
+  const pts=[{day:null,balance:open},...inR],W=300,H=90,vals=pts.map(x=>x.balance),lo=Math.min(...vals),hi=Math.max(...vals),sp=(hi-lo)||1;
+  const X=i=>i/(pts.length-1||1)*W,Y=v=>H-6-(v-lo)/sp*(H-12);BANKPTS=pts.map((p,i)=>({...p,x:X(i),y:Y(p.balance),prev:i?pts[i-1].balance:null}));
+  const chg=inR[inR.length-1].balance-open,col=chg>=0?"var(--good)":"var(--bad)",lab=(BANK_RANGES.find(x=>x[0]==bankRange)||[])[1];
+  const dd=d=>new Date(d+"T12:00:00").toLocaleDateString([],{day:"numeric",month:"short"});
+  return seg+`<div class="mute" style="font-size:12.5px">${lab=="All"?"Since the start":"Last "+lab.toLowerCase()}: <b style="color:${col}">${chg>=0?"+":""}${usd(chg)}</b></div>
+   <div style="position:relative;touch-action:pan-y;padding-top:30px" onpointermove="bankHover(event,this)" onpointerdown="bankHover(event,this)" onpointerleave="bankHover(null,this)">
+   <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:90px;margin-top:4px;display:block" role="img" aria-label="Balance over time"><line x1="0" x2="${W}" y1="${Y(open).toFixed(1)}" y2="${Y(open).toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 3"/><polyline fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke" points="${BANKPTS.map(p=>p.x.toFixed(1)+","+p.y.toFixed(1)).join(" ")}"/><line class="bk-v" x1="0" x2="0" y1="0" y2="${H}" stroke="var(--mute)" stroke-width="1" vector-effect="non-scaling-stroke" style="display:none"/></svg>
+   <div class="bk-dot" style="display:none;position:absolute;width:10px;height:10px;border-radius:50%;background:${col};border:2px solid var(--card);transform:translate(-50%,-50%);pointer-events:none"></div>
+   <div class="bk-tip" style="display:none;position:absolute;top:0;transform:translateX(-50%);background:var(--ink);color:var(--card);font-size:12px;padding:4px 8px;border-radius:6px;white-space:nowrap;pointer-events:none"></div></div>
+   <div class="mute" style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px"><span>${inR.length>1||before.length?dd(before.length?before[before.length-1].day:inR[0].day):""}</span><span>${dd(inR[inR.length-1].day)}</span></div>`}
+function bankHover(e,box){const v=box.querySelector(".bk-v"),d=box.querySelector(".bk-dot"),t=box.querySelector(".bk-tip");
+  if(!e||BANKPTS.length<2){v.style.display=d.style.display=t.style.display="none";return}
+  const r=box.getBoundingClientRect(),fx=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*300;
+  let p=BANKPTS[1];for(const q of BANKPTS.slice(1))if(Math.abs(q.x-fx)<Math.abs(p.x-fx))p=q;
+  const px=p.x/300*r.width,py=34+p.y,ch=p.balance-p.prev;
+  v.setAttribute("x1",p.x);v.setAttribute("x2",p.x);v.style.display="";d.style.cssText+=`;display:block;left:${px}px;top:${py}px`;
+  t.innerHTML=`${new Date(p.day+"T12:00:00").toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} · <b>${usd(p.balance)}</b> <span style="opacity:.8">(${ch>=0?"+":""}${usd(ch)} that day)</span>`;
+  t.style.display="block";t.style.left=Math.max(70,Math.min(r.width-70,px))+"px"}
+function bankrollHTML(b){if(!b)return"";BANK=b;const up=b.profit>=0,col=up?"var(--good)":"var(--bad)",n=b.won+b.lost;
   return `<details class="card" ${trkOpen("bank")?"open":""} ontoggle="trkSet('bank',this.open)"><summary class="csum">Hypothetical $${b.start.toLocaleString()} bankroll <span style="font-weight:700;color:${col}">· ${usd(b.balance)}</span></summary>
    <div class="mute" style="font-size:13px;margin:-4px 0 6px">$${b.stake} on every pick that had a bookmaker price</div>
    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:28px;font-weight:800;color:${col}">${usd(b.balance)}</span><b style="color:${col}">${up?"+":""}${usd(b.profit)}${b.roi!=null?` (${up?"+":""}${(b.roi*100).toFixed(1)}% of money bet)`:""}</b></div>
-   ${chart}<p class="mute" style="margin:6px 0 0;font-size:12.5px">${n} settled · ${b.won} won · ${b.lost} lost${b.void?` · ${b.void} void`:""}${b.waiting?` · ${b.waiting} waiting`:""}${b.no_price?` · ${b.no_price} not counted (no bookmaker price)`:""}. Pretend money, to see whether the picks would have paid.</p></details>`}
+   <div id="bankbox">${(b.series||[]).length?bankChart(b):""}</div><p class="mute" style="margin:6px 0 0;font-size:12.5px">${n} settled · ${b.won} won · ${b.lost} lost${b.void?` · ${b.void} void`:""}${b.waiting?` · ${b.waiting} waiting`:""}${b.no_price?` · ${b.no_price} not counted (no bookmaker price)`:""}. Pretend money, to see whether the picks would have paid.</p></details>`}
 const trackWho=x=>`${x.player_id?photo(x.player_id,x.player):""}${x.team?`<img src="${logo(x.team)}" alt="${esc(x.team)}" style="width:20px;height:20px;vertical-align:middle;margin:0 6px 0 4px">`:""}${esc(x.player)}${liveDot(x.game_id)}`;
 function trackSummaryHTML(t){const L=t.legs,C=t.combos;
     const gap=L.n>=20?L.won/L.n-L.avg_p:null;
