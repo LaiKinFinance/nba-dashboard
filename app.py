@@ -1101,8 +1101,18 @@ def live_status(x_code: str = Header("")):
     """Cheap live check of lineup/injury changes for players on tonight's slate (cached 2 min)."""
     check(x_code)
     if time.time() - _status_cache["t"] > 120:
-        try: _status_cache.update(t=time.time(), data=(sl.lineups(), sl.injuries()))
-        except Exception: logging.exception("status fetch failed"); return {}
+        def fetch(): _status_cache.update(t=time.time(), data=(sl.lineups(), sl.injuries()))
+        if _status_cache["data"]:                      # last known status at once, fresh copy in the background
+            if not _status_cache.get("busy"):
+                _status_cache["busy"] = True
+                def work():
+                    try: fetch()
+                    except Exception: logging.exception("status fetch failed")
+                    finally: _status_cache["busy"] = False
+                threading.Thread(target=work, daemon=True).start()
+        else:
+            try: fetch()
+            except Exception: logging.exception("status fetch failed"); return {}
     lu, inj = _status_cache["data"] or ({}, {}); out = {}
     for p in projections():
         t = lu.get(p["team"], {}); out_names = [n for n, _ in t.get("out", [])]
@@ -1117,13 +1127,21 @@ _lu_cache = dict(t=0, data=None, starts={})
 def lineups_tab(x_code: str = Header("")):
     """Ad-free starting lineups (Rotowire data) with photos, our top-3 picks flagged, and starters who differ from the team's last game."""
     check(x_code)
+    def fetch():
+        _lu_cache.update(t=time.time(), data=sl.lineups_full(), starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)})
     if time.time() - _lu_cache["t"] > 300:
-        try:
-            _lu_cache.update(t=time.time(), data=sl.lineups_full(),
-                             starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)})
-        except Exception:
-            logging.exception("lineups fetch failed")
-            if not _lu_cache["data"]: raise HTTPException(502, "Lineups are temporarily unavailable")
+        if _lu_cache["data"]:                          # show the last lineups at once and refresh them in the background
+            if not _lu_cache.get("busy"):
+                _lu_cache["busy"] = True
+                def work():
+                    try: fetch()
+                    except Exception: logging.exception("lineups fetch failed")
+                    finally: _lu_cache["busy"] = False
+                threading.Thread(target=work, daemon=True).start()
+        else:
+            try: fetch()
+            except Exception:
+                logging.exception("lineups fetch failed"); raise HTTPException(502, "Lineups are temporarily unavailable")
     with closing(con()) as c:
         roster = _with_current_team(pd.read_sql("SELECT player_id, player, team, max(date) d FROM player_games GROUP BY player_id", c), c)
         pg = pd.read_sql("SELECT team, game_id, date, player, starter FROM player_games WHERE date >= date('now','-45 day')", c)

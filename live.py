@@ -17,9 +17,25 @@ def _get(url, **params):
             if i == 2: raise
             time.sleep(0.6 * (i + 1))
 
+import threading
+_busy = set(); _busy_lock = threading.Lock()
+
 def cached(key, ttl, fn):
+    """Fresh copy: return it. Old copy: return it at once and refresh it in the background (one refresh at a time), so a page never waits
+    for ESPN. No copy yet: fetch it now (only the very first time)."""
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < ttl: return hit[1]
+    if hit:
+        with _busy_lock:
+            if key in _busy: return hit[1]
+            _busy.add(key)
+        def work():
+            try: _cache[key] = (time.time(), fn())
+            except Exception: pass                     # keep the last good copy
+            finally:
+                with _busy_lock: _busy.discard(key)
+        threading.Thread(target=work, daemon=True).start()
+        return hit[1]
     val = fn(); _cache[key] = (time.time(), val); return val
 
 def _et_dates():

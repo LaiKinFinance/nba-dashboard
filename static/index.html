@@ -486,7 +486,8 @@ let bestView="today";      // always open on today's picks
 const pc0=x=>x==null?"–":Math.round(x*100)+"%";
 const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
 let LIVEIDS=new Set();
-const quietLive=async()=>{try{const r=await fetch("/api/live",{headers:hdr()});return r.ok?await r.json():[]}catch(e){return[]}};
+const fetchSoon=(u,ms=6000)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);return fetch(u,{headers:hdr(),signal:c.signal}).finally(()=>clearTimeout(t))};      // extras (live scores, lineups) never hold a page up for more than a few seconds
+const quietLive=async()=>{try{const r=await fetchSoon("/api/live");return r.ok?await r.json():[]}catch(e){return[]}};
 const liveSet=g=>new Set((g||[]).filter(x=>x.state=="in").map(x=>x.game_id));
 const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEIDS.has(id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
 async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
@@ -759,7 +760,7 @@ function luSide(sd){
   return `<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span></div>
    ${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
    ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
-const quietGet=async p=>{try{const r=await fetch("/api/"+p,{headers:hdr()});return r.ok?await r.json():[]}catch(e){return[]}};
+const quietGet=async p=>{try{const r=await fetchSoon("/api/"+p);return r.ok?await r.json():[]}catch(e){return[]}};
 
 /* ---------- games tab: every game of the day in one place (projections, live score, lineups) ---------- */
 let gamesDay="today";
