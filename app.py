@@ -660,6 +660,11 @@ def _lean_player(p):
 @app.get("/api/slate")
 def get_slate(x_code: str = Header("")):
     check(x_code)
+    from fastapi.responses import Response
+    body = cached_calc("slate", lambda: json.dumps(_slate_build(), separators=(",", ":"), allow_nan=False).encode())     # built once per data change (or minute) and shared by every phone
+    return Response(content=body, media_type="application/json")
+
+def _slate_build():
     import odds
     games = {}; raw = {}; gp = game_preds(); with_c = closing(con()); hist = _results_table()
     with with_c as c: bl = odds.load_lines(c); lage = odds.line_ages(c); ltime = odds.line_times(c)
