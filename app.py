@@ -310,6 +310,8 @@ def con():
 
 def init():
     with closing(con()) as c:
+        try: c.execute("CREATE INDEX IF NOT EXISTS pg_player_date ON player_games(player_id, date)")    # per-player lookups (Returning, New team, player pages) without reading every row
+        except sqlite3.OperationalError: pass
         c.executescript("""
         CREATE TABLE IF NOT EXISTS picks(id INTEGER PRIMARY KEY, user TEXT, created TEXT, game_id TEXT, legs TEXT, note TEXT, odds REAL, model_prob REAL);
         CREATE TABLE IF NOT EXISTS comments(id INTEGER PRIMARY KEY, pick_id INTEGER, user TEXT, created TEXT, body TEXT);
@@ -472,14 +474,15 @@ RETURN_MIN_MISSED = 3     # missing this many team games in a row counts as a re
 
 def returning_status(c, pids):
     """{player_id: dict(game_back=1|2, missed=n)} for players about to play their 1st or 2nd game back after missing 3+ of their team's games this season."""
-    out = {}
+    out, sched = {}, {}
     for pid in {x for x in pids if x}:
         try:
             last = c.execute("SELECT game_id, date, team, season FROM player_games WHERE player_id=? ORDER BY date DESC, game_id DESC LIMIT 2", (pid,)).fetchall()
             if not last: continue
             l1 = last[0]
-            tg = c.execute("SELECT game_id, date FROM games WHERE (home=? OR away=?) AND season=? AND home_pts IS NOT NULL ORDER BY date, game_id", (l1["team"], l1["team"], l1["season"])).fetchall()
-            ids = [g["game_id"] for g in tg]
+            k = (l1["team"], l1["season"])
+            if k not in sched: sched[k] = [g[0] for g in c.execute("SELECT game_id FROM games WHERE (home=? OR away=?) AND season=? AND home_pts IS NOT NULL ORDER BY date, game_id", (k[0], k[0], k[1]))]
+            ids = sched[k]                                            # each team's schedule is read once, not once per player
             if l1["game_id"] not in ids: continue
             after = len(ids) - 1 - ids.index(l1["game_id"])          # team games since his last appearance
             if after >= RETURN_MIN_MISSED:
