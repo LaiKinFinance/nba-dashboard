@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 import app
 
 def test_phone_timings_are_summarised_on_health(monkeypatch):
-    monkeypatch.setattr(app, "ACCESS_CODE", ""); app.PHONE_TIMES.clear()
+    monkeypatch.setattr(app, "ACCESS_CODE", ""); app.PHONE_TIMES.clear(); app._hits.clear()
     c = TestClient(app.app)
     assert c.post("/api/timing", json={"t": [{"p": "slate", "ms": 900}, {"p": "slate", "ms": 300}, {"p": "tab:best/today", "ms": 1200}]}).json() == {"ok": True}
     s = app.phone_speed()
