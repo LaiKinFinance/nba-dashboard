@@ -68,6 +68,7 @@ h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;color:var(--mute);text-transf
 .ph.l{width:48px;height:48px}.ph.xl{width:76px;height:76px}.ph.l::before{font-size:14px}
 .gb{display:none;border-top:1px solid var(--line);padding:6px 12px 12px;background:var(--bg2)}.game.open .gb{display:block}
 .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 18px}.cols>div,.lu>div{min-width:0}@media(max-width:760px){.cols{grid-template-columns:minmax(0,1fr)}.av{display:none}.tm img{width:28px;height:28px}}
+details.lut{margin:0;border-bottom:1px solid var(--line)}details.lut>summary{list-style:none;cursor:pointer;padding:8px 0;margin:0;color:var(--ink);font-size:15px}details.lut>summary::-webkit-details-marker{display:none}.luc{margin-left:auto;color:var(--mute);font-size:13px;transition:transform .15s}details.lut[open] .luc{transform:rotate(180deg)}
 .th{display:flex;align-items:center;gap:8px;margin:10px 0 2px;font-weight:700}.th img{width:22px;height:22px}.th span{font-weight:400;color:var(--mute);font-size:12px}
 .pl{padding:10px 0;border-bottom:1px solid var(--line)}.pl:last-child{border:0}
 .pt{display:flex;gap:10px;align-items:center}.pn{font-weight:700;cursor:pointer}.pn:hover{text-decoration:underline}
@@ -781,11 +782,14 @@ function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||
 let LU=[],STARTED=[];
 const luChip=t=>/out|ofs/i.test(t)?"out":/ques|doubt|game-time|gtd/i.test(t)?"q":"ok";
 const dotc=p=>p==null||p>=100?"var(--good)":p>=50?"var(--gold)":"var(--bad)";
+const luOpen=new Set(),LUG={v:""};      // which team lineups are open (kept while the page refreshes)
+function luTog(k,o){if(o)luOpen.add(k);else luOpen.delete(k)}
+const luWrap=(team,head,body)=>{const k=LUG.v+":"+team;return `<details class="lut" ${luOpen.has(k)?"open":""} ontoggle="luTog('${k}',this.open)"><summary class="th">${head}<b class="luc">▾</b></summary>${body}</details>`};
 function luSide(sd){
   const row=(p,out)=>`<div class="lp"><span class="pos">${esc(p.pos)}</span>${photo(p.player_id||0,p.name)}<span class="nm2" ${p.player_id?`onclick="go('players','${p.player_id}')"`:""}>${p.top3?"⭐ ":""}${esc(p.name)}${p.new?'<span class="newb">NEW</span>':""}</span>${out?`<span class="stc ${luChip(p.status)}">${esc(p.status)}</span>`:`<span class="dot" style="background:${dotc(p.pct)}" title="${esc(p.note||"")}"></span>`}</div>`;
-  return `<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span></div>
-   ${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
-   ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
+  return luWrap(sd.team,`<img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span>`,
+   `${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
+   ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}`)}
 const lastGot={};const quietGet=async p=>{const t0=performance.now();try{const r=await fetchSoon("/api/"+p);if(r.ok)lastGot[p]=await r.json()}catch(e){}tnote(p,performance.now()-t0);return lastGot[p]||[]};      // slow or failed: keep the last copy
 
 /* ---------- games tab: every game of the day in one place (projections, live score, lineups) ---------- */
@@ -798,9 +802,9 @@ function gameRows(){const rows=new Map();
   return [...rows.values()]}
 const midHTML=g=>{const L=LG.find(x=>x.game_id==g.game_id);
   return L&&L.state!="pre"?`<div class="t">${L.away.score}–${L.home.score}${liveDot(g.game_id)}</div><div class="s">${esc(stLabel(L))}</div>`:`<div class="t">${timeOf(g.start)}${liveDot(g.game_id)}</div><div class="s">at</div>`};
-const startedSide=sd=>`<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="mute">${sd.score??""}</span></div>${sd.starters.length?sd.starters.map(p=>`<div class="lp">${photo(p.player_id,p.name)}<span class="nm2" onclick="go('players','${p.player_id}')">${esc(p.name)}</span></div>`).join(""):'<div class="mute" style="padding:8px 0">No starters recorded</div>'}</div>`;
+const startedSide=sd=>luWrap(sd.team,`<img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="mute">${sd.score??""}</span>`,`${sd.starters.length?sd.starters.map(p=>`<div class="lp">${photo(p.player_id,p.name)}<span class="nm2" onclick="go('players','${p.player_id}')">${esc(p.name)}</span></div>`).join(""):'<div class="mute" style="padding:8px 0">No starters recorded</div>'}`);
 function liveBodyHTML(g){const L=LG.find(x=>x.game_id==g.game_id);return L&&L.state!="pre"?lineScore(L)+boxHTML(L):'<p class="mute">Game has not started.</p>'}
-function lineupsBodyHTML(g){const id=g.game_id,L=LG.find(x=>x.game_id==id),t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
+function lineupsBodyHTML(g){LUG.v=g.game_id;const id=g.game_id,L=LG.find(x=>x.game_id==id),t=Object.values(g.teams),away=t.find(x=>!x.home)||t[0],home=t.find(x=>x.home)||t[1];
   const e=LU.find(x=>x.away.team==away.team&&x.home.team==home.team),st=STARTED.find(x=>x.game_id==id),b=boxes[id];
   if(e&&(!L||L.state=="pre"))return `<div class="lu">${luSide(e.away)}${luSide(e.home)}</div>`;
   if(st)return `<div class="lu">${startedSide(st.away)}${startedSide(st.home)}</div>`;
