@@ -448,13 +448,24 @@ def _enriched_key():
     st = lambda f: (lambda x: (x.st_mtime_ns, x.st_size))(os.stat(f)) if os.path.exists(f) else None
     return (st(DB), st(DB + "-wal"), st(predict.MODELS), int(time.time() // 60))
 
+SPEED = {}                     # how long the heavy steps took last time (seconds), shown on /api/health so slowness can be seen from outside
+_warm = dict(on=False); _warm_evt = threading.Event(); _fresh = threading.local()
+
+def _serve_last():
+    """While the background warmer runs (on the website), pages get the last finished copy at once and the warmer makes the next one."""
+    return _warm["on"] and not getattr(_fresh, "on", False)
+
 def enriched():
     """Same as _enriched_build(), but computed once per change of data (or per minute) and shared, because every tab asks for it.
     The returned list is shared: callers must not modify it."""
     key = _enriched_key()
+    if _enr["val"] is not None and (_enr["key"] == key or _serve_last()):
+        if _enr["key"] != key: _warm_evt.set()
+        return _enr["val"]
     with _enr_lock:
         if _enr["key"] == key and _enr["val"] is not None: return _enr["val"]
-        val = _enriched_build(); _enr.update(key=key, val=val, at=time.time()); return val
+        t = time.time(); val = _enriched_build(); SPEED["enriched_s"] = round(time.time() - t, 2)
+        _enr.update(key=key, val=val, at=time.time()); return val
 
 NEW_TEAM_GAMES = 10       # a traded veteran's first 10 games with his new team ran about 1 PRA below the model (5 seasons)
 
@@ -661,7 +672,7 @@ def _lean_player(p):
 def get_slate(x_code: str = Header("")):
     check(x_code)
     from fastapi.responses import Response
-    body = cached_calc("slate", lambda: json.dumps(_slate_build(), separators=(",", ":"), allow_nan=False).encode())     # built once per data change (or minute) and shared by every phone
+    body = cached_calc("slate", _slate_bytes)     # built once per data change (or minute) and shared by every phone
     return Response(content=body, media_type="application/json")
 
 def _slate_build():
@@ -903,11 +914,29 @@ _calc, _calc_lock = {}, threading.Lock()
 def cached_calc(name, fn):
     """Best picks and Value bets are worked out once per change of data (or per minute, like enriched()) and shared by every request,
     instead of each tab and each pick log recomputing both. One at a time, so two tabs opening together never do the same work twice."""
-    k = _enriched_key()
+    k = _enriched_key(); hit = _calc.get(name)
+    if hit and (hit[0] == k or _serve_last()):
+        if hit[0] != k: _warm_evt.set()
+        return hit[1]
     with _calc_lock:
         hit = _calc.get(name)
         if hit and hit[0] == k: return hit[1]
-        v = fn(); _calc[name] = (k, v); return v
+        t = time.time(); v = fn(); SPEED[name + "_s"] = round(time.time() - t, 2); _calc[name] = (k, v); return v
+
+def _warmer():
+    """Keeps Games, Best picks and Value bets ready: rebuilds them whenever the data changes or a minute passes, so nobody waits for the work."""
+    _fresh.on = True; time.sleep(20)
+    while True:
+        _warm_evt.wait(30); _warm_evt.clear()
+        try:
+            t = time.time(); enriched(); cached_calc("best", compute_best); cached_calc("value", compute_value); cached_calc("slate", _slate_bytes)
+            SPEED.update(warm_s=round(time.time() - t, 2), warm_at=dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S"))
+        except Exception: logging.exception("warm-up failed")
+
+def _slate_bytes(): return json.dumps(_slate_build(), separators=(",", ":"), allow_nan=False).encode()
+
+if os.environ.get("AUTO_REFRESH") == "1":
+    _warm["on"] = True; threading.Thread(target=_warmer, daemon=True).start()
 
 
 def min_edge(p):
@@ -1128,7 +1157,7 @@ def lineups_tab(x_code: str = Header("")):
     """Ad-free starting lineups (Rotowire data) with photos, our top-3 picks flagged, and starters who differ from the team's last game."""
     check(x_code)
     def fetch():
-        _lu_cache.update(t=time.time(), data=sl.lineups_full(), starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)})
+        t0 = time.time(); _lu_cache.update(t=time.time(), data=sl.lineups_full(), starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)}); SPEED["lineups_fetch_s"] = round(time.time() - t0, 2)
     if time.time() - _lu_cache["t"] > 300:
         if _lu_cache["data"]:                          # show the last lineups at once and refresh them in the background
             if not _lu_cache.get("busy"):
@@ -1654,6 +1683,6 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [])
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED))
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

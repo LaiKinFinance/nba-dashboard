@@ -457,7 +457,7 @@ function bestHTML(){if(!best)return"";const c=best.combo;
 function bestLeg(l){const p=findP(l.game_id,l.player_id);return {game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n}}
 function addBest(){best.combo.legs.forEach(l=>addLeg(bestLeg(l),true));calc=null;paintSel();drawSlip();recalc()}
 function addBestLeg(i){addLeg(bestLeg(best.legs[i]),true);calc=null;paintSel();drawSlip();recalc()}
-async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];STARTED=st||[];
+async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];luAt=Date.now();STARTED=st||[];
   const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Bookmaker prices are not connected, so no lines are shown.";
   a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}${daySwitch(gamesDay,"setGamesDay")}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()"></div>
@@ -487,7 +487,7 @@ const pc0=x=>x==null?"–":Math.round(x*100)+"%";
 const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
 let LIVEIDS=new Set();
 const fetchSoon=(u,ms=6000)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);return fetch(u,{headers:hdr(),signal:c.signal}).finally(()=>clearTimeout(t))};      // extras (live scores, lineups) never hold a page up for more than a few seconds
-const quietLive=async()=>{try{const r=await fetchSoon("/api/live");return r.ok?await r.json():[]}catch(e){return[]}};
+let lastLive=[];const quietLive=async()=>{try{const r=await fetchSoon("/api/live");if(r.ok)lastLive=await r.json()}catch(e){}return lastLive};      // slow or failed: keep showing the last scores
 const liveSet=g=>new Set((g||[]).filter(x=>x.state=="in").map(x=>x.game_id));
 const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEIDS.has(id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
 async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
@@ -760,7 +760,7 @@ function luSide(sd){
   return `<div><div class="th"><img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span></div>
    ${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
    ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}</div>`}
-const quietGet=async p=>{try{const r=await fetchSoon("/api/"+p);return r.ok?await r.json():[]}catch(e){return[]}};
+const lastGot={};const quietGet=async p=>{try{const r=await fetchSoon("/api/"+p);if(r.ok)lastGot[p]=await r.json()}catch(e){}return lastGot[p]||[]};      // slow or failed: keep the last copy
 
 /* ---------- games tab: every game of the day in one place (projections, live score, lineups) ---------- */
 let gamesDay="today";
@@ -785,7 +785,10 @@ function drawLive(){Object.keys(gameIdx).forEach(paintLiveSections);LG.forEach(l
 async function loadBox(id){try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(!r.ok)return;boxes[id]=await r.json()}catch(e){return}
   const l=LG.find(x=>x.game_id==id);if(gameIdx[id])paintLiveSections(id);else{const el=$("#lv"+id);if(el&&l&&openLive.has(id))el.outerHTML=liveHTML(l)}}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);const l=LG.find(x=>x.game_id==id),el=$("#lv"+id);if(l&&el)el.outerHTML=liveHTML(l);if(openLive.has(id)&&l&&l.state!="pre")loadBox(id)}
-async function refreshGames(){if(tab!="today"||document.visibilityState!="visible")return;const lg=await quietLive();if(!lg.length&&!LG.length)return;LG=lg;LIVEIDS=liveSet(LG);
+let luAt=0;
+async function refreshGames(){if(tab!="today"||document.visibilityState!="visible")return;
+  if(!LU.length||Date.now()-luAt>60000){luAt=Date.now();quietGet("lineups").then(lu=>{const had=JSON.stringify(LU);LU=lu||[];if(tab=="today"&&JSON.stringify(LU)!=had)drawGames()})}      // lineups keep coming in after the page opens
+  const lg=await quietLive();if(!lg.length&&!LG.length)return;LG=lg;LIVEIDS=liveSet(LG);
   document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"});
   LG.forEach(l=>{const g=gameIdx[l.game_id];if(g){const m=document.querySelector("#g"+l.game_id+" .mid");if(m)m.innerHTML=midHTML(g)}else{const el=$("#lv"+l.game_id);if(el)el.outerHTML=liveHTML(l)}});
   const ids=[...new Set([...openGames,...openLive])].filter(id=>{const l=LG.find(x=>x.game_id==id);return l&&l.state!="pre"});await Promise.all(ids.map(loadBox))}
