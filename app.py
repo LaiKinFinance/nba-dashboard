@@ -935,6 +935,10 @@ def _warmer():
         try:
             t = time.time(); enriched(); cached_calc("best", compute_best); cached_calc("value", compute_value); cached_calc("slate", _slate_bytes)
             if _lu_cache["data"]: cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])
+            if time.time() - _steady_cache["t"] >= 300:
+                t1 = time.time()
+                with closing(con()) as c: steady_board(c)
+                SPEED["steady_s"] = round(time.time() - t1, 2)
             SPEED.update(warm_s=round(time.time() - t, 2), warm_at=dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S"))
         except Exception: logging.exception("warm-up failed")
 
@@ -1297,6 +1301,9 @@ def steady_board(c):
 @app.get("/api/steady")
 def steady(x_code: str = Header("")):
     check(x_code)
+    if _steady_cache["data"] and _serve_last():
+        if time.time() - _steady_cache["t"] >= 300: _warm_evt.set()
+        return _steady_cache["data"]                   # the background warmer keeps this ready (it takes several seconds to work out)
     with closing(con()) as c: return steady_board(c)
 
 @app.get("/api/team/{abbr}")
