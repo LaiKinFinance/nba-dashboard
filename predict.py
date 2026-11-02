@@ -229,6 +229,16 @@ def tonight_absent(team, lu, inj, state):
     found.sort(key=lambda x: -x["pts"] * x["weight"])
     return feats, found
 
+def own_absence(team_abs, pid):
+    """The team's missing-teammate totals as seen by one player: if he is himself on the injury list, his own share is taken out,
+    so his projection is never raised by his own possible absence."""
+    feats, found = team_abs; out = dict(feats)
+    for a in found:
+        if a["player_id"] == pid:
+            for c in absence.COLS: out["abs_" + c] -= a["weight"] * a[c]
+            out["abs_n"] -= a["weight"]
+    return out
+
 def with_without(real, team, pid, apid):
     """This player's own stats in games the teammate played vs games he missed (while still on the team that season)."""
     mine = real[(real.team == team) & (real.player_id == pid)]
@@ -314,7 +324,7 @@ def project(days=2):
     mk = {(x["game"]["game_id"], x["player_id"]): x for x in meta}
     feats = feats.copy(); Xb_rows = []
     for idx, f in feats.iterrows():
-        a = absmap[(f.game_id, f.team)][0]; r = recent.get(f.team)
+        a = own_absence(absmap[(f.game_id, f.team)], f.player_id); r = recent.get(f.team)
         for c in absence.ABS: feats.at[idx, c] = a[c]
     X = feats[FEATURES]
     Xb = X.copy()   # "recent norm" counterfactual: the absence level that was already baked into his last 10 games
@@ -333,7 +343,7 @@ def project(days=2):
                    home=int(f.home), starting=bool(mt["starting"]), lineup_status=mt["lineup_status"], injury=mt["injury"],
                    min=float(f.min_m10) if pd.notna(f.min_m10) else None, rest=float(f.rest) if pd.notna(f.rest) else None,
                    p_dd=float(pdd[k]), p_td=float(min(ptd[k], pdd[k])), proj={}, ladders={})
-        absent = absmap[(f.game_id, f.team)][1]
+        absent = [a for a in absmap[(f.game_id, f.team)][1] if a["player_id"] != f.player_id]      # a doubtful player is never his own "teammate out"
         rec["absent"] = [dict(a, weight=float(a["weight"])) for a in absent]
         rec["proj_base"] = {t: float(mus_base[t][k]) for t in TARGETS}
         rec["proj_full"] = {t: float(mus_full[t][k]) for t in TARGETS}
