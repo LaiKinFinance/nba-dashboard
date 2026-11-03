@@ -1539,6 +1539,167 @@ def phone_speed():
     for p, ms, _ in PHONE_TIMES: by.setdefault(p, []).append(ms)
     return {p: dict(n=len(v), median_ms=int(np.median(v)), worst_ms=max(v)) for p, v in sorted(by.items())}
 
+# ---------- pick alerts: phone notifications for saved picks while their games are on ----------
+def now(): return dt.datetime.now(dt.timezone.utc).isoformat()
+PUSH_KEY_FILE = os.path.join(os.path.dirname(DB), "push_key.pem")
+ALERT_KINDS = ("done", "half", "close")          # a leg is done · half-time check · close call late in the game
+_push_key = None
+STAT_WORD = {"pts": "points", "reb": "rebounds", "ast": "assists", "fg3m": "threes", "stl": "steals", "blk": "blocks", "pra": "pts+reb+ast", "pr": "pts+reb", "pa": "pts+ast"}
+CLOSE_GAP = {"pts": 3, "pra": 3, "pr": 3, "pa": 3, "reb": 2, "ast": 2, "fg3m": 1, "stl": 1, "blk": 1}
+
+def push_key():
+    global _push_key
+    if _push_key is None:
+        import push; _push_key = push.load_keys(PUSH_KEY_FILE)
+    return _push_key
+
+def _push_db(c):
+    c.execute("CREATE TABLE IF NOT EXISTS push_subs(endpoint TEXT PRIMARY KEY, user TEXT, sub TEXT, prefs TEXT, created TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS push_sent(k TEXT PRIMARY KEY, at TEXT)")
+
+@app.get("/api/push/key")
+def push_public_key(x_code: str = Header("")):
+    check(x_code); import push
+    return {"key": push.public_key_b64(push_key())}
+
+@app.post("/api/push/subscribe")
+def push_subscribe(body: dict = Body(...), x_code: str = Header(""), x_user: str = Header("")):
+    user = who(x_user, x_code)
+    sub = body.get("sub") or {}; ep = str(sub.get("endpoint") or "")
+    if not ep.startswith("https://") or len(ep) > 1000 or not (sub.get("keys") or {}).get("p256dh") or not (sub.get("keys") or {}).get("auth"):
+        raise HTTPException(400, "Not a valid phone subscription")
+    prefs = {k: bool((body.get("prefs") or {}).get(k, True)) for k in ALERT_KINDS}
+    with closing(con()) as c:
+        _push_db(c)
+        c.execute("INSERT OR REPLACE INTO push_subs VALUES(?,?,?,?,?)", (ep, user, json.dumps({"endpoint": ep, "keys": sub["keys"]}), json.dumps(prefs), now())); c.commit()
+    return {"ok": True, "prefs": prefs}
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(body: dict = Body(...), x_code: str = Header("")):
+    check(x_code)
+    with closing(con()) as c:
+        _push_db(c); c.execute("DELETE FROM push_subs WHERE endpoint=?", (str(body.get("endpoint") or ""),)); c.commit()
+    return {"ok": True}
+
+def _notify_user(user, kind, title, body, tag):
+    """Send to every phone of `user` that has this kind of alert switched on. Phones that have gone away are forgotten."""
+    import push
+    sent = 0
+    with closing(con()) as c:
+        _push_db(c)
+        rows = c.execute("SELECT endpoint, sub, prefs FROM push_subs WHERE user=?", (user,)).fetchall()
+        for ep, sub, prefs in rows:
+            if kind != "test" and not json.loads(prefs or "{}").get(kind, True): continue
+            try: st = push.send(push_key(), json.loads(sub), dict(title=title, body=body, tag=tag, url="/#picks"))
+            except Exception: logging.exception("push failed"); continue
+            if st in (404, 410): c.execute("DELETE FROM push_subs WHERE endpoint=?", (ep,))
+            elif st < 300: sent += 1
+        c.commit()
+    return sent
+
+@app.post("/api/push/test")
+def push_test(x_code: str = Header(""), x_user: str = Header("")):
+    n = _notify_user(who(x_user, x_code), "test", "🏀 Pick alerts are on", "You'll hear about your saved picks during their games.", "test")
+    return {"sent": n}
+
+def _leg_now(l, box):
+    """(current value, minutes played) for a player leg from the live box score, or (None, None) if he is not in it."""
+    for t in box.get("teams", []):
+        for r in t.get("players", []):
+            if r.get("player_id") == l.get("player_id"):
+                s = l["stat"]
+                if s in ("dd", "td"): v = sum(1 for k in ("pts", "reb", "ast", "stl", "blk") if (r.get(k) or 0) >= 10)
+                elif s in ("pra", "pr", "pa"): v = sum(r.get(k) or 0 for k in {"pra": ("pts", "reb", "ast"), "pr": ("pts", "reb"), "pa": ("pts", "ast")}[s])
+                else: v = r.get(s) or 0
+                return v, r.get("min") or 0
+    return None, None
+
+def _target(l):
+    """The number a player over-leg needs: whole-number total that wins it."""
+    if l["stat"] == "dd": return 2
+    if l["stat"] == "td": return 3
+    line = float(l.get("line") or 0)
+    return line if l.get("kind") == "atleast" else math.floor(line) + 1
+
+def _game_clock(g):
+    p = g.get("period") or 0
+    return f"{g.get('clock','')} left in the {'4th' if p == 4 else 'OT' if p > 4 else str(p)+('st' if p==1 else 'nd' if p==2 else 'rd')}"
+
+def leg_status(l, g, box, exp_min):
+    """'done' / 'on track' / 'behind' / None for one leg of a saved pick, with a short line of text."""
+    name = l.get("text") or ""
+    if l["stat"] in ("ml", "spread", "total", "tt", "band"):
+        hm = g["home"]["score"] - g["away"]["score"]; tot = g["home"]["score"] + g["away"]["score"]
+        if l["stat"] == "ml": m = hm if l.get("side") == "home" else -hm; return ("on track" if m > 0 else "behind"), f"{name}: {'leading' if m > 0 else 'trailing' if m < 0 else 'level'}{'' if m == 0 else ' by ' + str(abs(m))}"
+        if l["stat"] == "spread": m = (hm if l.get("side") == "home" else -hm) + (l["line"] if l.get("side") == "home" else -l["line"]); return ("on track" if m > 0 else "behind"), f"{name}: {'covering' if m > 0 else 'behind the line'}"
+        if l["stat"] in ("total", "tt"):
+            pts = tot if l["stat"] == "total" else (g["home"]["score"] if l.get("team") == "home" else g["away"]["score"])
+            if l.get("side") == "over" and pts > l["line"]: return "done", f"{name}: done ({pts})"
+            pace = pts * 4 / max(min(g.get("period") or 1, 4) - (0 if g.get("detail", "").lower().startswith("half") else 0.5), 1)
+            ok = pace > l["line"] if l.get("side") == "over" else pace < l["line"]
+            return ("on track" if ok else "behind"), f"{name}: {pts} so far"
+        return None, name
+    if l.get("side") == "under": return None, name
+    v, mins = _leg_now(l, box)
+    if v is None: return None, name
+    need = _target(l)
+    if v >= need: return "done", f"{name}: done ({v})"
+    pace = v / mins * exp_min if mins else 0
+    return ("on track" if pace >= need else "behind"), f"{name}: {v} so far, needs {need}"
+
+def pick_alerts():
+    """Look at every open saved pick of people with alerts on and send: a leg is done · half-time check · close call in the 4th."""
+    import live
+    with closing(con()) as c:
+        _push_db(c)
+        users = {r[0] for r in c.execute("SELECT DISTINCT user FROM push_subs")}
+        if not users: return dict(users=0)
+        bets = [dict(r) for r in c.execute("SELECT id, user, legs FROM bets WHERE result='open'") if r["user"] in users]
+        sent_keys = {r[0] for r in c.execute("SELECT k FROM push_sent")}
+    if not bets: return dict(bets=0)
+    games = {g["game_id"]: g for g in live.scoreboard()}
+    exp = {(p["game_id"], p["player_id"]): (p.get("min") or 30) for p in projections_all()}
+    out, done_keys = 0, []
+    def once(k, user, kind, title, body):
+        nonlocal out
+        if k in sent_keys: return
+        sent_keys.add(k); done_keys.append(k); out += _notify_user(user, kind, title, body, k)
+    for b in bets:
+        legs = _safe(lambda: json.loads(b["legs"])) or []
+        live_games = [gid for gid in {l.get("game_id") for l in legs} if (games.get(gid) or {}).get("state") == "in"]
+        for gid in live_games:
+            g = games[gid]; box = _safe(lambda: live.boxscore(gid)) or {}
+            mine = [(i, l) for i, l in enumerate(legs) if l.get("game_id") == gid]
+            stats = [(i, l) + leg_status(l, g, box, exp.get((gid, l.get("player_id")), 30)) for i, l in mine]
+            for i, l, st, txt in stats:
+                if st == "done":
+                    once(f"done:{b['id']}:{i}", b["user"], "done", "✔ Pick leg done", f"{txt} · {_game_clock(g)}")
+            half = "half" in (g.get("detail") or "").lower() or (g.get("period") or 0) == 3
+            if half and stats:
+                ok = sum(1 for s in stats if s[2] in ("done", "on track")); lines = [("✔ " if s[2] == "done" else "👍 " if s[2] == "on track" else "⚠️ ") + s[3] for s in stats if s[2]]
+                once(f"half:{b['id']}:{gid}", b["user"], "half", f"Half-time: {ok} of {len(stats)} on track", "\n".join(lines))
+            if (g.get("period") or 0) >= 4:
+                for i, l, st, txt in stats:
+                    if st in ("on track", "behind") and l.get("player_id") and l["stat"] in CLOSE_GAP:
+                        v, _ = _leg_now(l, box); gap = _target(l) - (v or 0)
+                        if 0 < gap <= CLOSE_GAP[l["stat"]]:
+                            word = STAT_WORD.get(l["stat"], l["stat"])
+                            once(f"close:{b['id']}:{i}", b["user"], "close", f"🔥 {l.get('text','')} needs {gap:g} more {word}", f"{_game_clock(g)} · {txt}")
+    if done_keys:
+        with closing(con()) as c:
+            c.executemany("INSERT OR IGNORE INTO push_sent VALUES(?,?)", [(k, now()) for k in done_keys]); c.commit()
+    return dict(sent=out)
+
+def _alerts_loop():
+    time.sleep(60)
+    while True:
+        try: pick_alerts()
+        except Exception: logging.exception("pick alerts failed")
+        time.sleep(60)
+
+if os.environ.get("AUTO_REFRESH") == "1":
+    threading.Thread(target=_alerts_loop, daemon=True).start()
+
 @app.post("/api/bets")
 def add_bet(body: BetInput, x_user: str = Header(""), x_code: str = Header("")):
     user = who(x_user, x_code)

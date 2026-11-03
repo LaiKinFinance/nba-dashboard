@@ -588,6 +588,28 @@ async function delPick(id){if(!confirm("Delete this pick? It cannot be brought b
 function setPicksView(v){picksView=v;render()}
 async function picksTab(a){a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${picksView=="mine"?"on":""}" onclick="setPicksView('mine')">Mine</button><button class="${picksView=="friends"?"on":""}" onclick="setPicksView('friends')">Friends</button></div><div id="pkbody"><p class="mute">Loading…</p></div>`;
   await (picksView=="mine"?bets:friendsPicks)($("#pkbody"))}
+/* ---------- pick alerts (phone notifications for saved picks) ---------- */
+const ALERTS=[["done","A leg is done","As soon as a pick can no longer lose (e.g. over 8.5 rebounds reaches 9)"],["half","Half-time check","How many of your picks are on track at half-time"],["close","Close call late in the game","In the 4th quarter, when a pick needs just a little more"]];
+const alertPrefs=()=>{try{return JSON.parse(localStorage.alertPrefs||"{}")}catch(e){return{}}};
+const pushOK=()=>"serviceWorker"in navigator&&"PushManager"in window&&"Notification"in window;
+const b64k=s=>{const p="=".repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...b].map(c=>c.charCodeAt(0)))};
+async function alertSub(){if(!pushOK())return null;const r=await Promise.race([navigator.serviceWorker.ready,new Promise(z=>setTimeout(()=>z(null),3000))]);return r?r.pushManager.getSubscription():null}      // never leave the card blank if the phone is slow to start the helper
+async function alertsOn(){try{if(await Notification.requestPermission()!="granted"){paintAlerts();return}
+  const {key}=await api("push/key"),r=await navigator.serviceWorker.ready;let s=await r.pushManager.getSubscription();
+  if(!s)s=await r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64k(key)});
+  await post("push/subscribe",{sub:s.toJSON(),prefs:{...{done:true,half:true,close:true},...alertPrefs()}})}catch(e){console.error(e)}paintAlerts()}
+async function alertsOff(){try{const s=await alertSub();if(s){await post("push/unsubscribe",{endpoint:s.endpoint});await s.unsubscribe()}}catch(e){}paintAlerts()}
+async function alertPref(k,v){const p={...{done:true,half:true,close:true},...alertPrefs(),[k]:v};try{localStorage.alertPrefs=JSON.stringify(p)}catch(e){}
+  const s=await alertSub();if(s)try{await post("push/subscribe",{sub:s.toJSON(),prefs:p})}catch(e){}}
+async function alertTest(b){b.disabled=true;try{const r=await post("push/test",{});b.textContent=r.sent?"Sent – check your phone":"Not sent – try turning alerts off and on"}catch(e){b.textContent="Not sent"}}
+async function paintAlerts(){const box=$("#alertsBox");if(!box)return;const p={...{done:true,half:true,close:true},...alertPrefs()};let inner;
+  if(!pushOK())inner='<p class="mute" style="margin:0">This phone or browser can\'t receive alerts. On iPhone, add the app to your home screen first (Share → Add to Home Screen).</p>';
+  else if(Notification.permission=="denied")inner='<p class="mute" style="margin:0">Notifications are blocked for this site. Allow them in your phone\'s settings for this app, then come back here.</p>';
+  else{const s=await alertSub().catch(()=>null);
+    inner=s?`<p class="mute" style="margin:0 0 6px">On for this phone. Alerts are about the picks you saved here (Mine), during their games.</p>${ALERTS.map(([k,t,d])=>`<label style="display:flex;gap:10px;align-items:flex-start;padding:6px 0"><input type="checkbox" ${p[k]?"checked":""} onchange="alertPref('${k}',this.checked)" style="margin-top:3px;width:18px;height:18px"><span><b>${t}</b><br><span class="mute" style="font-size:12.5px">${d}</span></span></label>`).join("")}
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn" onclick="alertTest(this)">Send a test alert</button><button class="btn" onclick="alertsOff()">Turn off</button></div>`
+     :`<p class="mute" style="margin:0 0 8px">Get a notification when a saved pick's leg is done, a half-time check, and close calls late in the game.</p><button class="btn p" onclick="alertsOn()">Turn on pick alerts</button>`}
+  box.innerHTML=`<details class="card" ${foldOpen("alerts",true)?"open":""} ontoggle="foldSet('alerts',this.open)"><summary class="csum">🔔 Pick alerts</summary>${inner}</details>`}
 async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.teams||{};GT={...GT,...(s.game_teams||{})};
   const mine=s.bets.filter(b=>b.user==me),open=mine.filter(b=>b.result=="open"),done=mine.filter(b=>b.result!="open");
   const u=s.users.find(x=>x.user==me)||{bets:0,settled:0,wins:0,losses:0};
@@ -601,12 +623,13 @@ async function bets(a){const s=await api("scorecard"),me=localStorage.user;PT=s.
       ${!["won","lost","open"].includes(b.result)?'<div class="mute">A tied result or a player who did not play stays out of the win/loss count.</div>':""}
       ${b.result=="open"?`<div style="margin-top:8px"><button class="btn" onclick="delPick(${b.id})">Delete</button></div>`:""}
       </div>`};
-  a.innerHTML=`${infoNote("mp","Save a pick from Games or Best picks. This page shows whether it was right. Only completed picks with a clear result count.")}
+  a.innerHTML=`<div id="alertsBox"></div>${infoNote("mp","Save a pick from Games or Best picks. This page shows whether it was right. Only completed picks with a clear result count.")}
     <div class="tiles"><div class="tile"><div class="v">${u.bets}</div><div class="k">Picks saved</div></div><div class="tile"><div class="v">${u.wins}</div><div class="k">Won</div></div><div class="tile"><div class="v">${u.losses}</div><div class="k">Lost</div></div></div>
     ${open.length?`<div class="card"><h2>Waiting for the games</h2><div id="openPicks">${open.map(card).join("")}</div></div>`:""}
     <details class="card" ${foldOpen("results",false)?"open":""} ontoggle="foldSet('results',this.open)"><summary class="csum">Pick results <span class="mute" style="font-weight:400;font-size:13px">· everyone</span></summary>${s.users.length?`<table class="t"><tr><th style="text-align:left">Name</th><th>Won</th><th>Lost</th><th>Right</th></tr>${s.users.map(x=>`<tr><td style="text-align:left">${esc(x.user)}</td><td>${x.wins}</td><td>${x.losses}</td><td>${x.settled?pct(x.hit_rate):"–"}</td></tr>`).join("")}</table><p class="mute">Counted picks only. Results marked by hand are included.</p>`:'<p class="mute">Nobody has saved a pick yet.</p>'}</details>
     ${done.length?`<details class="card" ${foldOpen("past",false)?"open":""} ontoggle="foldSet('past',this.open)"><summary class="csum">Past picks <span class="mute" style="font-weight:400;font-size:13px">(${done.length})</span></summary>${done.map(card).join("")}</details>`:""}
     ${!mine.length?'<div class="card empty">Your saved picks will appear here.</div>':""}`;
+  paintAlerts();
   // live numbers for picks still waiting: same figures as the Live tab, refreshed every 20 seconds
   const ids=[...new Set(open.flatMap(b=>JSON.parse(b.legs).map(l=>l.game_id)))];
   const paint=()=>{const el=$("#openPicks");if(el)el.innerHTML=open.map(card).join("")};
@@ -855,6 +878,7 @@ if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(
 const ios=/iphone|ipad/i.test(navigator.userAgent)&&!navigator.standalone;
 if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this as an app, tap the Share button, then “Add to Home Screen”.\n\nShow this tip again?")===false)localStorage.iosHint=1},2500)}
 
+if(location.hash=="#picks"){tab="pk";picksView="mine";history.replaceState(null,"",location.pathname)}      // opened from a pick alert
 (async()=>{paintTheme();$("#me").textContent=localStorage.user||"Sign in";nav();
   if(!localStorage.user){showLogin()}
   try{meta=await api("meta")}catch(e){}
