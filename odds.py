@@ -16,7 +16,7 @@ STAT_OF = {"player_points": "pts", "player_rebounds": "reb", "player_assists": "
 PREFERRED = "sportsbet"
 DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
 MIN_CREDITS = int(os.environ.get("ODDS_MIN_CREDITS", "20"))
-GAMES_PER_RUN = int(os.environ.get("ODDS_GAMES_PER_DAY", "10"))
+GAMES_PER_RUN = int(os.environ.get("ODDS_GAMES_PER_DAY", "16"))      # a full NBA night is up to 15 games
 REFETCH_HOURS = 10  # a game's odds are refreshed at most this often
 
 def available():
@@ -78,7 +78,7 @@ def parse_event(js, name_to_pid):
                 rows.append((pid, stat, line, {"yes": "over", "no": "under"}.get(side, side), price, b["key"]))
     return rows
 
-def refresh(games, players_by_game):
+def refresh(games, players_by_game, window_h=30, refetch_h=None):
     """games: upcoming ESPN games [{game_id,start,home,away}] ; players_by_game: {game_id: [(player_id, player_name)]}."""
     import slate as sl
     if not available(): return dict(ok=False, msg="No ODDS_API_KEY set")
@@ -97,9 +97,9 @@ def refresh(games, players_by_game):
     fetched = 0; errors = []
     for g in sorted(games, key=lambda x: x["start"]):
         start = dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00"))
-        if start - now > dt.timedelta(hours=30) or start < now: continue
+        if start - now > dt.timedelta(hours=window_h) or start < now: continue
         row = con.execute("SELECT fetched_at FROM odds_fetch WHERE game_id=?", (g["game_id"],)).fetchone(); last = row[0] if row else None  # remembered even when a fetch returned no prices
-        if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=REFETCH_HOURS): continue
+        if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=refetch_h or REFETCH_HOURS): continue
         ev = ev_by.get((g["home"], g["away"]))
         if not ev or fetched >= GAMES_PER_RUN: continue
         if remaining is not None and int(float(remaining)) < MIN_CREDITS: break
@@ -149,13 +149,13 @@ def status(con):
 
 LINES_REFETCH_HOURS = float(os.environ.get("ODDS_LINES_HOURS", "8"))
 
-def refresh_lines(games):
+def refresh_lines(games, refetch_h=None):
     """Winner / handicap / total prices for every upcoming game in ONE request (3 credits), at most every LINES_REFETCH_HOURS."""
     import slate as sl
     if not available(): return dict(ok=False, msg="No ODDS_API_KEY set")
     con = sqlite3.connect(DB); init(con); now = dt.datetime.now(dt.timezone.utc)
     row = con.execute("SELECT v FROM odds_status WHERE k='lines_at'").fetchone()
-    if row and now - dt.datetime.fromisoformat(row[0]) < dt.timedelta(hours=LINES_REFETCH_HOURS): return dict(ok=True, skipped=True)
+    if row and now - dt.datetime.fromisoformat(row[0]) < dt.timedelta(hours=refetch_h or LINES_REFETCH_HOURS): return dict(ok=True, skipped=True)
     try: js, remaining = _get("/sports/basketball_nba/odds", regions="au", markets="h2h,spreads,totals", oddsFormat="decimal")
     except Exception as e:
         con.execute("INSERT OR REPLACE INTO odds_status VALUES('lines_error',?)", (scrub(e)[:200],)); con.commit()

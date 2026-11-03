@@ -16,14 +16,14 @@ def _fixture_game():
 
 def test_failed_player_price_call_is_partial_not_ok(blank, monkeypatch):
     monkeypatch.setattr(app, "projections_all", lambda: [])
-    monkeypatch.setattr(odds, "refresh", lambda g, p: dict(ok=False, msg="events call failed"))
-    monkeypatch.setattr(odds, "refresh_lines", lambda g: dict(ok=True))
+    monkeypatch.setattr(odds, "refresh", lambda g, p, **k: dict(ok=False, msg="events call failed"))
+    monkeypatch.setattr(odds, "refresh_lines", lambda g, **k: dict(ok=True))
     assert app._stage("odds", app.refresh_odds) == "partial"
     assert TestClient(app.app).get("/api/health").json()["stages"]["odds"]["note"].startswith("player prices")
 
 def test_failed_team_price_call_is_partial_not_ok(blank, monkeypatch):
     monkeypatch.setattr(app, "projections_all", lambda: [])
-    monkeypatch.setattr(odds, "refresh", lambda g, p: dict(ok=True)); monkeypatch.setattr(odds, "refresh_lines", lambda g: dict(ok=False, msg="HTTP 500"))
+    monkeypatch.setattr(odds, "refresh", lambda g, p, **k: dict(ok=True)); monkeypatch.setattr(odds, "refresh_lines", lambda g, **k: dict(ok=False, msg="HTTP 500"))
     assert app._stage("odds", app.refresh_odds) == "partial"
 
 def test_per_game_error_is_kept_and_last_ok_does_not_advance(blank, monkeypatch):

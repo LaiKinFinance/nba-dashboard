@@ -14,7 +14,7 @@ DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
 ACCESS_CODE = os.environ.get("APP_ACCESS_CODE", "")  # shared secret for friends; empty = open
 import threading, time, logging
 
-def refresh_odds():
+def refresh_odds(window_h=30, refetch_h=None):
     """Fetch bookmaker prices. Returns {'problem': ...} when any part failed, so the refresh step is reported as partial/failed, not ok."""
     import odds
     if not odds.available(): return dict(skipped=True, problem=None)
@@ -23,7 +23,7 @@ def refresh_odds():
         games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], home=p["team"] if p["home"] else p["opp"], away=p["opp"] if p["home"] else p["team"]))
         pbg.setdefault(p["game_id"], []).append((p["player_id"], p["player"]))
     gl = list(games.values())
-    props, lines = odds.refresh(gl, pbg), odds.refresh_lines(gl)
+    props, lines = odds.refresh(gl, pbg, window_h=window_h, refetch_h=refetch_h), odds.refresh_lines(gl, refetch_h=refetch_h)
     bad = [f"{name}: {r.get('msg') or 'failed'}" for name, r in (("player prices", props), ("team prices", lines)) if not r.get("ok")]
     return dict(props=props, lines=lines, problem=odds.scrub("; ".join(bad))[:300] or None)
 
@@ -105,8 +105,7 @@ def refresh_once():
             if _models_age() > TRAIN_EVERY or predict.model_stale(): _stage("train", train_quietly)
             if predict.model_stale(): _status_set("project", "skipped", "saved model is out of date; waiting for a good retrain")
             else: _stage("project", project_quietly)
-        if _odds_on(): _stage("odds", refresh_odds)
-        else: _status_set("odds", "skipped", "no Odds API key set")
+        if not _odds_on(): _status_set("odds", "skipped", "no Odds API key set")      # prices are fetched on their own timetable (odds_slot_due)
         _stage("grade", grade_picks); _stage("grade_bets", grade_bets); _stage("log_picks", log_picks)
         _stage("served_check", store_served_check)
         _stage("backup", backup_db)
@@ -211,6 +210,43 @@ app.add_middleware(BodyLimit, limit=MAX_BODY)
 app.add_middleware(GZipMiddleware, minimum_size=1000)      # the page and the slate are large text: sending them compressed is several times smaller
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_refresh_loop, daemon=True).start()
+
+ODDS_SLOTS = (20, 2, 8)      # Melbourne clock: 8pm (lines ready before bed), 2am and 8am refreshes; every game of the next day is fetched at each
+ODDS_WINDOW_H = 22           # games starting within this many hours of a fetch
+
+def odds_slot_due(now_utc, done_key):
+    """The latest fetch time (8pm / 2am / 8am Melbourne) that has passed in the last 6 hours, if it has not been run yet; else None."""
+    from zoneinfo import ZoneInfo
+    mel = now_utc.astimezone(ZoneInfo("Australia/Melbourne"))
+    for back in range(0, 7):
+        t = (mel - dt.timedelta(hours=back)).replace(minute=0, second=0, microsecond=0)
+        if t.hour in ODDS_SLOTS and t <= mel:
+            key = t.strftime("%Y-%m-%d %H:00 Melbourne")
+            return None if key == done_key else key
+    return None
+
+def _odds_loop():
+    time.sleep(90)
+    while True:
+        try:
+            if _odds_on():
+                with closing(con()) as c:
+                    c.execute("CREATE TABLE IF NOT EXISTS odds_slots(k TEXT PRIMARY KEY, v TEXT)")
+                    row = c.execute("SELECT v FROM odds_slots WHERE k='done'").fetchone()
+                key = odds_slot_due(dt.datetime.now(dt.timezone.utc), row[0] if row else None)
+                if key:
+                    res = {}
+                    _stage("odds", lambda: res.update(refresh_odds(window_h=ODDS_WINDOW_H, refetch_h=4)) or res)
+                    props = res.get("props") or {}
+                    with closing(con()) as c:
+                        c.execute("INSERT OR REPLACE INTO odds_slots VALUES('done', ?)", (key,))
+                        c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", ("log " + key, json.dumps(dict(games=props.get("fetched"), credits_left=props.get("remaining")))))
+                        c.commit()
+        except Exception: logging.exception("odds timetable failed")
+        time.sleep(300)
+
+if os.environ.get("AUTO_REFRESH") == "1":
+    threading.Thread(target=_odds_loop, daemon=True).start()
 
 RESULTS_EVERY = 300           # seconds between looks at the scoreboard for games that have just finished
 
@@ -1743,6 +1779,6 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None, credits_left=ostat.get("remaining")),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), phones=phone_speed(), phones_last=list(PHONE_TIMES)[-12:])
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(lambda: [dict(time=k[4:], **json.loads(v)) for k, v in c.execute("SELECT k, v FROM odds_slots WHERE k LIKE 'log %' ORDER BY k DESC LIMIT 9")], []), phones=phone_speed(), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
