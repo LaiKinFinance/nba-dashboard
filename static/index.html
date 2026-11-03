@@ -742,7 +742,7 @@ function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.s
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
   return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+boxHTML(g):""}</div></div>`}
 function legNow(l){const b=boxes[l.game_id];if(!b)return null;for(const t of b.teams){const r=t.players.find(p=>p.player_id==l.player_id);if(r)return r}return null}
-function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=teamLegLogos(l)+esc(l.text||"");
+function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=teamLegLogos(l)+esc(l.text||"")+liveDot(l.game_id);      // red dot while the game is live, like player picks
   if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
   if(g.state=="pre")return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · starts ${timeOf(g.start)}</span></div>`;
   const hm=g.home.score-g.away.score,tot=g.home.score+g.away.score;let hit,txt,frac;
