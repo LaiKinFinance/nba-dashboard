@@ -225,6 +225,11 @@ def odds_slot_due(now_utc, done_key):
             return None if key == done_key else key
     return None
 
+def price_fetch_log():
+    """The last nine timetable fetches: when, how many games, credits left afterwards (for /api/health)."""
+    with closing(con()) as c:
+        return [dict(time=k[4:], **json.loads(v)) for k, v in c.execute("SELECT k, v FROM odds_slots WHERE k LIKE 'log %' ORDER BY k DESC LIMIT 9")]
+
 def _odds_loop():
     time.sleep(90)
     while True:
@@ -1779,6 +1784,6 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None, credits_left=ostat.get("remaining")),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(lambda: [dict(time=k[4:], **json.loads(v)) for k, v in c.execute("SELECT k, v FROM odds_slots WHERE k LIKE 'log %' ORDER BY k DESC LIMIT 9")], []), phones=phone_speed(), phones_last=list(PHONE_TIMES)[-12:])
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), phones=phone_speed(), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
