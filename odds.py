@@ -7,7 +7,7 @@ import os, re, sqlite3, time, unicodedata, datetime as dt, math
 import requests
 
 BASE = "https://api.the-odds-api.com/v4"
-MARKETS = os.environ.get("ODDS_MARKETS", "player_points,player_rebounds,player_assists,player_double_double,player_triple_double")
+MARKETS = os.environ.get("ODDS_MARKETS", "player_points,player_rebounds,player_assists,player_points_rebounds_assists,player_double_double,player_triple_double")      # pts+reb+ast lines feed the Top player calls (1 credit per game per fetch)
 STAT_OF = {"player_points": "pts", "player_rebounds": "reb", "player_assists": "ast",
            "player_points_alternate": "pts", "player_rebounds_alternate": "reb", "player_assists_alternate": "ast",
            "player_points_rebounds_assists": "pra", "player_points_rebounds": "pr", "player_points_assists": "pa",

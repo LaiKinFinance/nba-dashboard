@@ -823,7 +823,8 @@ def grade_picks():
                 elif r["stat"] in ("dd", "td"):
                     cats = sum(1 for k in ("pts", "reb", "ast", "stl", "blk") if pr[k] >= 10); actual = float(cats); res = "won" if cats >= (2 if r["stat"] == "dd" else 3) else "lost"
                 else:
-                    actual = float(sum(pr[k] for k in COMBO_PARTS.get(r["stat"], (r["stat"],)))); res = "won" if actual > r["line"] else "lost"
+                    actual = float(sum(pr[k] for k in COMBO_PARTS.get(r["stat"], (r["stat"],))))
+                    res = "won" if ((actual < r["line"]) if r["side"] == "under" else (actual > r["line"])) else "lost"
             c.execute("UPDATE pick_log SET result=?, actual=?, graded_at=? WHERE id=?", (res, actual, now, r["id"]))
         record_closing_prices(c)
         for r in c.execute("SELECT * FROM combo_log WHERE result IS NULL").fetchall():
@@ -974,7 +975,7 @@ def _warmer():
     while True:
         _warm_evt.wait(30); _warm_evt.clear()
         try:
-            t = time.time(); enriched(); cached_calc("best", compute_best); cached_calc("value", compute_value); cached_calc("slate", _slate_bytes)
+            t = time.time(); enriched(); cached_calc("best", compute_best); cached_calc("value", compute_value); cached_calc("slate", _slate_bytes); cached_calc("calls", compute_calls)
             if _lu_cache["data"]: cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])
             with closing(con()) as c:
                 if _steady_cache.get("stamp") != results_stamp(c):          # Teams tab: only when new game results or roster moves are saved
@@ -1163,6 +1164,83 @@ def compute_best():
         res = pl.parlay(legs, pmap, alph["alphas"], alph["corr"], n=60000)
         if (res["fair_odds"] or 0) >= 2.0 or len(combo) == 3: break
     return dict(legs=cands[:8], combo=dict(legs=combo, joint=res["joint"] if res else None, fair_odds=res["fair_odds"] if res else None), playing=playing_picks())
+
+CALL_MIN_P = 0.60          # Top player calls: only calls the model rates at least this likely
+CALL_SKIP_INJURY = ("out", "doubtful", "questionable", "day-to-day", "game-time decision")
+
+def _main_pra_line(entries):
+    """The bookmaker's main points+rebounds+assists line: the one priced closest to even on both sides."""
+    both = [e for e in entries if e.get("price") and e.get("under")]
+    if both: return min(both, key=lambda e: abs(e["price"] - e["under"]))
+    priced = [e for e in entries if e.get("price")]
+    return min(priced, key=lambda e: abs(e["price"] - 1.9)) if priced else None
+
+def _team_history(c, team, opp):
+    """How far below/above normal `team` has scored against `opp` (this and last season, 2+ meetings), or None."""
+    try:
+        seasons = [r[0] for r in c.execute("SELECT DISTINCT season FROM games ORDER BY season DESC LIMIT 2")]
+        g = pd.read_sql(f"SELECT season, home, away, home_pts, away_pts FROM games WHERE home_pts IS NOT NULL AND season IN ({','.join('?' * len(seasons))})", c, params=seasons)
+    except Exception: return None
+    t = pd.concat([g.assign(tm=g.home, op=g.away, pf=g.home_pts, pa=g.away_pts), g.assign(tm=g.away, op=g.home, pf=g.away_pts, pa=g.home_pts)])
+    t["res"] = t.pf - (t.groupby(["season", "tm"]).pf.transform("mean") + t.groupby(["season", "op"]).pa.transform("mean") - t.groupby("season").pf.transform("mean"))
+    m = t[(t.tm == team) & (t.op == opp)]
+    return float(m.res.mean()) if len(m) >= 2 else None
+
+def compute_calls():
+    """Top player calls: each team's top player in the next day's games, over or under his points+rebounds+assists line at the bookmaker,
+    keeping only the 3 calls the model rates most likely (60%+). Same safety rules as Best picks."""
+    preds = next_game_day([p for p in enriched() if not p.get("frozen") and not has_started(p["start"])])
+    _, why = model_status(preds)
+    if why: return dict(calls=[], notice=why)
+    top = {}
+    for p in preds:
+        pra = sum(p["proj"][k] for k in ("pts", "reb", "ast"))
+        if p["team"] not in top or pra > top[p["team"]][1]: top[p["team"]] = (p, pra)
+    gp = game_preds(); out = []
+    with closing(con()) as c:
+        for team, (p, pra) in top.items():
+            if ((p.get("injury") or {}).get("status") or "").strip().lower() in CALL_SKIP_INJURY: continue
+            if p.get("returning") or p.get("new_team") or is_stale(p.get("odds_age_h")): continue
+            e = _main_pra_line((p.get("book") or {}).get("pra") or [])
+            if not e or e.get("p_over") is None: continue
+            side = "over" if e["p_over"] >= 0.5 else "under"; chance = e["p_over"] if side == "over" else 1 - e["p_over"]
+            price = e["price"] if side == "over" else e.get("under")
+            if chance < CALL_MIN_P or not price: continue
+            tags = []; g = gp.get(p["game_id"]) or {}
+            if g.get("margin") is not None:
+                fav = g["margin"] if p["home"] else -g["margin"]
+                if fav >= 10: tags.append("blowout risk · big favourite")
+                elif fav <= -10: tags.append("big underdog")
+            h = _team_history(c, team, p["opp"])
+            if h is not None and h <= -8: tags.append("team scores low v this opponent")
+            elif h is not None and h >= 8: tags.append("team scores high v this opponent")
+            if p.get("absent"): tags.append(f"{len(p['absent'])} teammate{'s' if len(p['absent']) > 1 else ''} out")
+            l10 = [x["pts"] + x["reb"] + x["ast"] for x in (p.get("last10") or [])]
+            out.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=team, opp=p["opp"], home=p["home"], start=p["start"],
+                            stat="pra", line=e["line"], side=side, p=chance, price=price, book=e.get("book"), expects=round(pra, 1), tags=tags,
+                            last10=l10, minutes=p.get("min"), absent=[a["name"] for a in (p.get("absent") or [])][:3]))
+    out.sort(key=lambda x: -x["p"])
+    return dict(calls=out[:3])
+
+def log_calls(res):
+    """Lock today's calls into their own record before tip-off (graded like Best picks; kept apart from the Best picks record)."""
+    now = dt.datetime.now(dt.timezone.utc); now_s = now.strftime("%Y-%m-%dT%H:%MZ"); mid = _current_model_id()
+    with closing(con()) as c:
+        for x in res.get("calls", []):
+            if x["start"] <= now_s: continue
+            c.execute("INSERT OR IGNORE INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,hit,n,price,book,in_combo,created,model_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (et_day(x["start"]), x["game_id"], x["player_id"], x["player"], x["team"], "call", "pra", x["line"], x["side"], x["p"], None, None, x["price"], x.get("book"), 0, now.isoformat(), mid))
+        c.commit()
+
+@app.get("/api/calls")
+def calls(x_code: str = Header("")):
+    check(x_code)
+    res = cached_calc("calls", compute_calls)
+    try: log_calls(res)
+    except Exception: logging.exception("call logging failed")
+    with closing(con()) as c:
+        rec = c.execute("SELECT sum(result='won'), sum(result='lost') FROM pick_log WHERE kind='call'").fetchone()
+    return dict(res, record=dict(won=rec[0] or 0, lost=rec[1] or 0))
 
 def playing_picks():
     """Picks that were published before tip-off and have no result yet, for games that have started. The page shows only those in a live game."""
