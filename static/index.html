@@ -458,10 +458,10 @@ function callsHTML(){const c=CALLS;if(!c)return"";const L=c.calls||[],rec=c.reco
      <div style="text-align:right"><b style="font-size:16px;color:${x.side=="over"?"var(--good)":"var(--bad)"}">${x.side=="over"?"▲ OVER":"▼ UNDER"}</b><div><strong>${pct(x.p)}</strong> <span class="mute">· ${x.price.toFixed(2)}</span></div></div>
      <details style="width:100%;margin:0 0 0 28px"><summary style="font-size:12px">Evidence</summary><ul class="why"><li>Last 10 games (pts+reb+ast): ${x.last10.join(", ")||"–"}</li>${x.minutes?`<li>Minutes lately: about ${Math.round(x.minutes)}</li>`:""}${x.absent.length?`<li>Teammates out: ${x.absent.map(esc).join(", ")}</li>`:""}<li>The model rates ${x.side} ${x.line} at ${pct(x.p)}; the bookmaker pays ${x.price.toFixed(2)}.</li></ul></details>
      <div style="margin:4px 0 6px 28px"><button class="btn" style="padding:6px 12px" data-lks="${lks([callLeg(x)])}" onclick="toggleLegs([callLeg(CALLS.calls[${i}])])">Add to pick list</button></div></div>`;
-  return `<div class="card"><h2 style="margin-top:0">🎯 Top player calls <span class="mute" style="font-weight:400;font-size:13px">· pts + reb + ast</span></h2>
+  return `<details class="card" ${foldOpen("calls",true)?"open":""} ontoggle="foldSet('calls',this.open)"><summary class="csum">🎯 Top player calls <span class="mute" style="font-weight:400;font-size:13px">· pts + reb + ast${L.length?` · ${L.length}`:""}</span></summary>
    <p class="mute" style="margin:0 0 6px">Each team's top player, over or under his bookmaker line. Only the 3 clearest calls (60%+) are shown.</p>
    ${L.length?L.map(row).join(""):'<p class="mute">No clear calls right now. Calls appear once bookmaker lines are in (from about 8pm the night before), and only when the model is 60%+ sure.</p>'}
-   ${n?`<div class="mute" style="margin-top:6px">Calls so far: ${rec.won} of ${n} right (${Math.round(rec.won/n*100)}%)</div>`:""}</div>`}
+   ${n?`<div class="mute" style="margin-top:6px">Calls so far: ${rec.won} of ${n} right (${Math.round(rec.won/n*100)}%)</div>`:""}</details>`}
 function bestHTML(){if(!best)return"";const c=best.combo;
   const more=best.legs.map((l,i)=>`<button class="sl" data-lks="${lks([bestLeg(l)])}" data-rem="<b>Remove</b><small>${esc(l.player)} · Over ${l.line} ${statName[l.stat]}</small>" onclick="addBestLeg(${i})"><b>${esc(l.player)}</b><small>Over ${l.line} ${statName[l.stat]} · ${pct(l.p)} · ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</small></button>`).join("");
   if(!c.legs.length)return"";
