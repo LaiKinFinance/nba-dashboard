@@ -105,6 +105,19 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7, team_legs=(), gps=None, f
         if comp in ("dd", "td"):
             p = pred["p_dd"] if comp == "dd" else pred["p_td"]; vals[(game, pid, comp)] = (u[:, v["i"]] > 1 - p).astype(float)
         else: vals[(game, pid, comp)] = samples(comp, u[:, v["i"]], pred["proj"][comp], alphas)
+    # A pinned leg moves its player's whole result for that stat (a small even shift on smoothed draws), and EVERY leg on that
+    # player/stat reads the same moved result: "over 26.5" and "under 26.5" can then never both win, whatever lines are mixed.
+    totals, moved = {}, {}
+    def total(game, pid, s):
+        if (game, pid, s) not in totals: totals[(game, pid, s)] = sum(vals[(game, pid, c)] for c in (COMBO[s] if s in COMBO else (s,)))
+        return totals[(game, pid, s)]
+    for li, l in enumerate(legs):
+        k = (l["game_id"], l["player_id"], l["stat"])
+        if li in fixed and l["stat"] not in ("dd", "td") and k not in moved:
+            q = float(fixed[li]); over = l.get("side", "over") == "over"
+            xs = total(*k) + np.random.default_rng(seed + 1000 + li).random(n) - 0.5          # smooth whole numbers so the shift can hit the chance
+            cut = np.quantile(xs, 1 - q if over else q)
+            moved[k] = xs + (float(l["line"]) - cut)                                        # now P(result > line) = q (over) or P(result < line) = q (under)
     wins, probs = [], []
     for li, l in enumerate(legs):
         game, pid, s = l["game_id"], l["player_id"], l["stat"]
@@ -112,14 +125,11 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7, team_legs=(), gps=None, f
             w = vals[(game, pid, s)] > 0.5
             if l.get("side", "over") == "under": w = ~w
         else:
-            x = sum(vals[(game, pid, c)] for c in (COMBO[s] if s in COMBO else (s,)))
-            if li in fixed:                     # same draws, cut so this leg wins exactly as often as its pinned chance
-                q = float(fixed[li]); w = x > np.quantile(x, 1 - q) if l.get("side", "over") == "over" else x < np.quantile(x, q)
-                if abs(w.mean() - q) > 0.02: w = np.random.default_rng(seed + li).random(len(x)) < q      # very lumpy counts: fall back to an even cut
-            else: w = x > l["line"] if l.get("side", "over") == "over" else x < l["line"]
+            x = moved.get((game, pid, s), total(game, pid, s))
+            w = x > l["line"] if l.get("side", "over") == "over" else x < l["line"]
         wins.append(w)
         exact = leg_prob_single(preds[(l["game_id"], pid)], alphas, l)
-        probs.append(float(fixed[li]) if li in fixed else float(exact) if exact is not None else float(w.mean()))
+        probs.append(float(fixed[li]) if li in fixed else float(w.mean()) if (game, pid, s) in moved else float(exact) if exact is not None else float(w.mean()))
     for l in team_legs:
         z = lambda c: stats.norm.ppf(np.clip(u[:, var[(l["game_id"], "_" + c, "_" + c)]["i"]], 1e-9, 1 - 1e-9))
         wins.append(_team_win(l, gps[l["game_id"]], z("margin"), z("total")))

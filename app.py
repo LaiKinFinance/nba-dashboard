@@ -503,7 +503,7 @@ def enriched():
     """Same as _enriched_build(), but computed once per change of data (or per minute) and shared, because every tab asks for it.
     The returned list is shared: callers must not modify it."""
     key = _enriched_key()
-    if _enr["val"] is not None and (_enr["key"] == key or _serve_last(_enr["at"])):
+    if _enr["val"] is not None and (_enr["key"] == key or (_serve_last(_enr["at"]) and _enr["key"] and _enr["key"][2] == key[2])):
         if _enr["key"] != key: _warm_evt.set()
         return _enr["val"]
     with _enr_lock:
@@ -958,22 +958,32 @@ def value_picks(x_code: str = Header("")):
 
 _calc, _calc_lock = {}, threading.Lock()
 
+def _price_ok(x):
+    """A saved pick may be shown only while its bookmaker price is under the 8-hour limit (checked again at every request)."""
+    t = x.get("price_time")
+    if not t: return True
+    try: age = (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(str(t).replace("Z", "+00:00"))).total_seconds() / 3600
+    except ValueError: return True
+    return not is_stale(age)
+
+def _live_ok(x): return not has_started(x.get("start") or "9999") and _price_ok(x)
+
 def _not_started_best(res):
     """Best picks as served: legs whose game has started are dropped, and a combo with any started leg is withdrawn (checked at every request)."""
     if not isinstance(res, dict) or "legs" not in res: return res
-    out = dict(res, legs=[l for l in res["legs"] if not has_started(l["start"])])
+    out = dict(res, legs=[l for l in res["legs"] if _live_ok(l)])
     cl = (res.get("combo") or {}).get("legs") or []
-    if any(has_started(l["start"]) for l in cl): out["combo"] = dict(legs=[], joint=None, fair_odds=None)
+    if any(not _live_ok(l) for l in cl): out["combo"] = dict(legs=[], joint=None, fair_odds=None)
     return out
 
 def _not_started_value(res):
     if not isinstance(res, dict) or "picks" not in res: return res
-    return dict(res, picks=[p for p in res["picks"] if not has_started(p.get("start") or "9999")])
+    return dict(res, picks=[p for p in res["picks"] if _live_ok(p)])
 def cached_calc(name, fn, extra=None):
     """Best picks and Value bets are worked out once per change of data (or per minute, like enriched()) and shared by every request,
     instead of each tab and each pick log recomputing both. One at a time, so two tabs opening together never do the same work twice."""
     k = (_enriched_key(), extra); hit = _calc.get(name)
-    if hit and (hit[0] == k or _serve_last(hit[2])):
+    if hit and (hit[0] == k or (_serve_last(hit[2]) and hit[0][0][2] == k[0][2])):      # a copy made with another model is never served
         if hit[0] != k: _warm_evt.set()
         return hit[1]
     with _calc_lock:
@@ -1026,7 +1036,7 @@ def compute_value():
                 edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
                 if edge < min_edge(p) or l["n"] < 5: continue
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
-                out.append(dict(kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
+                out.append(dict(price_time=p.get("odds_at"), kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
                                 price=l["price"], book=l["book"], price_age_h=p.get("odds_age_h"), p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
                                 confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
@@ -1035,7 +1045,7 @@ def compute_value():
             edge = p[pk] - 1 / b["price"]; adj = 0.7 * p[pk] + 0.3 / b["price"]
             if edge < min_edge(p): continue
             hk = p[f"{s}_hit"]
-            out.append(dict(kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
+            out.append(dict(price_time=p.get("odds_at"), kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
                             p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0,
                             confidence="Medium" if edge >= 0.1 and hk["k"] / max(hk["n"], 1) >= 0.25 else "Speculative",
                             evidence=[f"Model chance {p[pk]*100:.1f}% vs price implies {100/b['price']:.1f}%", f"Did it in {hk['k']} of his last {hk['n']} games"] +
@@ -1057,7 +1067,7 @@ def compute_value():
         for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
             pr = (b.get("h2h") or {}).get(side)
             if pr and g[pk] - 1 / pr[0] >= 0.04:
-                ranked.append(dict(kind="team", start=g["start"], game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
+                ranked.append(dict(kind="team", price_time=(dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=lage[gid])).isoformat() if lage.get(gid) is not None else None, start=g["start"], game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
                                    adj_edge=g[pk] - 1 / pr[0], confidence="Medium" if g[pk] - 1 / pr[0] >= 0.06 else "Speculative",
                                    evidence=[f"Betting-market consensus (DraftKings) puts {nmx} at {g[pk]*100:.0f}% to win; {bkName_(pr[1])}'s price implies only {100/pr[0]:.0f}%",
                                              f"Expected score {g['away']} {g['away_pts']:.0f} – {g['home']} {g['home_pts']:.0f} (market spread and total)",
@@ -1111,7 +1121,7 @@ def _best_candidates(preds):
             if not ok: continue
             o = max(ok, key=lambda x: x["line"])  # highest line that is still safe = best payout among safe legs
             if o["p"] > 0.86: continue  # too short to be worth a leg (pays almost nothing)
-            cands.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
+            cands.append(dict(price_time=p.get("odds_at"), game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=o["line"], side="over",
                               p=o["p"], hit=o["hit"], n=o["n"], price=o["price"], real=True, starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"]))
     cands += _steady_pra_candidates(preds)
     return cands
@@ -1138,7 +1148,7 @@ def _steady_pra_candidates(preds):
         if not ok: continue
         o = max(ok, key=lambda x: x["line"])
         if o["p"] > 0.86: continue
-        out.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat="pra", line=o["line"], side="over", p=o["p"], hit=o["hit"], n=o["n"],
+        out.append(dict(price_time=p.get("odds_at"), game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat="pra", line=o["line"], side="over", p=o["p"], hit=o["hit"], n=o["n"],
                         price=o["price"], real=True, starting=p["starting"], start=p["start"], opp=p["opp"], score=0.6 * o["p"] + 0.4 * o["hit"] / o["n"], steady_cv=st[1] / st[0]))
     return out
 
@@ -1228,7 +1238,7 @@ def compute_calls():
             elif h is not None and h >= 8: tags.append("team scores high v this opponent")
             if p.get("absent"): tags.append(f"{len(p['absent'])} teammate{'s' if len(p['absent']) > 1 else ''} out")
             l10 = [x["pts"] + x["reb"] + x["ast"] for x in (p.get("last10") or [])]
-            out.append(dict(game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=team, opp=p["opp"], home=p["home"], start=p["start"],
+            out.append(dict(price_time=p.get("odds_at"), game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=team, opp=p["opp"], home=p["home"], start=p["start"],
                             stat="pra", line=e["line"], side=side, p=chance, price=price, book=e.get("book"), expects=round(pra, 1), tags=tags,
                             last10=l10, minutes=p.get("min"), absent=[a["name"] for a in (p.get("absent") or [])][:3]))
     out.sort(key=lambda x: -x["p"])
@@ -1248,7 +1258,7 @@ def log_calls(res):
 def calls(x_code: str = Header("")):
     check(x_code)
     res = cached_calc("calls", compute_calls)
-    res = dict(res, calls=[x for x in res.get("calls", []) if not has_started(x["start"])])
+    res = dict(res, calls=[x for x in res.get("calls", []) if _live_ok(x)])
     try: log_calls(res)
     except Exception: logging.exception("call logging failed")
     with closing(con()) as c:

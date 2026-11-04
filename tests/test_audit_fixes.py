@@ -48,3 +48,28 @@ def test_5_bad_timing_data_cannot_break_the_health_page(monkeypatch):
     c.post("/api/timing", json={"t": "not a list"})
     assert [p for p, _, _ in app.PHONE_TIMES] == ["slate"]
     assert c.get("/api/health").status_code == 200
+
+def test_2b_over_and_under_the_same_line_can_never_both_win():
+    pred = dict(player_id="p", game_id="g", team="A", home=1, proj={"pts": 15.0, "reb": 7.0, "ast": 4.0, "fg3m": 1.0, "stl": 1.0, "blk": 1.0}, p_dd=.2, p_td=.02)
+    corr = {"same6": np.eye(6).tolist(), "teammate": {}, "opponent": {}}; al = {k: 0.1 for k in parlay.ALL}
+    o = dict(game_id="g", player_id="p", stat="pra", line=26.5, side="over"); u = dict(o, side="under")
+    for fixed in ({0: 0.55}, {}, {0: 0.3}):                         # pinned (consistent player) or not
+        r = parlay.parlay([o, u], {("g", "p"): pred}, al, corr, fixed=fixed)
+        assert r["joint"] == 0.0 and abs(sum(r["leg_probs"]) - 1) < 0.01
+    o2 = dict(o, line=24.5); u2 = dict(o, line=28.5, side="under")     # mixed lines stay consistent too
+    r = parlay.parlay([o, o2, u2], {("g", "p"): pred}, al, corr, fixed={0: 0.55})
+    assert r["joint"] <= min(r["leg_probs"]) + 1e-9
+
+def test_4b_expired_prices_and_a_new_model_are_never_served_from_a_saved_copy(monkeypatch):
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=8, minutes=5)).isoformat()
+    ok = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=7, minutes=55)).isoformat()
+    fut = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%MZ")
+    res = app._not_started_best(dict(legs=[dict(start=fut, price_time=old), dict(start=fut, price_time=ok)], combo=dict(legs=[dict(start=fut, price_time=old)])))
+    assert len(res["legs"]) == 1 and res["combo"]["legs"] == []          # the price crossed 8 hours since the copy was made
+    assert app._not_started_value(dict(picks=[dict(start=fut, price_time=old)]))["picks"] == []
+    monkeypatch.setitem(app._warm, "on", True); monkeypatch.setattr(app, "_calc", {})
+    keys = iter([(("db", "wal", "model-A", 1), None), (("db2", "wal", "model-B", 1), None)])
+    monkeypatch.setattr(app, "_enriched_key", lambda: next(keys)[0])
+    calls = []
+    app.cached_calc("best", lambda: calls.append(1) or "A")              # made with model A
+    assert app.cached_calc("best", lambda: calls.append(1) or "B") == "B" and len(calls) == 2     # 90 s later the model changed: worked out again, not served
