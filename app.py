@@ -1531,6 +1531,16 @@ def _own_pra_chances(legs, preds, rec):
         out[i] = 1 - _norm_cdf((line - sum(p["proj"][k] for k in ("pts", "reb", "ast"))) / st[1])
     return out
 
+def _own_pra_dists(legs, preds, rec):
+    """{(game, player, 'pra'): (average, swing)} for consistent players with a PRA pick: the same rule Best picks use for their chance."""
+    out = {}
+    for l in legs:
+        if l["stat"] != "pra": continue
+        st, p = rec.get(l.get("player_id")), preds.get((l["game_id"], l.get("player_id")))
+        if not st or not p or st[0] <= 0 or st[1] <= 0 or st[1] / st[0] > STEADY_CV: continue
+        out[(l["game_id"], l["player_id"], "pra")] = (sum(p["proj"][k] for k in ("pts", "reb", "ast")), st[1])
+    return out
+
 def _parlay_core(legs):
     preds = {(p["game_id"], p["player_id"]): p for p in projections()}
     gps = game_preds()
@@ -1555,12 +1565,12 @@ def _parlay_core(legs):
     b = require_current_model(list(preds.values()))
     tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
     with closing(con()) as c: rec = recent_pra(c, [l.get("player_id") for l in pl_legs if l["stat"] == "pra"])
-    fixed = _own_pra_chances(pl_legs, preds, rec)      # consistent players' PRA chance (own swing, same as Best picks), pinned inside the simulation
+    own = _own_pra_dists(pl_legs, preds, rec)      # consistent players' PRA from their own swing (same as Best picks), one shared result per player
     mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
     if mixed:      # team and player legs in the same game: simulate them together, so a star's big night and his team's win go together
-        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], team_legs=tm_legs, gps=gps, fixed=fixed); team_in_joint = True
+        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], team_legs=tm_legs, gps=gps, own=own); team_in_joint = True
     else:
-        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], fixed=fixed) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0); team_in_joint = False
+        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], own=own) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0); team_in_joint = False
     pi, ti = iter(rp["leg_probs"]), iter(tp)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
     joint = rp["joint"] * (1.0 if team_in_joint else float(np.prod(tp) if tp else 1.0)); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)

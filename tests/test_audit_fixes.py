@@ -17,8 +17,8 @@ def test_2_a_combined_chance_never_beats_its_least_likely_part():
     pred2 = dict(pred, player_id="q")
     corr = {"same6": np.eye(6).tolist(), "teammate": {}, "opponent": {}}; al = {k: 0.1 for k in parlay.ALL}
     legs = [dict(game_id="g", player_id="p", stat="pra", line=30.5, side="over"), dict(game_id="g", player_id="q", stat="reb", line=6.5, side="over")]
-    r = parlay.parlay(legs, {("g", "p"): pred, ("g", "q"): pred2}, al, corr, fixed={0: 0.25})
-    assert abs(r["leg_probs"][0] - 0.25) < 1e-9 and r["joint"] <= 0.25 + 1e-9 and r["joint"] <= min(r["leg_probs"])
+    r = parlay.parlay(legs, {("g", "p"): pred, ("g", "q"): pred2}, al, corr, own={("g", "p", "pra"): (27.0, 5.0)})       # over 30.5 ~ 24%
+    assert r["leg_probs"][0] < 0.25 and r["joint"] <= min(r["leg_probs"]) + 0.005
 
 def test_3_a_combo_leg_is_graded_at_its_own_line(monkeypatch):
     monkeypatch.setattr(app, "record_closing_prices", lambda c: None)      # not part of this check (needs a column the bundled test data lacks)
@@ -53,11 +53,11 @@ def test_2b_over_and_under_the_same_line_can_never_both_win():
     pred = dict(player_id="p", game_id="g", team="A", home=1, proj={"pts": 15.0, "reb": 7.0, "ast": 4.0, "fg3m": 1.0, "stl": 1.0, "blk": 1.0}, p_dd=.2, p_td=.02)
     corr = {"same6": np.eye(6).tolist(), "teammate": {}, "opponent": {}}; al = {k: 0.1 for k in parlay.ALL}
     o = dict(game_id="g", player_id="p", stat="pra", line=26.5, side="over"); u = dict(o, side="under")
-    for fixed in ({0: 0.55}, {}, {0: 0.3}):                         # pinned (consistent player) or not
-        r = parlay.parlay([o, u], {("g", "p"): pred}, al, corr, fixed=fixed)
+    for own in ({("g", "p", "pra"): (27.0, 5.0)}, {}, {("g", "p", "pra"): (24.0, 4.0)}):      # consistent player (own swing) or not
+        r = parlay.parlay([o, u], {("g", "p"): pred}, al, corr, own=own)
         assert r["joint"] == 0.0 and abs(sum(r["leg_probs"]) - 1) < 0.01
     o2 = dict(o, line=24.5); u2 = dict(o, line=28.5, side="under")     # mixed lines stay consistent too
-    r = parlay.parlay([o, o2, u2], {("g", "p"): pred}, al, corr, fixed={0: 0.55})
+    r = parlay.parlay([o, o2, u2], {("g", "p"): pred}, al, corr, own={("g", "p", "pra"): (27.0, 5.0)})
     assert r["joint"] <= min(r["leg_probs"]) + 1e-9
 
 def test_4b_expired_prices_and_a_new_model_are_never_served_from_a_saved_copy(monkeypatch):
@@ -73,3 +73,15 @@ def test_4b_expired_prices_and_a_new_model_are_never_served_from_a_saved_copy(mo
     calls = []
     app.cached_calc("best", lambda: calls.append(1) or "A")              # made with model A
     assert app.cached_calc("best", lambda: calls.append(1) or "B") == "B" and len(calls) == 2     # 90 s later the model changed: worked out again, not served
+
+def test_2c_the_same_picks_give_the_same_chance_in_any_order():
+    pred = dict(player_id="p", game_id="g", team="PHI", home=1, proj={"pts": 18.0, "reb": 7.0, "ast": 5.0, "fg3m": 1.0, "stl": 1.0, "blk": 1.0}, p_dd=.2, p_td=.02)
+    corr = {"same6": np.eye(6).tolist(), "teammate": {}, "opponent": {}}; al = {k: 0.1 for k in parlay.ALL}
+    gp = dict(p_home=0.6, p_away=0.4, margin=3.0, sigma_margin=13.0, total=225.0, sigma_total=18.0, home_pts=114.0, away_pts=111.0, bands=[])
+    a = dict(game_id="g", player_id="p", stat="pra", line=26.5, side="over"); b = dict(a, line=34.5); win = dict(game_id="g", stat="ml", side="home", line=0)
+    own = {("g", "p", "pra"): (30.0, 5.0)}
+    j1 = parlay.parlay([a, b], {("g", "p"): pred}, al, corr, team_legs=[win], gps={"g": gp}, own=own)["joint"]
+    j2 = parlay.parlay([b, a], {("g", "p"): pred}, al, corr, team_legs=[win], gps={"g": gp}, own=own)["joint"]
+    assert abs(j1 - j2) < 1e-12
+    over34 = parlay.parlay([b], {("g", "p"): pred}, al, corr, own=own)["leg_probs"][0]
+    assert j1 <= over34 + 0.005                                     # over 26.5 AND over 34.5 is just over 34.5 (plus the team)
