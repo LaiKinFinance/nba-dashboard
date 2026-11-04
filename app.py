@@ -1453,17 +1453,19 @@ def _parlay_core(legs):
                     level_legs=[dict(game_id=l["game_id"], stat=l["stat"], line=l.get("line"), side=l.get("side"), text=l.get("text", "")) for l in lvl], legs=legs)
     b = require_current_model(list(preds.values()))
     tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
-    rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0)
+    mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
+    if mixed:      # team and player legs in the same game: simulate them together, so a star's big night and his team's win go together
+        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], team_legs=tm_legs, gps=gps); team_in_joint = True
+    else:
+        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0); team_in_joint = False
     pi, ti = iter(rp["leg_probs"]), iter(tp)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
-    joint = rp["joint"] * float(np.prod(tp) if tp else 1.0); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
+    joint = rp["joint"] * (1.0 if team_in_joint else float(np.prod(tp) if tp else 1.0)); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
     with closing(con()) as c: rec = recent_pra(c, [l.get("player_id") for l in legs if l["stat"] == "pra"])
     for i, own in _own_pra_chances(legs, preds, rec).items():        # same chance as Best picks for a consistent player's PRA leg (his own spread); the combined chance moves with it
         ratio = own / max(probs[i], 1e-6); probs[i] = own; joint = min(joint * ratio, 0.999); indep = min(indep * ratio, 0.999)
     r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None), value=None)
-    mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
-    r["warning"] = ("Team and player legs from the same game are linked (for example, a big scoring night helps both the player and the total), "
-                    "so this combined chance is approximate.") if mixed else None
+    r["warning"] = None      # team and player legs of the same game are now worked out together (see parlay.TEAM_LINK)
     if any(l["stat"] in POINTS_BASED for l in legs) and not POINTS_CLAIMS_ENABLED:
         r["no_advice"] = True
         r["points_warning"] = "Points chances have been too confident in testing. Treat this chance as a rough estimate. Points picks receive no VALUE or safe-pick labels."
