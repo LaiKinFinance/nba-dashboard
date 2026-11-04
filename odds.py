@@ -93,7 +93,7 @@ def match_event(events, home, away, start, abbr):
         if gap <= MATCH_HOURS and (best is None or gap < best[0]): best = (gap, e)
     return best[1] if best else None
 
-def refresh(games, players_by_game, window_h=30, refetch_h=None):
+def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=None):
     """games: upcoming ESPN games [{game_id,start,home,away}] ; players_by_game: {game_id: [(player_id, player_name)]}."""
     import slate as sl
     if not available(): return dict(ok=False, msg="No ODDS_API_KEY set")
@@ -116,7 +116,7 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None):
         if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=refetch_h or REFETCH_HOURS): continue
         ev = match_event(events, g["home"], g["away"], g["start"], abbr)
         if not ev or fetched >= GAMES_PER_RUN: continue
-        if remaining is not None and int(float(remaining)) < MIN_CREDITS: break
+        if remaining is not None and int(float(remaining)) < max(MIN_CREDITS, min_credits or 0): break      # balance checked before each paid request
         try:
             js, remaining = _get(f"/sports/basketball_nba/events/{ev['id']}/odds", regions="au", markets=MARKETS, oddsFormat="decimal")
         except Exception as e:
@@ -163,13 +163,21 @@ def status(con):
 
 LINES_REFETCH_HOURS = float(os.environ.get("ODDS_LINES_HOURS", "8"))
 
-def refresh_lines(games, refetch_h=None):
+def refresh_lines(games, refetch_h=None, min_credits=None, attempt_gap_h=None):
     """Winner / handicap / total prices for every upcoming game in ONE request (3 credits), at most every LINES_REFETCH_HOURS."""
     import slate as sl
     if not available(): return dict(ok=False, msg="No ODDS_API_KEY set")
     con = sqlite3.connect(DB); init(con); now = dt.datetime.now(dt.timezone.utc)
     row = con.execute("SELECT v FROM odds_status WHERE k='lines_at'").fetchone()
     if row and now - dt.datetime.fromisoformat(row[0]) < dt.timedelta(hours=refetch_h or LINES_REFETCH_HOURS): return dict(ok=True, skipped=True)
+    if attempt_gap_h is not None:      # extra (pre-game) fetches: wait after ANY attempt, failed or not, and only with a known balance above the brake
+        tr = con.execute("SELECT v FROM odds_status WHERE k='lines_try'").fetchone()
+        if tr and now - dt.datetime.fromisoformat(tr[0]) < dt.timedelta(hours=attempt_gap_h): return dict(ok=True, skipped=True)
+        bal = con.execute("SELECT v FROM odds_status WHERE k='remaining'").fetchone()
+        try: ok_bal = bal is not None and float(bal[0]) >= (min_credits or 0)
+        except (TypeError, ValueError): ok_bal = False
+        if not ok_bal: return dict(ok=True, skipped=True)
+        con.execute("INSERT OR REPLACE INTO odds_status VALUES('lines_try',?)", (now.isoformat(),)); con.commit()      # saved before sending
     try: js, remaining = _get("/sports/basketball_nba/odds", regions="au", markets="h2h,spreads,totals", oddsFormat="decimal")
     except Exception as e:
         con.execute("INSERT OR REPLACE INTO odds_status VALUES('lines_error',?)", (scrub(e)[:200],)); con.commit()

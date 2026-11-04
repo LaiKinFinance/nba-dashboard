@@ -14,7 +14,7 @@ DB = os.path.join(os.environ.get("DATA_DIR", "data"), "nba.db")
 ACCESS_CODE = os.environ.get("APP_ACCESS_CODE", "")  # shared secret for friends; empty = open
 import threading, time, logging
 
-def refresh_odds(window_h=30, refetch_h=None, only=None):
+def refresh_odds(window_h=30, refetch_h=None, only=None, min_credits=None):
     """Fetch bookmaker prices. Returns {'problem': ...} when any part failed, so the refresh step is reported as partial/failed, not ok."""
     import odds
     if not odds.available(): return dict(skipped=True, problem=None)
@@ -23,7 +23,8 @@ def refresh_odds(window_h=30, refetch_h=None, only=None):
         games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"], home=p["team"] if p["home"] else p["opp"], away=p["opp"] if p["home"] else p["team"]))
         pbg.setdefault(p["game_id"], []).append((p["player_id"], p["player"]))
     gl = [g for g in games.values() if only is None or g["game_id"] in only]
-    props, lines = odds.refresh(gl, pbg, window_h=window_h, refetch_h=refetch_h), odds.refresh_lines(list(games.values()), refetch_h=refetch_h if only is None else 0.4)
+    props = odds.refresh(gl, pbg, window_h=window_h, refetch_h=refetch_h, min_credits=min_credits)
+    lines = odds.refresh_lines(list(games.values()), refetch_h=refetch_h) if only is None else odds.refresh_lines(list(games.values()), refetch_h=0.4, min_credits=min_credits, attempt_gap_h=0.4)
     bad = [f"{name}: {r.get('msg') or 'failed'}" for name, r in (("player prices", props), ("team prices", lines)) if not r.get("ok")]
     return dict(props=props, lines=lines, problem=odds.scrub("; ".join(bad))[:300] or None)
 
@@ -233,11 +234,17 @@ def price_fetch_log():
 PREGAME = (("2h", 95, 125), ("30m", 20, 40))     # refresh a game's prices about 2 hours (after lineups) and about 30 minutes (late injury news) before tip-off
 PREGAME_MIN_CREDITS = 1500                        # safety brake: below this many credits only the 8pm/2am/8am fetches run
 
-def pregame_due(games, now_utc, done, credits_left):
-    """[(label, game_id)] of pre-game refreshes due now: tip-off within the label's window, not done yet, and enough credits left."""
+def _credits(v):
+    """A usable credit balance, or None if it is missing or not a number."""
     try:
-        if credits_left is not None and float(credits_left) < PREGAME_MIN_CREDITS: return []
-    except ValueError: pass
+        x = float(v); return x if x == x and x >= 0 else None
+    except (TypeError, ValueError): return None
+
+def pregame_due(games, now_utc, done, credits_left):
+    """[(label, game_id)] of pre-game refreshes due now: tip-off inside the label's window, never tried before, and a known balance
+    above the brake. A window missed while the site was down is simply skipped (no late catch-up)."""
+    c = _credits(credits_left)
+    if c is None or c < PREGAME_MIN_CREDITS: return []
     out = []
     for g in games:
         mins = (dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00")) - now_utc).total_seconds() / 60
@@ -248,18 +255,24 @@ def pregame_due(games, now_utc, done, credits_left):
 def _pregame_refresh(now):
     import odds
     with closing(con()) as c:
-        done = {r[0] for r in c.execute("SELECT k FROM odds_slots WHERE k LIKE 'pre %'")}
+        done = {r[0] for r in c.execute("SELECT k FROM odds_slots WHERE k LIKE 'pre %'")}      # tried before (sent, ok or failed): never again
         left = (odds.status(c) or {}).get("remaining")
     games = {}
     for p in projections_all(): games.setdefault(p["game_id"], dict(game_id=p["game_id"], start=p["start"]))
     for label, gid in pregame_due(games.values(), now, done, left):
-        res = {}
-        _stage("odds", lambda: res.update(refresh_odds(window_h=3, refetch_h=0.25, only={gid})) or res)
-        props = res.get("props") or {}
+        with closing(con()) as c:
+            bal = _credits((odds.status(c) or {}).get("remaining"))              # balance checked again before each paid request
+            if bal is None or bal < PREGAME_MIN_CREDITS: return
+            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"pre {label} {gid}", json.dumps(dict(state="sent", at=now.isoformat())))); c.commit()   # saved BEFORE sending
+        res = {}; ok = False
+        try:
+            _stage("odds", lambda: res.update(refresh_odds(window_h=3, refetch_h=0.25, only={gid}, min_credits=PREGAME_MIN_CREDITS)) or res)
+            props = res.get("props") or {}; ok = bool(props.get("ok", True)) and not res.get("problem")
+        except Exception: logging.exception("pre-game refresh failed"); props = {}
         mel = now.astimezone(ZoneInfo("Australia/Melbourne")).strftime("%Y-%m-%d %H:%M")
         with closing(con()) as c:
-            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"pre {label} {gid}", now.isoformat()))
-            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"log {mel} Melbourne (pre-game {label})", json.dumps(dict(games=props.get("fetched"), credits_left=props.get("remaining")))))
+            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"pre {label} {gid}", json.dumps(dict(state="ok" if ok else "failed", at=now.isoformat()))))
+            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"log {mel} Melbourne (pre-game {label}{'' if ok else ', failed'})", json.dumps(dict(games=props.get("fetched"), credits_left=props.get("remaining")))))
             c.commit()
 
 def _odds_loop():
