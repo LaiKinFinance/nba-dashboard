@@ -483,10 +483,15 @@ const valueLeg=o=>o.kind=="team"?{game_id:o.game_id,stat:o.stat,line:o.line,side
 const g3Leg=l=>({game_id:l.game_id,player_id:l.player_id,stat:l.stat,line:l.line,side:"over",text:l.player,price:l.price,book:null,p:l.p,hit:l.hit,n:l.n,tm:l.team});
 function addBest(){toggleLegs(best.combo.legs.map(bestLeg))}
 function addBestLeg(i){toggleLegs([bestLeg(best.legs[i])])}
+async function refreshPrices(el){el.textContent="Starting…";let r;try{r=await post("odds/refresh",{})}catch(e){el.textContent="Could not start";return}
+  el.textContent=r.msg;if(!r.started)return;
+  for(let i=0;i<30;i++){await new Promise(z=>setTimeout(z,5000));let s;try{s=await api("odds/refresh")}catch(e){continue}
+    if(!s.running){el.textContent=`Done${s.last&&s.last.games!=null?` – ${s.last.games} games updated`:""}${s.credits_left?` · ${s.credits_left} credits left`:""}`;memo.best=memo.value=memo.calls=undefined;lastLoad=0;if(tab=="today")loadSlate(true).then(()=>drawGames()).catch(()=>{});return}}}
 async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];luAt=Date.now();STARTED=st||[];
   const o=meta.odds||{};
   const oddsNote=o.enabled?(o.remaining!=null?`Sportsbet prices are fetched once per game (${Math.round(o.remaining)} data credits left this month).`:"Fetching Sportsbet prices…"):"Bookmaker prices are not connected, so no lines are shown.";
   a.innerHTML=`${meta.model_current===false?`<div class="note" style="margin:0 0 8px"><b>Predictions are being updated.</b> ${esc(meta.model_note||"")}. Bet building is paused for a few minutes; do not rely on the numbers below for bets yet.</div>`:""}${daySwitch(gamesDay,"setGamesDay")}<div class="tools"><input id="q" placeholder="Search team or player" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()"></div>
+   ${o.enabled?`<div class="mute" style="font-size:12.5px;margin:0 0 8px">Bookmaker prices are fetched at 8pm, 2am and 8am Melbourne time · <a href="#" style="color:var(--acc)" onclick="refreshPrices(this);return false">Refresh prices now</a></div>`:""}
    <details class="note" ${foldOpen("gfil",false)?"open":""} ontoggle="foldSet('gfil',this.open)"><summary>Filters${filt.start?" · starters only":""}</summary><div class="tools" style="margin-top:8px">
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div></details>
