@@ -78,6 +78,21 @@ def parse_event(js, name_to_pid):
                 rows.append((pid, stat, line, {"yes": "over", "no": "under"}.get(side, side), price, b["key"]))
     return rows
 
+MATCH_HOURS = 6      # a bookmaker event belongs to our game only if both teams match AND it starts within this many hours of our tip-off
+
+def _when(s):
+    return dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+
+def match_event(events, home, away, start, abbr):
+    """The bookmaker event for one game: same home and away team, and the start time closest to ours (within MATCH_HOURS).
+    Teams that meet twice in a few days (a home-and-home) can never swap prices."""
+    t = _when(start); best = None
+    for e in events:
+        if abbr(e.get("home_team", "")) != home or abbr(e.get("away_team", "")) != away or not e.get("commence_time"): continue
+        gap = abs((_when(e["commence_time"]) - t).total_seconds()) / 3600
+        if gap <= MATCH_HOURS and (best is None or gap < best[0]): best = (gap, e)
+    return best[1] if best else None
+
 def refresh(games, players_by_game, window_h=30, refetch_h=None):
     """games: upcoming ESPN games [{game_id,start,home,away}] ; players_by_game: {game_id: [(player_id, player_name)]}."""
     import slate as sl
@@ -93,14 +108,13 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None):
         f = full.lower()
         for a, n in nick.items():
             if f.endswith(n): return a
-    ev_by = {(abbr(e["home_team"]), abbr(e["away_team"])): e for e in events}
     fetched = 0; errors = []
     for g in sorted(games, key=lambda x: x["start"]):
         start = dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00"))
         if start - now > dt.timedelta(hours=window_h) or start < now: continue
         row = con.execute("SELECT fetched_at FROM odds_fetch WHERE game_id=?", (g["game_id"],)).fetchone(); last = row[0] if row else None  # remembered even when a fetch returned no prices
         if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=refetch_h or REFETCH_HOURS): continue
-        ev = ev_by.get((g["home"], g["away"]))
+        ev = match_event(events, g["home"], g["away"], g["start"], abbr)
         if not ev or fetched >= GAMES_PER_RUN: continue
         if remaining is not None and int(float(remaining)) < MIN_CREDITS: break
         try:
@@ -162,10 +176,14 @@ def refresh_lines(games, refetch_h=None):
         return dict(ok=False, msg=scrub(e))
     nick = {k: v.lower() for k, v in sl.TEAM_NICK.items()}
     abbr = lambda full: next((a for a, n in nick.items() if full.lower().endswith(n)), None)
-    by = {(g["home"], g["away"]): g["game_id"] for g in games}; n = 0
+    n = 0
     for ev in js:
-        h, a = abbr(ev["home_team"]), abbr(ev["away_team"]); gid = by.get((h, a))
-        if not gid: continue
+        h, a = abbr(ev["home_team"]), abbr(ev["away_team"])
+        g = min((g for g in games if g["home"] == h and g["away"] == a and ev.get("commence_time")
+                 and abs((_when(ev["commence_time"]) - _when(g["start"])).total_seconds()) <= MATCH_HOURS * 3600),
+                key=lambda g: abs((_when(ev["commence_time"]) - _when(g["start"])).total_seconds()), default=None)
+        if not g: continue
+        gid = g["game_id"]
         if not ev.get("bookmakers"): continue          # keep last good prices if the answer is empty
         con.execute("DELETE FROM book_lines WHERE game_id=?", (gid,))
         for b in ev.get("bookmakers", []):

@@ -492,15 +492,18 @@ def _enriched_key():
 SPEED = {}                     # how long the heavy steps took last time (seconds), shown on /api/health so slowness can be seen from outside
 _warm = dict(on=False); _warm_evt = threading.Event(); _fresh = threading.local()
 
-def _serve_last():
-    """While the background warmer runs (on the website), pages get the last finished copy at once and the warmer makes the next one."""
-    return _warm["on"] and not getattr(_fresh, "on", False)
+SERVE_LAST_MAX = 180          # a saved copy is handed out instantly only while it is under 3 minutes old; older (e.g. the warmer failed) = work it out now
+
+def _serve_last(made_at=None):
+    """While the background warmer runs (on the website), pages get the last finished copy at once and the warmer makes the next one,
+    but never a copy older than SERVE_LAST_MAX: if refreshing keeps failing, people wait for fresh results instead of seeing expired ones."""
+    return _warm["on"] and not getattr(_fresh, "on", False) and (made_at is None or time.time() - made_at < SERVE_LAST_MAX)
 
 def enriched():
     """Same as _enriched_build(), but computed once per change of data (or per minute) and shared, because every tab asks for it.
     The returned list is shared: callers must not modify it."""
     key = _enriched_key()
-    if _enr["val"] is not None and (_enr["key"] == key or _serve_last()):
+    if _enr["val"] is not None and (_enr["key"] == key or _serve_last(_enr["at"])):
         if _enr["key"] != key: _warm_evt.set()
         return _enr["val"]
     with _enr_lock:
@@ -828,12 +831,9 @@ def grade_picks():
             c.execute("UPDATE pick_log SET result=?, actual=?, graded_at=? WHERE id=?", (res, actual, now, r["id"]))
         record_closing_prices(c)
         for r in c.execute("SELECT * FROM combo_log WHERE result IS NULL").fetchall():
-            legs = json.loads(r["legs"]); rs = []
-            for l in legs:
-                x = c.execute("SELECT result FROM pick_log WHERE game_id=? AND player_id=? AND stat=? AND kind='leg'", (l["game_id"], l["player_id"], l["stat"])).fetchone()
-                rs.append(x["result"] if x else None)
-            if any(v is None for v in rs): continue
-            res = "lost" if "lost" in rs else ("void" if "void" in rs else "won")
+            legs = [dict(l, side=l.get("side", "over")) for l in json.loads(r["legs"])]
+            res, _ = _score_legs(c, legs)            # each leg at the exact line saved with the combo (never another pick's result for a different line)
+            if res == "open": continue
             c.execute("UPDATE combo_log SET result=?, graded_at=? WHERE id=?", (res, now, r["id"]))
         c.commit()
 
@@ -951,23 +951,35 @@ def track_record(x_code: str = Header("")):
 def value_picks(x_code: str = Header("")):
     """Legs where the model's chance clearly beats the bookmaker's price, each with the evidence behind it. Needs bookmaker prices."""
     check(x_code)
-    res = cached_calc("value", compute_value)
-    try: log_picks(best=cached_calc("best", compute_best), value=res)
+    res = _not_started_value(cached_calc("value", compute_value))
+    try: log_picks(best=_not_started_best(cached_calc("best", compute_best)), value=res)
     except Exception: logging.exception("pick logging failed")
     return res
 
 _calc, _calc_lock = {}, threading.Lock()
+
+def _not_started_best(res):
+    """Best picks as served: legs whose game has started are dropped, and a combo with any started leg is withdrawn (checked at every request)."""
+    if not isinstance(res, dict) or "legs" not in res: return res
+    out = dict(res, legs=[l for l in res["legs"] if not has_started(l["start"])])
+    cl = (res.get("combo") or {}).get("legs") or []
+    if any(has_started(l["start"]) for l in cl): out["combo"] = dict(legs=[], joint=None, fair_odds=None)
+    return out
+
+def _not_started_value(res):
+    if not isinstance(res, dict) or "picks" not in res: return res
+    return dict(res, picks=[p for p in res["picks"] if not has_started(p.get("start") or "9999")])
 def cached_calc(name, fn, extra=None):
     """Best picks and Value bets are worked out once per change of data (or per minute, like enriched()) and shared by every request,
     instead of each tab and each pick log recomputing both. One at a time, so two tabs opening together never do the same work twice."""
     k = (_enriched_key(), extra); hit = _calc.get(name)
-    if hit and (hit[0] == k or _serve_last()):
+    if hit and (hit[0] == k or _serve_last(hit[2])):
         if hit[0] != k: _warm_evt.set()
         return hit[1]
     with _calc_lock:
         hit = _calc.get(name)
         if hit and hit[0] == k: return hit[1]
-        t = time.time(); v = fn(); SPEED[name + "_s"] = round(time.time() - t, 2); _calc[name] = (k, v); return v
+        t = time.time(); v = fn(); SPEED[name + "_s"] = round(time.time() - t, 2); _calc[name] = (k, v, time.time()); return v
 
 def _warmer():
     """Keeps Games, Best picks and Value bets ready: rebuilds them whenever the data changes or a minute passes, so nobody waits for the work."""
@@ -1057,8 +1069,8 @@ def compute_value():
 def best(x_code: str = Header("")):
     """Safest legs of the day plus a suggested 2-3 leg combo aiming for fair odds of ~2.0+ while staying likely. Also locks them into the track record."""
     check(x_code)
-    res = cached_calc("best", compute_best)
-    try: log_picks(best=res, value=cached_calc("value", compute_value))
+    res = _not_started_best(cached_calc("best", compute_best))
+    try: log_picks(best=res, value=_not_started_value(cached_calc("value", compute_value)))
     except Exception: logging.exception("pick logging failed")
     return res
 
@@ -1236,6 +1248,7 @@ def log_calls(res):
 def calls(x_code: str = Header("")):
     check(x_code)
     res = cached_calc("calls", compute_calls)
+    res = dict(res, calls=[x for x in res.get("calls", []) if not has_started(x["start"])])
     try: log_calls(res)
     except Exception: logging.exception("call logging failed")
     with closing(con()) as c:
@@ -1531,17 +1544,17 @@ def _parlay_core(legs):
                     level_legs=[dict(game_id=l["game_id"], stat=l["stat"], line=l.get("line"), side=l.get("side"), text=l.get("text", "")) for l in lvl], legs=legs)
     b = require_current_model(list(preds.values()))
     tp = [team_leg_prob(l, gps[l["game_id"]]) for l in tm_legs]
+    with closing(con()) as c: rec = recent_pra(c, [l.get("player_id") for l in pl_legs if l["stat"] == "pra"])
+    fixed = _own_pra_chances(pl_legs, preds, rec)      # consistent players' PRA chance (own swing, same as Best picks), pinned inside the simulation
     mixed = {l["game_id"] for l in tm_legs} & {l["game_id"] for l in pl_legs}
     if mixed:      # team and player legs in the same game: simulate them together, so a star's big night and his team's win go together
-        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], team_legs=tm_legs, gps=gps); team_in_joint = True
+        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], team_legs=tm_legs, gps=gps, fixed=fixed); team_in_joint = True
     else:
-        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"]) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0); team_in_joint = False
+        rp = pl.parlay(pl_legs, preds, b["alphas"], b["corr"], fixed=fixed) if pl_legs else dict(leg_probs=[], independent=1.0, joint=1.0); team_in_joint = False
     pi, ti = iter(rp["leg_probs"]), iter(tp)
     probs = [next(ti) if l["stat"] in TEAM_STATS else next(pi) for l in legs]
     joint = rp["joint"] * (1.0 if team_in_joint else float(np.prod(tp) if tp else 1.0)); indep = rp["independent"] * float(np.prod(tp) if tp else 1.0)
-    with closing(con()) as c: rec = recent_pra(c, [l.get("player_id") for l in legs if l["stat"] == "pra"])
-    for i, own in _own_pra_chances(legs, preds, rec).items():        # same chance as Best picks for a consistent player's PRA leg (his own spread); the combined chance moves with it
-        ratio = own / max(probs[i], 1e-6); probs[i] = own; joint = min(joint * ratio, 0.999); indep = min(indep * ratio, 0.999)
+    joint = min(joint, min(probs) if probs else 1.0)      # a combined chance can never beat its least likely part
     r = dict(leg_probs=probs, independent=indep, joint=joint, fair_odds=(1 / joint if joint > 0 else None), value=None)
     r["warning"] = None      # team and player legs of the same game are now worked out together (see parlay.TEAM_LINK)
     if any(l["stat"] in POINTS_BASED for l in legs) and not POINTS_CLAIMS_ENABLED:
@@ -1603,14 +1616,17 @@ def _any_started(c, legs):
     """True when a game in the pick is known to have started. A pick can be neither saved nor removed once play has begun."""
     return any(_game_start(c, l.get("game_id")) and has_started(_game_start(c, l.get("game_id"))) for l in legs if l.get("game_id"))
 
+TIMING_NAME = __import__("re").compile(r"tab:(best/(today|track)|today|pk|players|model)|best|value|calls|slate|meta|live|scores|lineups|started|track|picks|leaderboard|scorecard|steady|team|player|players|status|bets")
 PHONE_TIMES = deque(maxlen=400)     # how long pages took on people's phones (path, milliseconds, time), so slowness can be measured, not guessed
 
 @app.post("/api/timing")
 def phone_timing(body: dict = Body(...), x_code: str = Header("")):
     check(x_code)
     now = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
-    for e in (body.get("t") or [])[:50]:
-        try: PHONE_TIMES.append((str(e["p"])[:40], int(e["ms"]), now))
+    for e in (body.get("t") or [])[:50] if isinstance(body.get("t"), list) else []:
+        try:
+            p, ms = str(e["p"]), float(e["ms"])
+            if TIMING_NAME.fullmatch(p) and math.isfinite(ms) and 0 <= ms <= 120000: PHONE_TIMES.append((p, int(ms), now))     # only known page names and sensible durations
         except Exception: pass
     return {"ok": True}
 
@@ -1864,6 +1880,6 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None, credits_left=ostat.get("remaining")),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), phones=phone_speed(), phones_last=list(PHONE_TIMES)[-12:])
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), phones=_safe(phone_speed, {}), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

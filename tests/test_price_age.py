@@ -11,7 +11,7 @@ def test_empty_answer_keeps_prices_and_true_age(tmp_path, monkeypatch):
     old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=20)).isoformat()
     con.execute("INSERT INTO book_odds VALUES('g9','p9','pts',24.5,'over',1.9,'sportsbet',?)", (old,)); con.commit()
     start = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=5)).isoformat()
-    monkeypatch.setattr(odds, "_get", lambda path, **kw: ([{"id": "e1", "home_team": "New York Knicks", "away_team": "Boston Celtics"}], 100) if path.endswith("/events") else ({"bookmakers": []}, 99))
+    monkeypatch.setattr(odds, "_get", lambda path, **kw: ([{"id": "e1", "home_team": "New York Knicks", "away_team": "Boston Celtics", "commence_time": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=5)).isoformat()}], 100) if path.endswith("/events") else ({"bookmakers": []}, 99))
     odds.refresh([dict(game_id="g9", start=start, home="NY", away="BOS")], {"g9": [("p9", "X Player")]})
     assert con.execute("SELECT count(*) FROM book_odds WHERE game_id='g9'").fetchone()[0] == 1       # last good price kept
     assert 19.9 < odds.fetch_ages(con)["g9"] < 20.1                                                    # and still shown as 20 hours old

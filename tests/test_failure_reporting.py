@@ -30,7 +30,7 @@ def test_per_game_error_is_kept_and_last_ok_does_not_advance(blank, monkeypatch)
     con = sqlite3.connect(odds.DB); odds.init(con)
     games, pbg = _fixture_game()
     def fake(path, **kw):
-        if path.endswith("/events"): return [{"id": "e1", "home_team": "New York Knicks", "away_team": "Boston Celtics"}], 100
+        if path.endswith("/events"): return [{"id": "e1", "home_team": "New York Knicks", "away_team": "Boston Celtics", "commence_time": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=5)).isoformat()}], 100
         raise RuntimeError("Odds API request failed (HTTP 500): HTTPError")
     monkeypatch.setattr(odds, "_get", fake)
     r = odds.refresh(games, pbg); st = odds.status(con)
@@ -39,7 +39,7 @@ def test_per_game_error_is_kept_and_last_ok_does_not_advance(blank, monkeypatch)
 def test_clean_run_clears_error_and_sets_last_ok(blank, monkeypatch):
     con = sqlite3.connect(odds.DB); odds.init(con); con.execute("INSERT INTO odds_status VALUES('error','old trouble')"); con.commit()
     games, pbg = _fixture_game()
-    monkeypatch.setattr(odds, "_get", lambda path, **kw: ([{"id": "e1", "home_team": "New York Knicks", "away_team": "Boston Celtics"}], 100) if path.endswith("/events") else ({"bookmakers": []}, 99))
+    monkeypatch.setattr(odds, "_get", lambda path, **kw: ([{"id": "e1", "home_team": "New York Knicks", "away_team": "Boston Celtics", "commence_time": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=5)).isoformat()}], 100) if path.endswith("/events") else ({"bookmakers": []}, 99))
     assert odds.refresh(games, pbg)["ok"] is True
     st = odds.status(con); assert st["error"] == "" and "last_ok" in st
 

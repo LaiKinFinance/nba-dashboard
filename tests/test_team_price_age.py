@@ -29,7 +29,7 @@ def test_empty_lines_answer_keeps_last_good_prices_and_true_age(tmp_path, monkey
     con = sqlite3.connect(odds.DB); odds.init(con)
     old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=48)).isoformat()
     con.execute("INSERT INTO book_lines VALUES('g1','h2h','home',0.0,2.0,'sportsbet',?)", (old,)); con.commit()
-    monkeypatch.setattr(odds, "_get", lambda path, **kw: ([{"home_team": "New York Knicks", "away_team": "Boston Celtics", "bookmakers": []}], 100))
+    monkeypatch.setattr(odds, "_get", lambda path, **kw: ([{"home_team": "New York Knicks", "away_team": "Boston Celtics", "commence_time": "2999-01-01T00:00Z", "bookmakers": []}], 100))
     odds.refresh_lines([dict(game_id="g1", start="2999-01-01T00:00Z", home="NY", away="BOS")])
     assert con.execute("SELECT count(*) FROM book_lines").fetchone()[0] == 1
     assert 47.9 < odds.line_ages(con)["g1"] < 48.1
