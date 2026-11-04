@@ -1,6 +1,5 @@
 """NBA top-3 dashboard API + static UI.  Run: uvicorn app:app --host 0.0.0.0 --port 8000"""
 import json, math, os, sqlite3, datetime as dt
-from zoneinfo import ZoneInfo
 from contextlib import closing
 import numpy as np, pandas as pd
 from fastapi import FastAPI, HTTPException, Header, Body
@@ -230,38 +229,6 @@ def price_fetch_log():
     """The last nine timetable fetches: when, how many games, credits left afterwards (for /api/health)."""
     with closing(con()) as c:
         return [dict(time=k[4:], **json.loads(v)) for k, v in c.execute("SELECT k, v FROM odds_slots WHERE k LIKE 'log %' ORDER BY k DESC LIMIT 9")]
-
-_manual_odds = dict(running=False, at=0.0, result=None)
-MANUAL_ODDS_GAP = 3600       # a manual "refresh prices now" at most once an hour, so a few taps cannot burn the credits
-
-@app.post("/api/odds/refresh")
-def odds_refresh_now(x_code: str = Header("")):
-    """Fetch bookmaker prices for the next day's games right now (in the background), at most once an hour."""
-    check(x_code)
-    if not _odds_on(): raise HTTPException(400, "Bookmaker prices are not connected")
-    if _manual_odds["running"]: return dict(started=False, msg="Already fetching – check back in a minute")
-    wait = MANUAL_ODDS_GAP - (time.time() - _manual_odds["at"])
-    if wait > 0: return dict(started=False, msg=f"Prices were refreshed recently – try again in about {int(wait // 60) + 1} min")
-    _manual_odds.update(running=True, at=time.time())
-    def work():
-        try:
-            res = {}; _stage("odds", lambda: res.update(refresh_odds(window_h=ODDS_WINDOW_H, refetch_h=0.01)) or res)
-            props = res.get("props") or {}
-            with closing(con()) as c:
-                c.execute("CREATE TABLE IF NOT EXISTS odds_slots(k TEXT PRIMARY KEY, v TEXT)")
-                key = "log " + dt.datetime.now(ZoneInfo("Australia/Melbourne")).strftime("%Y-%m-%d %H:%M") + " Melbourne (manual)"
-                c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (key, json.dumps(dict(games=props.get("fetched"), credits_left=props.get("remaining"))))); c.commit()
-            _manual_odds["result"] = dict(games=props.get("fetched"), credits_left=props.get("remaining"))
-        except Exception: logging.exception("manual odds refresh failed")
-        finally: _manual_odds["running"] = False; _warm_evt.set()
-    threading.Thread(target=work, daemon=True).start()
-    return dict(started=True, msg="Fetching prices now – this takes about a minute")
-
-@app.get("/api/odds/refresh")
-def odds_refresh_status(x_code: str = Header("")):
-    check(x_code)
-    with closing(con()) as c: left = (odds_status() or {}).get("remaining")
-    return dict(running=_manual_odds["running"], last=_manual_odds["result"], credits_left=left)
 
 def _odds_loop():
     time.sleep(90)
