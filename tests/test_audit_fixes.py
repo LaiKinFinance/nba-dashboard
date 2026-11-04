@@ -85,3 +85,16 @@ def test_2c_the_same_picks_give_the_same_chance_in_any_order():
     assert abs(j1 - j2) < 1e-12
     over34 = parlay.parlay([b], {("g", "p"): pred}, al, corr, own=own)["leg_probs"][0]
     assert j1 <= over34 + 0.005                                     # over 26.5 AND over 34.5 is just over 34.5 (plus the team)
+
+def test_2d_swapping_picks_for_different_players_gives_exactly_the_same_chance():
+    mk = lambda pid, team, home: dict(player_id=pid, game_id="g", team=team, home=home, proj={"pts": 20.0, "reb": 7.0, "ast": 5.0, "fg3m": 2.0, "stl": 1.0, "blk": 1.0}, p_dd=.2, p_td=.02)
+    preds = {("g", "a"): mk("a", "PHI", 1), ("g", "b"): mk("b", "BOS", 0), ("g", "c"): mk("c", "PHI", 1)}
+    corr = {"same6": np.eye(6).tolist(), "teammate": {"pts": .1, "reb": -.1, "ast": .05}, "opponent": {"pts": .05, "reb": .0, "ast": .0}}; al = {k: 0.1 for k in parlay.ALL}
+    gp = dict(p_home=0.6, p_away=0.4, margin=3.0, sigma_margin=13.0, total=225.0, sigma_total=18.0, home_pts=114.0, away_pts=111.0, bands=[])
+    legs = [dict(game_id="g", player_id="a", stat="pra", line=31.5, side="over"), dict(game_id="g", player_id="b", stat="reb", line=6.5, side="over"),
+            dict(game_id="g", player_id="c", stat="ast", line=4.5, side="under")]
+    win = dict(game_id="g", stat="ml", side="home", line=0); own = {("g", "a", "pra"): (32.0, 5.0)}
+    run = lambda L: parlay.parlay(L, preds, al, corr, team_legs=[win], gps={"g": gp}, own=own)["joint"]
+    base = run(legs)
+    for order in ([2, 0, 1], [1, 2, 0], [2, 1, 0]):
+        assert run([legs[i] for i in order]) == base

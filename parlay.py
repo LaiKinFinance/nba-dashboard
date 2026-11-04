@@ -82,6 +82,7 @@ def parlay(legs, preds, alphas, corr, n=60000, seed=7, team_legs=(), gps=None, o
             for c in CORE: add(pid, g, c)       # needed for the latent link
     for l in team_legs:
         add("_margin", l["game_id"], "_margin"); add("_total", l["game_id"], "_total")
+    for i, key in enumerate(sorted(var, key=lambda t: tuple(str(x) for x in t))): var[key]["i"] = i      # one fixed internal order: the picks' order never changes the draws
     keys = sorted(var, key=lambda k: var[k]["i"]); k = len(keys); C = np.eye(k)
     for a in range(k):
         for b in range(a + 1, k):
