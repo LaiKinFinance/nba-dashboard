@@ -24,7 +24,10 @@ def refresh_odds(window_h=30, refetch_h=None, only=None, min_credits=None):
         pbg.setdefault(p["game_id"], []).append((p["player_id"], p["player"]))
     gl = [g for g in games.values() if only is None or g["game_id"] in only]
     props = odds.refresh(gl, pbg, window_h=window_h, refetch_h=refetch_h, min_credits=min_credits)
-    lines = odds.refresh_lines(list(games.values()), refetch_h=refetch_h) if only is None else odds.refresh_lines(list(games.values()), refetch_h=0.4, min_credits=min_credits, attempt_gap_h=0.4)
+    if only is None: lines = odds.refresh_lines(list(games.values()), refetch_h=refetch_h)
+    elif not props.get("balance_fresh"):     # pre-game: after a failed/timed-out player request the credit count is not known: no paid team request
+        lines = dict(ok=False, skipped=True, msg="team prices skipped: no fresh credit count after the player prices")
+    else: lines = odds.refresh_lines(list(games.values()), refetch_h=0.4, min_credits=min_credits, attempt_gap_h=0.4)
     bad = [f"{name}: {r.get('msg') or 'failed'}" for name, r in (("player prices", props), ("team prices", lines)) if not r.get("ok")]
     return dict(props=props, lines=lines, problem=odds.scrub("; ".join(bad))[:300] or None)
 
@@ -270,8 +273,9 @@ def _pregame_refresh(now):
         except Exception: logging.exception("pre-game refresh failed"); props = {}
         mel = now.astimezone(ZoneInfo("Australia/Melbourne")).strftime("%Y-%m-%d %H:%M")
         with closing(con()) as c:
-            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"pre {label} {gid}", json.dumps(dict(state="ok" if ok else "failed", at=now.isoformat()))))
-            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"log {mel} Melbourne (pre-game {label}{'' if ok else ', failed'})", json.dumps(dict(games=props.get("fetched"), credits_left=props.get("remaining")))))
+            state = "failed" if not ok else "ok" if (props.get("saved") or 0) > 0 else "no new prices"      # a clean run that saved no player prices says so
+            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"pre {label} {gid}", json.dumps(dict(state=state, saved=props.get("saved") or 0, at=now.isoformat()))))
+            c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"log {mel} Melbourne (pre-game {label}{'' if state == 'ok' else ', ' + state})", json.dumps(dict(games=props.get("fetched"), prices_saved=props.get("saved") or 0, credits_left=props.get("remaining")))))
             c.commit()
 
 def _odds_loop():

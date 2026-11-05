@@ -114,7 +114,8 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=Non
         f = full.lower()
         for a, n in nick.items():
             if f.endswith(n): return a
-    fetched = 0; errors = []; skipped_low = False
+    fetched = 0; errors = []; skipped_low = False; saved = 0
+    balance_fresh = valid_balance(remaining) is not None        # the latest reply (so far the free events list) carried a valid credit count
     for g in sorted(games, key=lambda x: x["start"]):
         start = dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00"))
         if start - now > dt.timedelta(hours=window_h) or start < now: continue
@@ -128,8 +129,9 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=Non
         elif remaining is not None and int(float(remaining)) < MIN_CREDITS: break
         try:
             js, remaining = _get(f"/sports/basketball_nba/events/{ev['id']}/odds", regions="au", markets=MARKETS, oddsFormat="decimal")
+            balance_fresh = valid_balance(remaining) is not None
         except Exception as e:
-            errors.append(scrub(e)[:200]); continue
+            errors.append(scrub(e)[:200]); balance_fresh = False; continue      # e.g. a timeout: the request may have been charged, so the count is no longer known
         n2p = {norm_name(nm): pid for pid, nm in players_by_game.get(g["game_id"], [])}
         rows = parse_event(js, n2p)
         con.execute("INSERT OR REPLACE INTO odds_fetch VALUES(?,?)", (g["game_id"], now.isoformat()))
@@ -139,13 +141,14 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=Non
             con.executemany("INSERT OR REPLACE INTO book_odds VALUES(?,?,?,?,?,?,?,?)", data)
             # append-only history of every price seen before tip-off: the only way to later check closing prices and real edge
             con.executemany("INSERT INTO odds_archive VALUES(?,?,?,?,?,?,?,?)", [(d[7], d[0], d[1], d[2], d[3], d[4], d[5], d[6]) for d in data])
+            saved += len(data)
         fetched += 1
     # a run with any per-game error is NOT a success: keep the error text, and only move "last_ok" forward on a clean run
     stamp = [("remaining", remaining), ("last_run", now.isoformat()), ("error", "; ".join(sorted(set(errors)))[:300])]
     if not errors: stamp.append(("last_ok", now.isoformat()))
     for k, v in stamp: con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
     con.commit()
-    return dict(ok=not errors and not skipped_low, fetched=fetched, errors=len(errors), remaining=remaining, skipped_low_balance=skipped_low,
+    return dict(ok=not errors and not skipped_low, fetched=fetched, saved=saved, balance_fresh=balance_fresh, errors=len(errors), remaining=remaining, skipped_low_balance=skipped_low,
                 msg=("; ".join(sorted(set(errors)))[:200] if errors else "skipped: balance missing or below the brake" if skipped_low else None))
 
 def _better(cur, price, book):

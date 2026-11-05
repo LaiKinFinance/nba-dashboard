@@ -35,7 +35,7 @@ def test_two_games_crossing_the_credit_limit_only_the_first_is_fetched(monkeypat
     def fake(**k):
         sent.append(k["only"])
         with closing(app.con()) as c: c.execute("UPDATE odds_status SET v='1496' WHERE k='remaining'"); c.commit()    # this fetch cost 9 credits
-        return dict(props=dict(ok=True, fetched=1, remaining="1496"))
+        return dict(props=dict(ok=True, fetched=1, saved=4, remaining="1496"))
     monkeypatch.setattr(app, "refresh_odds", fake)
     app._pregame_refresh(NOW)
     assert len(sent) == 1                                  # the balance was checked again before the second paid request
@@ -65,7 +65,10 @@ def test_team_price_wait_applies_after_a_failure_too(monkeypatch):
 # ---- the real fetch code (app.refresh_odds -> odds.refresh / odds.refresh_lines) with fake provider replies ----
 import math, pytest
 
-def _real(monkeypatch, events_balance, odds_reply=None):
+PRICES = {"bookmakers": [{"key": "sportsbet", "markets": [{"key": "player_points", "outcomes": [
+    {"name": "Over", "description": "Some Player", "point": 20.5, "price": 1.9}, {"name": "Under", "description": "Some Player", "point": 20.5, "price": 1.9}]}]}]}
+
+def _real(monkeypatch, events_balance, odds_reply="prices", paid_balance="18990"):
     monkeypatch.setenv("ODDS_API_KEY", "k")
     start = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=110)).strftime("%Y-%m-%dT%H:%MZ")
     with closing(app.con()) as c:
@@ -78,8 +81,11 @@ def _real(monkeypatch, events_balance, odds_reply=None):
         if path.endswith("/events"):
             return [dict(id="e1", home_team="New York Knicks", away_team="Boston Celtics", commence_time=start)], events_balance
         paid.append(path)
-        if odds_reply == "error": raise RuntimeError("Odds API request failed (HTTP 500): HTTPError")
-        return ({"bookmakers": []} if path.endswith("/odds") and "/events/" in path else []), "18990"
+        if "/events/" in path:
+            if odds_reply == "error": raise RuntimeError("Odds API request failed (HTTP 500): HTTPError")
+            if odds_reply == "timeout": raise RuntimeError("Odds API request failed: ReadTimeout")
+            return (PRICES if odds_reply == "prices" else {"bookmakers": []}), paid_balance
+        return [], paid_balance
     monkeypatch.setattr(odds, "_get", fake_get)
     app._pregame_refresh(dt.datetime.now(dt.timezone.utc))
     with closing(app.con()) as c:
@@ -102,3 +108,12 @@ def test_real_fetch_that_fails_is_saved_as_failed(monkeypatch):
 def test_inf_is_never_a_usable_balance():
     assert app._credits("inf") is None and app._credits(float("inf")) is None and app._credits("19000") == 19000.0
     assert app.pregame_due(GAMES, NOW, set(), "inf") == []
+
+def test_after_a_player_price_timeout_the_paid_team_request_is_skipped(monkeypatch):
+    paid, state = _real(monkeypatch, "19000", odds_reply="timeout")
+    assert any("/events/e1/odds" in p for p in paid)                                   # the player request was tried (and timed out)
+    assert not any(p.endswith("/sports/basketball_nba/odds") for p in paid) and state == "failed"     # no fresh credit count: no paid team request
+
+def test_a_clean_run_that_saved_no_player_prices_is_recorded_as_such(monkeypatch):
+    paid, state = _real(monkeypatch, "19000", odds_reply="empty")
+    assert any("/events/e1/odds" in p for p in paid) and state == "no new prices"
