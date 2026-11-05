@@ -176,6 +176,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 .npl.hit{background:var(--good)}.npl.tg{left:auto;right:0;transform:none;background:var(--btn);color:var(--mute)}.tlab{position:relative;height:14px;font-size:10.5px;color:var(--mute)}.tlab span{position:absolute;top:1px;transform:translateX(-100%)}
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
+#upd{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:60;background:var(--card);color:var(--mute);border:1px solid var(--btn);border-radius:20px;padding:3px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);pointer-events:none}
 </style>
 </head>
 <body>
@@ -206,7 +207,24 @@ let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set
 const hdr=()=>({"Content-Type":"application/json","X-User":localStorage.user||"","X-Code":localStorage.code||""});
 const TIMES=[];const tnote=(p,ms)=>{if(TIMES.length<60)TIMES.push({p,ms:Math.round(ms)})};
 setInterval(()=>{if(!TIMES.length||!localStorage.code&&!localStorage.user)return;const t=TIMES.splice(0);fetch("/api/timing",{method:"POST",headers:hdr(),body:JSON.stringify({t})}).catch(()=>{})},20e3);      // page timings, so slowness can be measured
-async function api(p,o={}){const t0=performance.now();const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});if(!o.method)tnote(p.split("/")[0],performance.now()-t0);
+/* ---------- instant open: show the copy this phone saved last time, then swap in fresh data ---------- */
+const SAVE_OK=/^(meta|slate|best|value|calls|lineups|started|live|steady|track|leaderboard|scorecard|status)(\?|$|\/)/,SV="nbaSaved:",SAVE_MAX_H=18;
+let booting=true,svPend=0,svUsed=false,quietRender=false;
+const svGet=p=>{try{const j=JSON.parse(localStorage.getItem(SV+p)||"null");return j&&Date.now()-j.t<SAVE_MAX_H*3600e3?j.v:null}catch(e){return null}};
+const svPut=(p,v)=>{try{const t=JSON.stringify({t:Date.now(),v});if(t.length<1.5e6)localStorage.setItem(SV+p,t)}catch(e){}};
+function showUpd(on){let el=$("#upd");if(!el&&on){el=document.createElement("div");el.id="upd";el.textContent="Updating…";document.body.appendChild(el)}if(el)el.style.display=on?"":"none"}
+function savedFirst(p,real){      // real() fetches fresh data; while the app is opening, answer at once from the saved copy
+  if(!SAVE_OK.test(p))return real();
+  const fresh=real().then(v=>{svPut(p,v);return v});
+  const old=booting?svGet(p):null;if(old==null)return fresh;
+  svUsed=true;svPend++;showUpd(true);
+  fresh.catch(()=>{}).finally(()=>{if(--svPend)return;showUpd(false);if(!svUsed)return;svUsed=false;
+    for(const k in memo)delete memo[k];lastLoad=0;      // drop the saved copies so the redraw uses fresh data
+    const f=document.activeElement;if(f&&/INPUT|TEXTAREA|SELECT/.test(f.tagName))return;      // never wipe what someone is typing
+    quietRender=true;render().finally(()=>{quietRender=false})});
+  return Promise.resolve(old)}
+function api(p,o={}){return o.method?apiNet(p,o):savedFirst(p,()=>apiNet(p,o))}
+async function apiNet(p,o={}){const t0=performance.now();const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});if(!o.method)tnote(p.split("/")[0],performance.now()-t0);
   if(r.status==401){showLogin("That access code isn't right. Try again.");throw"auth"}
   if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||"Something went wrong");throw e}return r.json()}
 const post=(p,b)=>api(p,{method:"POST",body:JSON.stringify(b)});
@@ -234,10 +252,14 @@ function needName(){if(!localStorage.user){showLogin();return false}return true}
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct=x=>x==null?"–":(x*100).toFixed(x<0.1?1:0)+"%";
 const dec=p=>p>0.001?(1/p).toFixed(2):"–";
-const logo=a=>`https://a.espncdn.com/i/teamlogos/nba/500/${a.toLowerCase()}.png`;
-const face=id=>`https://a.espncdn.com/i/headshots/nba/players/full/${encodeURIComponent(id)}.png`;
+const logo=a=>`https://a.espncdn.com/combiner/i?img=/i/teamlogos/nba/500/${a.toLowerCase()}.png&w=144&h=144`;   // 144px: sharp at 3x for logos up to 48px shown
+const FACE_SZ={s:[132,96],"":[132,96],l:[200,145],xl:[320,232]};   // about 3x the shown size, so photos stay sharp on phones
+const faceFull=id=>`https://a.espncdn.com/i/headshots/nba/players/full/${encodeURIComponent(id)}.png`;
+const face=(id,sz)=>{const [w,h]=FACE_SZ[sz||""]||FACE_SZ.l;return `https://a.espncdn.com/combiner/i?img=/i/headshots/nba/players/full/${encodeURIComponent(id)}.png&w=${w}&h=${h}`};
+document.addEventListener("error",e=>{const el=e.target;if(el.tagName!=="IMG"||el.dataset.full!==undefined)return;const m=/combiner\/i\?img=([^&]+)/.exec(el.src||"");if(m&&!el.dataset.tried){el.dataset.tried=1;el.src="https://a.espncdn.com"+m[1]}},true);   // a logo whose smaller copy fails falls back to the full-size image
+const imgBack=el=>{const f=el.dataset.full;if(f&&el.src!==f){el.dataset.full="";el.src=f}else el.remove()};   // smaller copy failed: try the full-size image once, then show initials
 const ini=n=>n.split(" ").filter(Boolean).map(w=>w[0]).slice(0,2).join("");
-const photo=(id,n,sz)=>`<span class="ph ${sz||""}" data-i="${esc(ini(n))}"><img src="${esc(face(id))}" alt="" loading="lazy" onerror="this.remove()"></span>`;
+const photo=(id,n,sz)=>`<span class="ph ${sz||""}" data-i="${esc(ini(n))}"><img src="${esc(face(id,sz))}" data-full="${esc(faceFull(id))}" alt="" loading="lazy" onerror="imgBack(this)"></span>`;
 const timeOf=s=>new Date(s).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
 const dayKey=s=>{const d=new Date(s),t=new Date(),tm=new Date(t.getTime()+864e5),k=x=>x.toDateString();return k(d)==k(t)?"Today":k(d)==k(tm)?"Tomorrow":d.toLocaleDateString([],{weekday:"long",day:"numeric",month:"short"})};
 const statName={pts:"PTS",reb:"REB",ast:"AST",fg3m:"3PM",stl:"STL",blk:"BLK",pra:"Pts+Reb+Ast",pr:"Pts+Reb",pa:"Pts+Ast",dd:"Double-double",td:"Triple-double"};
@@ -255,7 +277,7 @@ let navFromBack=false;
 function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.replaceState({nba:1,...s},"");
   else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView||c.modelView!=s.modelView))history.pushState({nba:1,...s},"")}catch(e){}}
 addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"track";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
-async function render(){navSync();const T0=performance.now(),T_TAB=tab+(tab=="best"?"/"+bestView:"");const a=$("#app");a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
+async function render(){navSync();const T0=performance.now(),T_TAB=tab+(tab=="best"?"/"+bestView:"");const a=$("#app");if(!quietRender)a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
   clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip();paintAddBtns();tnote("tab:"+T_TAB,performance.now()-T0)}
 
 /* ---------- finding players on the slate ---------- */
@@ -512,7 +534,7 @@ const pc0=x=>x==null?"–":Math.round(x*100)+"%";
 const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
 let LIVEIDS=new Set();
 const fetchSoon=(u,ms=6000)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);return fetch(u,{headers:hdr(),signal:c.signal}).finally(()=>clearTimeout(t))};      // extras (live scores, lineups) never hold a page up for more than a few seconds
-let lastLive=[];const quietLive=async()=>{const t0=performance.now();try{const r=await fetchSoon("/api/live");if(r.ok)lastLive=await r.json()}catch(e){}tnote("scores",performance.now()-t0);return lastLive};      // slow or failed: keep showing the last scores
+let lastLive=[];const quietLive=()=>savedFirst("live",quietLiveNet);const quietLiveNet=async()=>{const t0=performance.now();try{const r=await fetchSoon("/api/live");if(r.ok)lastLive=await r.json()}catch(e){}tnote("scores",performance.now()-t0);return lastLive};      // slow or failed: keep showing the last scores
 const liveSet=g=>new Set((g||[]).filter(x=>x.state=="in").map(x=>x.game_id));
 const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEIDS.has(id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
 async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
@@ -825,7 +847,7 @@ function luSide(sd){
   return luWrap(sd.team,`<img src="${logo(sd.team)}" alt="">${nm(sd.team)} <span class="stc ${sd.confirmed?"ok":"ex"}">${sd.confirmed?"Confirmed":"Expected"}</span><span>${esc(sd.record||"")}</span>`,
    `${sd.starters.length?sd.starters.map(p=>row(p,false)).join(""):'<div class="mute" style="padding:8px 0">Lineup not posted yet</div>'}
    ${sd.out.length?`<div class="mnp">May not play</div>`+sd.out.map(p=>row(p,true)).join(""):""}`)}
-const lastGot={};const quietGet=async p=>{const t0=performance.now();try{const r=await fetchSoon("/api/"+p);if(r.ok)lastGot[p]=await r.json()}catch(e){}tnote(p,performance.now()-t0);return lastGot[p]||[]};      // slow or failed: keep the last copy
+const lastGot={};const quietGetNet=async p=>{const t0=performance.now();try{const r=await fetchSoon("/api/"+p);if(r.ok)lastGot[p]=await r.json()}catch(e){}tnote(p,performance.now()-t0);return lastGot[p]||[]};const quietGet=p=>savedFirst(p,()=>quietGetNet(p));      // slow or failed: keep the last copy
 
 /* ---------- games tab: every game of the day in one place (projections, live score, lineups) ---------- */
 let gamesDay="today";
@@ -872,7 +894,7 @@ if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this 
 (async()=>{paintTheme();$("#me").textContent=localStorage.user||"Sign in";nav();
   if(!localStorage.user){showLogin()}
   try{meta=await api("meta")}catch(e){}
-  render().finally(()=>{endIntro();if(localStorage.user&&!localStorage.welcomed)setTimeout(showWelcome,1100)})})();
+  render().finally(()=>{booting=false;endIntro();if(localStorage.user&&!localStorage.welcomed)setTimeout(showWelcome,1100)})})();
 </script>
 </body>
 </html>

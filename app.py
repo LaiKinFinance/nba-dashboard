@@ -1369,12 +1369,26 @@ def live_status(x_code: str = Header("")):
     return out
 
 _lu_cache = dict(t=0, data=None, starts={})
+def _lu_fetch():
+    t0 = time.time(); _lu_cache.update(t=time.time(), data=sl.lineups_full(), starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)}); SPEED["lineups_fetch_s"] = round(time.time() - t0, 2)
+
+def _startup_prefetch():
+    """Right after a restart: fetch live scores and lineups straight away, so the first person to open the app doesn't wait for them."""
+    import live
+    t0 = time.time()
+    for name, job in (("scores", live.scoreboard), ("lineups", _lu_fetch)):
+        try: job()
+        except Exception: logging.exception("start-up %s fetch failed", name)
+    try:
+        if _lu_cache["data"]: cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])
+    except Exception: logging.exception("start-up lineups build failed")
+    SPEED["startup_prefetch_s"] = round(time.time() - t0, 2)
+
 @app.get("/api/lineups")
 def lineups_tab(x_code: str = Header("")):
     """Ad-free starting lineups (Rotowire data) with photos, our top-3 picks flagged, and starters who differ from the team's last game."""
     check(x_code)
-    def fetch():
-        t0 = time.time(); _lu_cache.update(t=time.time(), data=sl.lineups_full(), starts={(g["home"], g["away"]): g["start"] for g in sl.upcoming(2)}); SPEED["lineups_fetch_s"] = round(time.time() - t0, 2)
+    fetch = _lu_fetch
     if time.time() - _lu_cache["t"] > 300:
         if _lu_cache["data"]:                          # show the last lineups at once and refresh them in the background
             if not _lu_cache.get("busy"):
@@ -1970,3 +1984,7 @@ def health():
                 models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), past_prices_check=_safe(past_prices_check, None), phones=_safe(phone_speed, {}), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+# started last, once every function it uses exists
+if os.environ.get("AUTO_REFRESH") == "1":
+    threading.Thread(target=_startup_prefetch, daemon=True).start()
