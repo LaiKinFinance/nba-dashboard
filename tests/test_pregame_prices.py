@@ -61,3 +61,44 @@ def test_team_price_wait_applies_after_a_failure_too(monkeypatch):
     monkeypatch.setattr(odds, "_get", boom)
     assert odds.refresh_lines([], refetch_h=0.4, min_credits=1500, attempt_gap_h=0.4)["ok"] is False
     assert odds.refresh_lines([], refetch_h=0.4, min_credits=1500, attempt_gap_h=0.4).get("skipped") and len(calls) == 1      # no retry within 24 minutes
+
+# ---- the real fetch code (app.refresh_odds -> odds.refresh / odds.refresh_lines) with fake provider replies ----
+import math, pytest
+
+def _real(monkeypatch, events_balance, odds_reply=None):
+    monkeypatch.setenv("ODDS_API_KEY", "k")
+    start = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=110)).strftime("%Y-%m-%dT%H:%MZ")
+    with closing(app.con()) as c:
+        odds.init(c); c.execute("CREATE TABLE IF NOT EXISTS odds_slots(k TEXT PRIMARY KEY, v TEXT)"); c.execute("DELETE FROM odds_slots WHERE k LIKE 'pre %' OR k LIKE 'log %'")
+        c.execute("DELETE FROM odds_fetch"); c.execute("DELETE FROM odds_status WHERE k IN ('lines_at','lines_try')")
+        c.execute("INSERT OR REPLACE INTO odds_status VALUES('remaining','19000')"); c.commit()
+    monkeypatch.setattr(app, "projections_all", lambda: [dict(game_id="rg", start=start, team="NY", opp="BOS", home=1, player_id="p1", player="Some Player")])
+    paid = []
+    def fake_get(path, **kw):
+        if path.endswith("/events"):
+            return [dict(id="e1", home_team="New York Knicks", away_team="Boston Celtics", commence_time=start)], events_balance
+        paid.append(path)
+        if odds_reply == "error": raise RuntimeError("Odds API request failed (HTTP 500): HTTPError")
+        return ({"bookmakers": []} if path.endswith("/odds") and "/events/" in path else []), "18990"
+    monkeypatch.setattr(odds, "_get", fake_get)
+    app._pregame_refresh(dt.datetime.now(dt.timezone.utc))
+    with closing(app.con()) as c:
+        row = c.execute("SELECT v FROM odds_slots WHERE k='pre 2h rg'").fetchone()
+    return paid, (json.loads(row[0])["state"] if row else None)
+
+def test_real_fetch_with_a_good_balance_is_sent_and_saved_ok(monkeypatch):
+    paid, state = _real(monkeypatch, "19000")
+    assert any("/events/e1/odds" in p for p in paid) and state == "ok"
+
+@pytest.mark.parametrize("bal", [None, "", "abc", "inf", "-inf", "nan", "1499"])
+def test_real_fetch_skips_the_paid_request_when_the_latest_balance_is_bad(monkeypatch, bal):
+    paid, state = _real(monkeypatch, bal)
+    assert not any("/events/e1/odds" in p for p in paid) and state == "failed"      # the reply with no (or a bad/low) balance: nothing paid, saved as failed
+
+def test_real_fetch_that_fails_is_saved_as_failed(monkeypatch):
+    paid, state = _real(monkeypatch, "19000", odds_reply="error")
+    assert state == "failed"
+
+def test_inf_is_never_a_usable_balance():
+    assert app._credits("inf") is None and app._credits(float("inf")) is None and app._credits("19000") == 19000.0
+    assert app.pregame_due(GAMES, NOW, set(), "inf") == []

@@ -3,7 +3,7 @@
 Credit cost on the API = markets x regions per event call, so we fetch each upcoming game once (not on every page view)
 and stop when the remaining credits get low.
 """
-import os, re, sqlite3, time, unicodedata, datetime as dt, math
+import math, os, re, sqlite3, time, unicodedata, datetime as dt
 import requests
 
 BASE = "https://api.the-odds-api.com/v4"
@@ -83,6 +83,12 @@ MATCH_HOURS = 6      # a bookmaker event belongs to our game only if both teams 
 def _when(s):
     return dt.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
 
+def valid_balance(v):
+    """A credit balance as a finite, non-negative number, or None if it is missing, blank, text, NaN, infinite or negative."""
+    try: x = float(v)
+    except (TypeError, ValueError): return None
+    return x if math.isfinite(x) and x >= 0 else None
+
 def match_event(events, home, away, start, abbr):
     """The bookmaker event for one game: same home and away team, and the start time closest to ours (within MATCH_HOURS).
     Teams that meet twice in a few days (a home-and-home) can never swap prices."""
@@ -108,7 +114,7 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=Non
         f = full.lower()
         for a, n in nick.items():
             if f.endswith(n): return a
-    fetched = 0; errors = []
+    fetched = 0; errors = []; skipped_low = False
     for g in sorted(games, key=lambda x: x["start"]):
         start = dt.datetime.fromisoformat(g["start"].replace("Z", "+00:00"))
         if start - now > dt.timedelta(hours=window_h) or start < now: continue
@@ -116,7 +122,10 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=Non
         if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=refetch_h or REFETCH_HOURS): continue
         ev = match_event(events, g["home"], g["away"], g["start"], abbr)
         if not ev or fetched >= GAMES_PER_RUN: continue
-        if remaining is not None and int(float(remaining)) < max(MIN_CREDITS, min_credits or 0): break      # balance checked before each paid request
+        if min_credits is not None:          # extra (pre-game) fetches: the LATEST balance must be known and above the brake before each paid request
+            bal = valid_balance(remaining)
+            if bal is None or bal < min_credits: skipped_low = True; break
+        elif remaining is not None and int(float(remaining)) < MIN_CREDITS: break
         try:
             js, remaining = _get(f"/sports/basketball_nba/events/{ev['id']}/odds", regions="au", markets=MARKETS, oddsFormat="decimal")
         except Exception as e:
@@ -136,7 +145,8 @@ def refresh(games, players_by_game, window_h=30, refetch_h=None, min_credits=Non
     if not errors: stamp.append(("last_ok", now.isoformat()))
     for k, v in stamp: con.execute("INSERT OR REPLACE INTO odds_status VALUES(?,?)", (k, str(v)))
     con.commit()
-    return dict(ok=not errors, fetched=fetched, errors=len(errors), remaining=remaining, msg=("; ".join(sorted(set(errors)))[:200] if errors else None))
+    return dict(ok=not errors and not skipped_low, fetched=fetched, errors=len(errors), remaining=remaining, skipped_low_balance=skipped_low,
+                msg=("; ".join(sorted(set(errors)))[:200] if errors else "skipped: balance missing or below the brake" if skipped_low else None))
 
 def _better(cur, price, book):
     """Preferred book (Sportsbet) wins; otherwise the best price."""
@@ -174,9 +184,8 @@ def refresh_lines(games, refetch_h=None, min_credits=None, attempt_gap_h=None):
         tr = con.execute("SELECT v FROM odds_status WHERE k='lines_try'").fetchone()
         if tr and now - dt.datetime.fromisoformat(tr[0]) < dt.timedelta(hours=attempt_gap_h): return dict(ok=True, skipped=True)
         bal = con.execute("SELECT v FROM odds_status WHERE k='remaining'").fetchone()
-        try: ok_bal = bal is not None and float(bal[0]) >= (min_credits or 0)
-        except (TypeError, ValueError): ok_bal = False
-        if not ok_bal: return dict(ok=True, skipped=True)
+        b = valid_balance(bal[0]) if bal else None
+        if b is None or b < (min_credits or 0): return dict(ok=True, skipped=True)
         con.execute("INSERT OR REPLACE INTO odds_status VALUES('lines_try',?)", (now.isoformat(),)); con.commit()      # saved before sending
     try: js, remaining = _get("/sports/basketball_nba/odds", regions="au", markets="h2h,spreads,totals", oddsFormat="decimal")
     except Exception as e:

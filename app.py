@@ -235,10 +235,9 @@ PREGAME = (("2h", 95, 125), ("30m", 20, 40))     # refresh a game's prices about
 PREGAME_MIN_CREDITS = 1500                        # safety brake: below this many credits only the 8pm/2am/8am fetches run
 
 def _credits(v):
-    """A usable credit balance, or None if it is missing or not a number."""
-    try:
-        x = float(v); return x if x == x and x >= 0 else None
-    except (TypeError, ValueError): return None
+    """A usable credit balance, or None if it is missing, not a number, infinite or negative."""
+    import odds
+    return odds.valid_balance(v)
 
 def pregame_due(games, now_utc, done, credits_left):
     """[(label, game_id)] of pre-game refreshes due now: tip-off inside the label's window, never tried before, and a known balance
@@ -267,7 +266,7 @@ def _pregame_refresh(now):
         res = {}; ok = False
         try:
             _stage("odds", lambda: res.update(refresh_odds(window_h=3, refetch_h=0.25, only={gid}, min_credits=PREGAME_MIN_CREDITS)) or res)
-            props = res.get("props") or {}; ok = bool(props.get("ok", True)) and not res.get("problem")
+            props = res.get("props") or {}; ok = props.get("ok") is True and not res.get("problem")      # anything short of a clear success is saved as failed
         except Exception: logging.exception("pre-game refresh failed"); props = {}
         mel = now.astimezone(ZoneInfo("Australia/Melbourne")).strftime("%Y-%m-%d %H:%M")
         with closing(con()) as c:
