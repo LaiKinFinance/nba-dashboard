@@ -278,6 +278,23 @@ def _pregame_refresh(now):
             c.execute("INSERT OR REPLACE INTO odds_slots VALUES(?, ?)", (f"log {mel} Melbourne (pre-game {label}{'' if state == 'ok' else ', ' + state})", json.dumps(dict(games=props.get("fetched"), prices_saved=props.get("saved") or 0, credits_left=props.get("remaining")))))
             c.commit()
 
+def past_prices_check():
+    with closing(con()) as c:
+        r = c.execute("SELECT v FROM odds_status WHERE k='history_check'").fetchone()
+    return json.loads(r[0]) if r else None
+
+def _history_check_once():
+    """Past-prices study, step 1: the one-game cost check runs once (a few minutes after start, only with 3,000+ credits) and is kept for /api/health."""
+    time.sleep(240)
+    while True:                     # waits (checking every 30 minutes) until a known balance of 3,000+ is available, then runs once
+        try:
+            import history
+            if _odds_on():
+                with closing(con()) as c: out = history.cost_check(c)
+                if out.get("ran"): return
+        except Exception: logging.exception("history cost check failed")
+        time.sleep(1800)
+
 def _odds_loop():
     time.sleep(90)
     while True:
@@ -301,6 +318,7 @@ def _odds_loop():
 
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_odds_loop, daemon=True).start()
+    threading.Thread(target=_history_check_once, daemon=True).start()
 
 RESULTS_EVERY = 300           # seconds between looks at the scoreboard for games that have just finished
 
@@ -1963,7 +1981,7 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None, credits_left=ostat.get("remaining")),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), phones=_safe(phone_speed, {}), phones_last=list(PHONE_TIMES)[-12:])
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), past_prices_check=_safe(past_prices_check, None), phones=_safe(phone_speed, {}), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
