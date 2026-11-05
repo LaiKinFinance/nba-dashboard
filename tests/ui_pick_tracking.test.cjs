@@ -44,7 +44,7 @@ test('saving a pick sends no financial fields, keeps its threshold type, and can
 });
 
 test('a hostile player id or name cannot break out of an attribute', () => {
-  const lines = ['const esc=', 'const face=', 'const ini=', 'const photo='].map(k => script.split('\n').find(l => l.startsWith(k)));
+  const lines = ['const esc=', 'const FACE_SZ=', 'const faceFull=', 'const face=', 'const ini=', 'const photo='].map(k => script.split('\n').find(l => l.startsWith(k)));
   assert.ok(lines.every(Boolean));
   const photo = new Function(lines.join('\n') + ';return photo')();
   const html = photo('x" onerror="alert(1)\' onload=\'alert(2)', '"><img src=x onerror=alert(3)>');
