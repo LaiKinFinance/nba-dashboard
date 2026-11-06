@@ -1988,3 +1988,4 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 # started last, once every function it uses exists
 if os.environ.get("AUTO_REFRESH") == "1":
     threading.Thread(target=_startup_prefetch, daemon=True).start()
+    __import__("live").start_keeper()          # live scores and open box scores stay at most ~10 seconds old while someone is watching
