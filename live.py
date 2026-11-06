@@ -19,10 +19,38 @@ def _get(url, **params):
 
 import threading
 _busy = set(); _busy_lock = threading.Lock()
+_wanted = {}          # key -> (last asked for, ttl, fetch): what phones are looking at right now
+KEEP_FOR = 120        # keep refreshing a score or box score for 2 minutes after a phone last asked for it
+
+def keep_fresh_once(now=None):
+    """Refresh every score/box score a phone asked for in the last 2 minutes once its copy is older than its ttl, so a phone
+    gets an up-to-date copy straight away instead of the previous one (the old copy was up to one refresh behind)."""
+    now = now or time.time()
+    for key, (asked, ttl, fn) in list(_wanted.items()):
+        if now - asked > KEEP_FOR: _wanted.pop(key, None); continue
+        hit = _cache.get(key)
+        if hit and now - hit[0] < ttl: continue
+        with _busy_lock:
+            if key in _busy: continue
+            _busy.add(key)
+        try: _cache[key] = (time.time(), fn())
+        except Exception: pass                     # keep the last good copy
+        finally:
+            with _busy_lock: _busy.discard(key)
+
+def _keeper():
+    while True:
+        try: keep_fresh_once()
+        except Exception: pass
+        time.sleep(3)
+
+def start_keeper():
+    threading.Thread(target=_keeper, daemon=True).start()
 
 def cached(key, ttl, fn):
     """Fresh copy: return it. Old copy: return it at once and refresh it in the background (one refresh at a time), so a page never waits
     for ESPN. No copy yet: fetch it now (only the very first time)."""
+    _wanted[key] = (time.time(), ttl, fn)
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < ttl: return hit[1]
     if hit:

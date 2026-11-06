@@ -512,7 +512,10 @@ async function today(a){await loadSlate();const [lg,lu,st]=await Promise.all([qu
    <details class="note" ${foldOpen("gfil",false)?"open":""} ontoggle="foldSet('gfil',this.open)"><summary>Filters${filt.start?" · starters only":""}</summary><div class="tools" style="margin-top:8px">
    <button class="pill ${filt.start?"on":""}" onclick="filt.start=!filt.start;render()">Starters only</button>
    <button class="pill" onclick="slate.forEach(g=>openGames.add(g.game_id));drawGames()">Expand all</button><button class="pill" onclick="openGames.clear();drawGames()">Collapse all</button></div></details>
-   <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). Every button is a line a bookmaker really offers; the tag after the line (for example <b>SB</b> for Sportsbet) says which one, and the price is theirs. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="glist"></div>`;drawGames();pollStatus();liveTimer=setInterval(refreshGames,20000)}
+   <details class="note"><summary>How to read a button</summary>The line, the price, then the model's chance and how many of the player's last games cleared it (e.g. 8/10). Every button is a line a bookmaker really offers; the tag after the line (for example <b>SB</b> for Sportsbet) says which one, and the price is theirs. A green <b style="color:var(--good)">VALUE</b> tag means the model rates it clearly more likely than the bookmaker's price implies. A purple <b style="color:var(--c-pur-fg)">BOOST</b> means teammates being out raises the model's chance; an orange <b style="color:#d9730d">FADE</b> means a teammate returning lowers it. ${oddsNote}</details><div id="liveAt" class="mute" style="font-size:12px;margin:0 0 6px"></div><div id="glist"></div>`;drawGames();stampLive();pollStatus();liveTimer=setInterval(refreshGames,15000)}
+let liveGotAt=0;
+function stampLive(){const el=$("#liveAt");if(!el)return;el.textContent=LG.some(l=>l.state=="in")&&liveGotAt?`Live scores updated ${new Date(liveGotAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit",second:"2-digit"})}`:""}      // so it is easy to see the scores are current
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState!="visible")return;if(tab=="today")refreshGames();else refreshDots()});      // coming back to the app: update the scores at once, not at the next tick
 
 /* ---------- value bets with evidence ---------- */
 let VAL=null;
@@ -534,7 +537,7 @@ const pc0=x=>x==null?"–":Math.round(x*100)+"%";
 const resIcon=r=>r=="won"?'<b class="good">✔ Won</b>':r=="lost"?'<b class="bad">✖ Lost</b>':r=="void"?'<span class="mute">Void</span>':'<span class="mute">Pending</span>';
 let LIVEIDS=new Set();
 const fetchSoon=(u,ms=6000)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);return fetch(u,{headers:hdr(),signal:c.signal}).finally(()=>clearTimeout(t))};      // extras (live scores, lineups) never hold a page up for more than a few seconds
-let lastLive=[];const quietLive=()=>savedFirst("live",quietLiveNet);const quietLiveNet=async()=>{const t0=performance.now();try{const r=await fetchSoon("/api/live");if(r.ok)lastLive=await r.json()}catch(e){}tnote("scores",performance.now()-t0);return lastLive};      // slow or failed: keep showing the last scores
+let lastLive=[];const quietLive=()=>savedFirst("live",quietLiveNet);const quietLiveNet=async()=>{const t0=performance.now();try{const r=await fetchSoon("/api/live");if(r.ok){lastLive=await r.json();liveGotAt=Date.now()}}catch(e){}tnote("scores",performance.now()-t0);return lastLive};      // slow or failed: keep showing the last scores
 const liveSet=g=>new Set((g||[]).filter(x=>x.state=="in").map(x=>x.game_id));
 const liveDot=id=>`<span class="live-dot" data-g="${esc(id||"")}" style="${LIVEIDS.has(id)?"":"display:none;"}margin:0 0 0 6px" title="Live now"></span>`;
 async function refreshDots(){LIVEIDS=liveSet(await quietLive());document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"})}
@@ -875,7 +878,7 @@ function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(i
 let luAt=0;
 async function refreshGames(){if(tab!="today"||document.visibilityState!="visible")return;
   if(!LU.length||Date.now()-luAt>60000){luAt=Date.now();quietGet("lineups").then(lu=>{const had=JSON.stringify(LU);LU=lu||[];if(tab=="today"&&JSON.stringify(LU)!=had)drawGames()})}      // lineups keep coming in after the page opens
-  const lg=await quietLive();if(!lg.length&&!LG.length)return;LG=lg;LIVEIDS=liveSet(LG);
+  const lg=await quietLive();if(!lg.length&&!LG.length)return;LG=lg;LIVEIDS=liveSet(LG);stampLive();
   document.querySelectorAll(".live-dot[data-g]").forEach(d=>{d.style.display=LIVEIDS.has(d.dataset.g)?"":"none"});
   LG.forEach(l=>{const g=gameIdx[l.game_id];if(g){const m=document.querySelector("#g"+l.game_id+" .mid");if(m)m.innerHTML=midHTML(g)}else{const el=$("#lv"+l.game_id);if(el)el.outerHTML=liveHTML(l)}});
   const ids=[...new Set([...openGames,...openLive])].filter(id=>{const l=LG.find(x=>x.game_id==id);return l&&l.state!="pre"});await Promise.all(ids.map(loadBox))}
