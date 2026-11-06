@@ -284,16 +284,22 @@ def past_prices_check():
     return json.loads(r[0]) if r else None
 
 def _history_check_once():
-    """Past-prices study, step 1: the one-game cost check runs once (a few minutes after start, only with 3,000+ credits) and is kept for /api/health."""
+    """Past-prices study: the one-game cost check (once), then the monthly download (option B: one past game day every 30 minutes,
+    within 5,000 credits a month and never below 3,000 credits left). Results are kept for /api/health."""
     time.sleep(240)
-    while True:                     # waits (checking every 30 minutes) until a known balance of 3,000+ is available, then runs once
+    while True:
         try:
             import history
             if _odds_on():
-                with closing(con()) as c: out = history.cost_check(c)
-                if out.get("ran"): return
-        except Exception: logging.exception("history cost check failed")
+                with closing(con()) as c:
+                    if history.cost_check(c).get("ran"):
+                        out = history.download_step(c); SPEED["past_prices_last"] = {k: out.get(k) for k in ("day", "games", "reason", "state")}
+        except Exception: logging.exception("past prices step failed")
         time.sleep(1800)
+
+def past_prices_progress():
+    import history
+    with closing(con()) as c: return history.summary(c)
 
 def _odds_loop():
     time.sleep(90)
@@ -1981,7 +1987,7 @@ def health():
     age = _models_age()
     return dict(overall="ok" if not problems else "problem", problems=problems, data_through=last, projections_made=made, model_current=current, stages=st, served_check=sc,
                 finished_games_without_box_score=nobox, prices=dict(last_ok=ostat.get("last_ok"), last_error=ostat.get("error") or ostat.get("lines_error") or None, credits_left=ostat.get("remaining")),
-                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), past_prices_check=_safe(past_prices_check, None), phones=_safe(phone_speed, {}), phones_last=list(PHONE_TIMES)[-12:])
+                models_age_days=round(age / 86400, 1) if age != float("inf") else None, backups=backups or [], speed=dict(SPEED), price_fetches=_safe(price_fetch_log, []), past_prices_check=_safe(past_prices_check, None), past_prices=_safe(past_prices_progress, None), phones=_safe(phone_speed, {}), phones_last=list(PHONE_TIMES)[-12:])
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
