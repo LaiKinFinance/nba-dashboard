@@ -48,8 +48,8 @@ test('double and triple doubles count steals and blocks, all five categories', (
   assert.match(calc({stat:'td',side:'over'},stocks).txt,/STL 10, BLK 11/);
 });
 test('under wording says the bet can still be lost, and shows when it already has been', () => {
-  assert.match(calc({stat:'pra',line:30.5,side:'under'},box).txt,/must stay under/);
-  assert.match(calc({stat:'pra',line:20.5,side:'under'},box).txt,/already over the line, this under has lost/);
+  assert.match(calc({stat:'pra',line:30.5,side:'under'},box).txt,/24 Pts\+Reb\+Ast so far – 6.5 to spare, must stay under 30.5/);
+  assert.match(calc({stat:'pra',line:20.5,side:'under'},box).txt,/already over 20.5, this under has lost/);
 });
 test('exactly on a whole-number line is left out of the win/loss count', () => {
   for (const side of ['over','under']) {
