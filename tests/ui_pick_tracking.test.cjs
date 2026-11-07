@@ -19,7 +19,7 @@ test('personal results render without a model, prices or money', async () => {
   const render = new Function('api', 'localStorage', 'esc', 'pct', 'legDesc', 'const infoNote=()=>"",foldOpen=(k,d)=>d,foldSet=()=>{},legWho=()=>"",legMark=r=>r||"";let GT={};'+source+';return bets')(
     async () => response, {user:'mark'}, x=>String(x), x=>`${Math.round(x*100)}%`, ()=> 'Over 7.5 rebounds');
   const app = {innerHTML:''}; await render(app);
-  assert.match(app.innerHTML, /Past picks/);
+  assert.match(app.innerHTML, /My results/);
   assert.match(app.innerHTML, /Over 7.5 rebounds/);
   assert.doesNotMatch(app.innerHTML, /Mark won|Mark lost|<button/);
   assert.doesNotMatch(app.innerHTML, /\$|profit|stake|refund|Sportsbet|bankroll/i);

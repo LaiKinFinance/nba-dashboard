@@ -88,7 +88,7 @@ def test_game_page_lists_whole_number_team_lines_in_a_note_not_as_bets():
 def test_the_page_has_no_refund_estimates():
     html = open("static/index.html").read()
     for gone in ("refund_note", "value_note", "r.value.assumption", "payout_odds", "Expected profit"): assert gone not in html, gone
-    assert "No advice for this slip" in html and "whole-number line" in html
+    assert "No advice for this pick list" in html and "whole-number line" in html
 
 def test_no_refund_maths_left_in_the_code():
     for f in ("parlay.py", "settle.py"): assert "refund_ev" not in open(f).read() and "reduced_odds" not in open(f).read()

@@ -509,7 +509,7 @@ def model_status(preds=None):
     """(saved model or None, reason it should not be used for bets or None). Never trains."""
     try: b = predict.load_models(strict=False)
     except predict.ModelMissing: return None, "There is no prediction model yet"
-    if predict.contract_problem(b): return b, "Predictions are from an older version of the model and are being updated"
+    if predict.contract_problem(b): return b, "The app is refreshing its predictions"
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     if preds and any(p.get("model_id") != b.get("model_id") for p in preds if p.get("start", "") >= now):    # games already under way keep their old projections
         return b, "Predictions are being refreshed after a model update"
