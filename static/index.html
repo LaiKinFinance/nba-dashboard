@@ -177,6 +177,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 .prog{padding:8px 0;border-bottom:1px solid var(--line)}.prog:last-child{border:0}.pbar{height:6px;background:var(--btn);border-radius:3px;margin-top:5px;overflow:hidden}.pbar i{display:block;height:100%;background:var(--acc)}.pbar.hit i{background:var(--good)}
 
 #upd{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:60;background:var(--card);color:var(--mute);border:1px solid var(--btn);border-radius:20px;padding:3px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);pointer-events:none}
+.lockh{font-weight:700;margin:12px 0 2px;font-size:14px}.lockrow{opacity:.92;border-top:1px solid var(--btn);padding-top:4px;margin-top:4px}.lockmeta{font-size:12px;margin:-2px 0 4px}
 </style>
 </head>
 <body>
@@ -464,11 +465,20 @@ function drawGames(){const q=filt.q.toLowerCase(),rank={in:0,pre:1,post:2};
   const none={yesterday:"No finished games from yesterday.",today:"No games today.",tomorrow:"No games listed for tomorrow yet."}[gamesDay];
   $("#glist").innerHTML=h||`<div class="empty">${none}</div>`;paintSel();centerStrips()}
 let playingOpen=true;
-const playingLegs=()=>(best&&best.playing||[]).filter(x=>LIVEIDS.has(x.game_id)).map(x=>({game_id:x.game_id,player_id:x.player_id,team:x.team,text:x.player,stat:x.stat,line:x.line,side:"over"}));
-async function loadPlayingBoxes(){const ids=[...new Set(playingLegs().map(l=>l.game_id))];
+// Locked picks: everything saved before tip-off whose game has started. Shown (not addable) with live progress until the next morning.
+const LOCK=()=>(best&&best.locked)||{legs:[],calls:[],value:[],combo:null};
+const asLeg=x=>({game_id:x.game_id,player_id:x.player_id,team:x.team,text:x.player,stat:x.stat,line:x.line,side:x.side||"over"});
+const playingLegs=()=>{const L=LOCK();return [...L.legs,...L.calls,...L.value,...((L.combo&&L.combo.legs)||[])].map(asLeg)};
+async function loadPlayingBoxes(){const ids=[...new Set(playingLegs().map(l=>l.game_id))].filter(id=>{const g=LG.find(x=>x.game_id==id);return g&&(g.state=="in"||(g.state=="post"&&!boxes[id]))});
   await Promise.all(ids.map(async id=>{try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(r.ok)boxes[id]=await r.json()}catch(e){}}))}
-function playingHTML(){const ls=playingLegs();if(!ls.length)return"";
-  return `<details class="card" ${playingOpen?"open":""} ontoggle="playingOpen=this.open"><summary style="color:var(--ink);font-size:17px;font-weight:700;margin:0">Playing now <span class="mute" style="font-weight:400;font-size:14px">(${ls.length})</span></summary><div style="margin-top:6px">${ls.map(legProg).join("")}</div></details>`}
+function playingHTML(){const L=LOCK(),n=L.legs.length+L.calls.length+L.value.length+(L.combo?1:0);if(!n)return"";
+  const live=new Set(playingLegs().map(l=>l.game_id).filter(id=>LIVEIDS.has(id))).size;
+  const row=x=>`<div class="lockrow">${legProg(asLeg(x))}<div class="mute lockmeta">🔒 ${x.p!=null?`model ${pc0(x.p)}`:""}${x.price?` · price ${x.price.toFixed(2)}`:""}${x.in_combo?" · in combo":""}${x.result?` · ${resIcon(x.result)}`:""}</div></div>`;
+  const grp=(title,xs)=>xs.length?`<div class="lockh">${title}</div>${xs.map(row).join("")}`:"";
+  const cb=L.combo?`<div class="lockh">Daily combo${L.combo.joint?` <span class="mute" style="font-weight:400">· ${pc0(L.combo.joint)} together${L.combo.fair_odds?` · fair odds ${L.combo.fair_odds.toFixed(2)}`:""}</span>`:""}${L.combo.result?` · ${resIcon(L.combo.result)}`:""}</div>${L.combo.legs.map(l=>`<div class="lockrow">${legProg(asLeg(l))}</div>`).join("")}`:"";
+  return `<details class="card lockcard" ${playingOpen?"open":""} ontoggle="playingOpen=this.open"><summary style="color:var(--ink);font-size:17px;font-weight:700;margin:0">🔒 Locked picks <span class="mute" style="font-weight:400;font-size:14px">(${n}${live?` · ${live} game${live>1?"s":""} live`:""})</span></summary>
+   <div class="mute" style="font-size:13px;margin:6px 0 2px">Saved before tip-off, so they can no longer be added. Follow them here; they move to Yesterday the next morning.</div>
+   ${grp("Best picks",L.legs)}${cb}${grp("Top player calls",L.calls)}${grp("Value bets",L.value)}</details>`}
 async function refreshPlaying(){if(tab!="best"||bestView!="today"||document.visibilityState!="visible")return;
   LG=await quietLive();LIVEIDS=liveSet(LG);await loadPlayingBoxes();const w=$("#playingWrap");if(w)w.innerHTML=playingHTML()}
 /* ---------- Top player calls: the 3 clearest over/under calls on each team's top player (pts + reb + ast) ---------- */
@@ -592,7 +602,7 @@ async function bestTab(a){const slateP=loadSlate();     // load the games list a
   const sb=v=>`onclick="bestView='${v}';try{localStorage.bestView='${v}'}catch(e){}render()"`;
   a.innerHTML=`<div class="seg" style="margin:0 0 12px"><button class="${bestView=="today"?"on":""}" ${sb("today")}>Today</button><button class="${bestView=="track"?"on":""}" ${sb("track")}>Yesterday</button></div><div id="bbody"><p class="mute">Loading…</p></div>`;
   if(bestView=="today"){const [b,v,lv0,,cl]=await Promise.all([apiMemo("best"),apiMemo("value"),quietLive(),slateP,apiMemo("calls").catch(()=>null)]);CALLS=cl;best=b;VAL=v;LG=lv0;LIVEIDS=liveSet(lv0);await loadPlayingBoxes();
-    $("#bbody").innerHTML=`${infoNote("tp",`Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="modelView='track';go('model');return false">Track record</a> (tap the logo) for how they have done.`)}`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||'<div class="card empty">No picks right now. A pick only appears once a bookmaker line has been found for it, and once lineups are posted.</div>')+callsHTML()+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
+    $("#bbody").innerHTML=`${infoNote("tp",`Each pick is saved the first time it appears, before tip-off, and graded automatically after the game. See <a href="#" style="color:var(--acc)" onclick="modelView='track';go('model');return false">Track record</a> (tap the logo) for how they have done.`)}`+`<div id="playingWrap">${playingHTML()}</div>`+(bestHTML()||(playingHTML()?'<div class="card empty">No more picks for games still to come. Today\'s earlier picks are locked above.</div>':'<div class="card empty">No picks right now. A pick only appears once a bookmaker line has been found for it, and once lineups are posted.</div>'))+callsHTML()+valueHTML();liveTimer=setInterval(refreshPlaying,20000)}
   else{const [t,lv0]=await Promise.all([apiMemo("track",60e3),quietLive()]);await slateP;LIVEIDS=liveSet(lv0);
     const days=t.days.filter(d=>[...d.legs,...d.value].some(x=>x.result!=null));      // only days with results: today's waiting picks belong on Today
     $("#bbody").innerHTML=`${days.length?days.map((d,di)=>{const all=[...d.legs,...d.value],w=all.filter(x=>x.result=="won").length,l=all.filter(x=>x.result=="lost").length,wt=all.filter(x=>x.result==null).length;return `<details class="card" ${foldOpen("day_"+d.day,di==0)?"open":""} ontoggle="foldSet('day_${d.day}',this.open)"><summary class="csum" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${(d.start?new Date(d.start):new Date(d.day+"T12:00:00")).toLocaleDateString([],{weekday:"short",day:"numeric",month:"short"})} <span class="mute" style="font-weight:400;font-size:13px">· ${w} won · ${l} lost${wt?` · ${wt} waiting`:""}</span></span>${d.combo?`<span style="font-weight:400;font-size:14px">Daily combo: ${resIcon(d.combo.result)}</span>`:""}</summary>

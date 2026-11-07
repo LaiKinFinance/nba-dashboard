@@ -1155,7 +1155,7 @@ def best(x_code: str = Header("")):
     res = _not_started_best(cached_calc("best", compute_best))
     try: log_picks(best=res, value=_not_started_value(cached_calc("value", compute_value)))
     except Exception: logging.exception("pick logging failed")
-    return res
+    return dict(res, locked=_safe(locked_picks, None))
 
 STEADY_CV = 0.265        # a player whose PRA swings less than this (as a share of his average) over his last 20 games is among the steadiest third (5 seasons of tests)
 STEADY_MIN_P = 0.75      # for steady players, PRA picks use lines at least this likely: with his own spread those chances were honest (said 82%, came true 82%)
@@ -1337,6 +1337,38 @@ def calls(x_code: str = Header("")):
     with closing(con()) as c:
         rec = c.execute("SELECT sum(result='won'), sum(result='lost') FROM pick_log WHERE kind='call'").fetchone()
     return dict(res, record=dict(won=rec[0] or 0, lost=rec[1] or 0))
+
+LOCK_KEEP_H = 18          # a locked pick stays on Best picks for 18 hours after its game tips off (then it is under Yesterday)
+
+def locked_picks(now=None):
+    """Today's picks whose game has started: exactly what was saved before tip-off (Best picks, the daily combo, Top player calls,
+    Value bets), so they stay visible, locked, while the games are played and after they finish."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    since = (now - dt.timedelta(days=2)).astimezone(ET).date().isoformat()
+    def recent(st):
+        try: t = dt.datetime.fromisoformat(st.replace("Z", "+00:00"))
+        except Exception: return False
+        return t <= now and now - t <= dt.timedelta(hours=LOCK_KEEP_H)
+    out = dict(legs=[], calls=[], value=[], combo=None)
+    with closing(con()) as c:
+        starts = {}
+        def start_of(gid):
+            if gid not in starts: starts[gid] = _game_start(c, gid)
+            return starts[gid]
+        for r in c.execute("SELECT * FROM pick_log WHERE kind IN ('leg','call','value') AND day >= ? ORDER BY id", (since,)).fetchall():
+            if r["kind"] == "leg" and r["price"] is None: continue          # only picks that were shown (they need a bookmaker line)
+            st = start_of(r["game_id"])
+            if not st or not recent(st): continue
+            out[{"leg": "legs", "call": "calls", "value": "value"}[r["kind"]]].append(dict(
+                player=r["player"], player_id=r["player_id"], team=r["team"], game_id=r["game_id"], stat=r["stat"], line=r["line"], side=r["side"] or "over",
+                p=r["model_p"], price=r["price"], book=r["book"], in_combo=bool(r["in_combo"]), result=r["result"], start=st))
+        for r in c.execute("SELECT * FROM combo_log WHERE day >= ? ORDER BY day DESC", (since,)).fetchall():
+            legs = json.loads(r["legs"] or "[]"); ss = [start_of(l["game_id"]) for l in legs]
+            if not legs or not all(ss): continue
+            first = min(ss)
+            if not recent(first) and not any(recent(x) for x in ss): continue
+            out["combo"] = dict(legs=[dict(l, side="over", start=st) for l, st in zip(legs, ss)], joint=r["joint"], fair_odds=r["fair_odds"], result=r["result"]); break
+    return out
 
 def playing_picks():
     """Picks that were published before tip-off and have no result yet, for games that have started. The page shows only those in a live game."""
