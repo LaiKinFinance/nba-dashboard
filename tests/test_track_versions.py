@@ -72,3 +72,16 @@ def test_a_pick_published_twice_counts_once_and_prefers_the_priced_copy():
 def test_bankroll_with_nothing_settled_is_flat():
     out = app.bankroll([_row(1, "2026-10-01", None, 2.0)])
     assert out["balance"] == 1000.0 and out["roi"] is None and out["series"] == [] and out["waiting"] == 1
+
+
+def test_results_are_split_by_kind_with_their_own_pretend_money(client):
+    import sqlite3
+    c = sqlite3.connect(app.DB)
+    for i, (kind, res, price) in enumerate([("leg", "won", 1.4), ("leg", "won", 1.4), ("leg", "lost", 1.4), ("value", "lost", 2.2), ("value", "won", 2.2), ("call", "lost", 1.88)]):
+        c.execute("INSERT INTO pick_log(day,game_id,player_id,player,team,kind,stat,line,side,model_p,price,created,result,model_id) VALUES('2026-10-28',?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  ("g", f"k{i}", "X", "A", kind, "reb", 5.5 + i, "over", .7, price, "t", res, "NEW"))
+    c.commit(); t = client.get("/api/track").json(); K = t["by_kind"]
+    assert (K["legs"]["won"], K["legs"]["n"], K["value"]["n"], K["calls"]["n"]) == (2, 3, 2, 1)
+    assert round(K["legs"]["bank"]["profit"], 2) == -2.0 and round(K["value"]["bank"]["profit"], 2) == 2.0 and K["calls"]["bank"]["profit"] == -10
+    assert round(K["legs"]["bank"]["avg_price"], 2) == 1.4
+    assert any(d.get("calls") for d in t["days"])                   # calls listed under their own name on the Results days

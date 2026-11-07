@@ -960,7 +960,8 @@ def bankroll(legs):
         else: continue
         days[r["day"]] = bal
     settled = won + lost
-    return dict(start=BANK_START, stake=BANK_STAKE, balance=bal, profit=bal - BANK_START, won=won, lost=lost, void=void, no_price=no_price,
+    sp = [r["price"] for r in priced if r["result"] in ("won", "lost")]
+    return dict(avg_price=(sum(sp) / len(sp)) if sp else None, start=BANK_START, stake=BANK_STAKE, balance=bal, profit=bal - BANK_START, won=won, lost=lost, void=void, no_price=no_price,
                 waiting=sum(1 for r in priced if r["result"] is None), roi=((bal - BANK_START) / (BANK_STAKE * settled)) if settled else None,
                 series=[dict(day=d, balance=b) for d, b in sorted(days.items())])
 
@@ -977,8 +978,9 @@ def track_record(x_code: str = Header("")):
         g = [r for r in rows if r["result"] in ("won", "lost")]
         return dict(n=len(g), won=sum(1 for r in g if r["result"] == "won"), avg_p=(sum(r["model_p"] for r in g) / len(g)) if g else None,
                     pending=sum(1 for r in rows if r["result"] is None), void=sum(1 for r in rows if r["result"] == "void"))
-    L = [r for r in legs if r["kind"] == "leg"]; V = [r for r in legs if r["kind"] == "value"]
-    out = dict(legs=summ(L), value=summ(V), bankroll=bankroll(legs))
+    L = [r for r in legs if r["kind"] == "leg"]; V = [r for r in legs if r["kind"] == "value"]; K = [r for r in legs if r["kind"] == "call"]
+    out = dict(legs=summ(L), value=summ(V), calls=summ(K), bankroll=bankroll(legs),
+               by_kind=dict(legs=dict(summ(L), bank=bankroll(L)), calls=dict(summ(K), bank=bankroll(K)), value=dict(summ(V), bank=bankroll(V))))   # each kind on its own, so one kind can't hide another
     bins = []
     for lo, hi in ((0.0, 0.7), (0.7, 0.8), (0.8, 1.01)):
         g = [r for r in L if r["result"] in ("won", "lost") and lo <= r["model_p"] < hi]
@@ -995,10 +997,10 @@ def track_record(x_code: str = Header("")):
     gc = [x for x in combos if x["result"] in ("won", "lost")]
     out["combos"] = dict(n=len(gc), won=sum(1 for x in gc if x["result"] == "won"), avg_p=(sum(x["joint"] for x in gc) / len(gc)) if gc else None, pending=sum(1 for x in combos if x["result"] is None))
     days = {}
-    for x in combos: days.setdefault(x["day"], dict(day=x["day"], combo=dict(result=x["result"], joint=x["joint"], fair_odds=x["fair_odds"], legs=json.loads(x["legs"])), legs=[], value=[]))
+    for x in combos: days.setdefault(x["day"], dict(day=x["day"], combo=dict(result=x["result"], joint=x["joint"], fair_odds=x["fair_odds"], legs=json.loads(x["legs"])), legs=[], value=[], calls=[]))
     for r in legs:
-        d = days.setdefault(r["day"], dict(day=r["day"], combo=None, legs=[], value=[]))
-        (d["legs"] if r["kind"] == "leg" else d["value"]).append(dict(player=r["player"], player_id=r["player_id"], game_id=r["game_id"], team=r["team"], stat=r["stat"], line=r["line"], side=r["side"], p=r["model_p"], price=r["price"],
+        d = days.setdefault(r["day"], dict(day=r["day"], combo=None, legs=[], value=[], calls=[]))
+        (d["legs"] if r["kind"] == "leg" else d["calls"] if r["kind"] == "call" else d["value"]).append(dict(player=r["player"], player_id=r["player_id"], game_id=r["game_id"], team=r["team"], stat=r["stat"], line=r["line"], side=r["side"], p=r["model_p"], price=r["price"],
                                                                       result=r["result"], actual=r["actual"], in_combo=bool(r["in_combo"])))
     starts = {}
     with closing(con()) as c:
