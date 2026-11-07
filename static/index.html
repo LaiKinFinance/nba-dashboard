@@ -347,11 +347,12 @@ setInterval(pollStatus,180000);
 /* ---------- games tab ---------- */
 let lastLoad=Date.now();
 async function loadSlate(force){if(!force&&slate.length&&Date.now()-lastLoad<60e3)return;slate=await api("slate");lastLoad=Date.now()}      // reuse the games data for a minute instead of downloading it on every tab change
+const isVal=(edge,price)=>!!price&&price<=3&&0.5*edge>=0.06;     // same rule as Value bets: the app's chance leaned halfway to the bookmaker must still be 6%+ ahead, and no long shots over 3.00
 const oldAt=iso=>!!iso&&(Date.now()-new Date(iso).getTime())/36e5>8;     // price older than 8 hours, re-checked every time the page draws
 setInterval(()=>{if(document.visibilityState!="visible"||Date.now()-lastLoad<5*60e3)return;if(tab=="today")loadSlate(true).then(()=>drawGames()).catch(()=>{});else if(tab=="best"&&!legs.length)render()},60e3);
 function hitTxt(h,n){if(!n)return"";const c=h/n>=.8?"hg":h/n<=.3?"hb":"";return `<span class="${c}">${h}/${n}</span>`}
 function btn(p,s,o){ // o: {line, prob, price, book, edge, hit, n}
-  const val=o.price&&!o.stale&&!oldAt(p.odds_at)&&!o.no_claim&&o.edge>=0.04,bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
+  const val=o.price&&!o.stale&&!oldAt(p.odds_at)&&!o.no_claim&&isVal(o.edge,o.price),bst=(o.boost||0)>=0.05,fad=!bst&&(o.fade||0)<=-0.05;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:o.line,side:"over"});
   return `<button class="od ${val?"val":""} ${bst?"bst":""} ${fad?"fad":""}" data-k="${k}" data-p="${o.prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',${o.line},${o.price||0},'${o.book||""}',${o.prob},${o.hit},${o.n})">${val?'<span class="vt">VALUE</span>':""}${bst?'<span class="bt">BOOST</span>':fad?'<span class="ft">FADE</span>':""}${o.alt?`<span class="alt">${bk(o.alt[1])} ${o.alt[0].toFixed(2)}</span>`:""}
    <div class="l">O ${o.line}${o.price?" · "+bk(o.book):""}</div><div class="o">${o.price?o.price.toFixed(2):dec(o.prob)}</div><div class="p">${pct(o.prob)} · ${hitTxt(o.hit,o.n)}</div></button>`}
 function whyHTML(p){const ab=p.absent||[],ev=p.evidence||[];if(!ab.length)return"";
@@ -371,7 +372,7 @@ function moreHTML(p){const defs=[["pra","PRA"],["pr","P+R"],["pa","P+A"],["fg3m"
 function playerHTML(p){
   const mk=["pts","reb","ast"].map(st=>statRow(p,st,st.toUpperCase())).join("");
   const dd=p.book&&p.book.dd,td=p.book&&p.book.td;
-  const sp=(s,prob,b,h)=>{const val=b&&!b.stale&&!oldAt(p.odds_at)&&b.edge>=0.04;const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:0,side:"over"}),hist=p.dd_td_hist||{};
+  const sp=(s,prob,b,h)=>{const val=b&&!b.stale&&!oldAt(p.odds_at)&&isVal(b.edge,b.price);const k=key({game_id:p.game_id,player_id:p.player_id,stat:s,line:0,side:"over"}),hist=p.dd_td_hist||{};
     const note=s=="td"?`${hist.td||0} in ${hist.games||0} games`:`${hist.dd20||0} in last 20`;
     return `<button class="od ${val?"val":""}" data-k="${k}" data-p="${prob}" onclick="pick('${p.game_id}','${p.player_id}','${s}',0,${b?b.price:0},'${b?b.book:""}',${prob},${h.k},${h.n})">${val?'<span class="vt">VALUE</span>':""}<span class="l" style="text-align:left">${statName[s]}</span><span><span class="o">${b?b.price.toFixed(2):dec(prob)}</span><span class="p">${pct(prob)} · ${note}</span></span></button>`};
   const l10=p.last10||[],l5=l10.slice(0,5),av=k=>l5.length?(l5.reduce((a,x)=>a+x[k],0)/l5.length).toFixed(1):"–";
@@ -532,8 +533,8 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState!="
 /* ---------- value bets with evidence ---------- */
 let VAL=null;
 function valueHTML(){if(!VAL)return"";
-  if(!VAL.odds_connected)return `<div class="card vb"><h2>💎 Value bets</h2><p class="mute" style="margin:0">No bookmaker prices right now, so there are no value bets. Check back after the next price update.</p></div>`;
-  if(!VAL.picks.length)return `<div class="card vb"><h2>💎 Value bets</h2><p class="mute" style="margin:0">No pick beats the bookmaker's price by a clear margin (6% or more) tonight. That's normal on many nights: bookmakers are usually close to right.</p></div>`;
+  if(!VAL.odds_connected)return `<div class="card vb"><h2>💎 Value bets <span class="chip q" style="font-size:12px;vertical-align:middle">Experimental</span></h2><p class="mute" style="margin:0">No bookmaker prices right now, so there are no value bets. Check back after the next price update.</p></div>`;
+  if(!VAL.picks.length)return `<div class="card vb"><h2>💎 Value bets <span class="chip q" style="font-size:12px;vertical-align:middle">Experimental</span></h2><p class="mute" style="margin:0">No pick is clearly better than the bookmaker's price tonight. That's normal on many nights: bookmakers are usually close to right.</p></div>`;
   return `<details class="card vb" ${foldOpen("value",false)?"open":""} ontoggle="foldSet('value',this.open)"><summary class="csum">💎 Value bets <span class="mute" style="font-weight:400;font-size:13px">(${VAL.picks.length}) · model vs Sportsbet price, with the evidence</span></summary>
    <p class="mute" style="margin:0 0 6px">Sorted by how much better the app's chance is than the bookmaker's price. The app leans part-way toward the bookmaker so it doesn't over-trust itself, and prefers players with steady minutes and a good recent record.</p>
    ${VAL.picks.map((o,i)=>`<div class="bl" style="align-items:flex-start">${o.kind=="player"?photo(o.player_id,o.player):'<span class="ph"></span>'}<div class="x"><b>${esc(o.kind=="player"?o.player:o.text)}</b><span class="mute">${o.kind=="player"?legDesc(o)+" · "+(NAMES[o.team]||o.team):"Match winner"}</span>
@@ -605,9 +606,12 @@ function kindVerdict(name,k){if(!k||k.n<20)return `<li><b>${name}:</b> too early
 function setBank(k){BANKSEL=k;const w=$("#bankwrap");if(w&&TRK)w.innerHTML=bankPick()}
 function bankPick(){const K=TRK.by_kind||{},b={all:TRK.bankroll,legs:K.legs&&K.legs.bank,calls:K.calls&&K.calls.bank,value:K.value&&K.value.bank}[BANKSEL]||TRK.bankroll;
   return `<div class="seg sm" style="margin:0 0 8px">${[["all","All"],["legs","Best picks"],["calls","Top calls"],["value","Value bets"]].map(([k,l])=>`<button class="${BANKSEL==k?"on":""}" onclick="setBank('${k}')">${l}</button>`).join("")}</div>${bankrollHTML(b)}`}
+function newRulesHTML(t){const xs=(t.days||[]).flatMap(d=>d.value||[]).filter(x=>x.price&&x.p!=null&&(x.result=="won"||x.result=="lost")&&x.player_id);if(xs.length<5)return"";
+  const keep=xs.filter(x=>isVal(x.p-1/x.price,x.price)),w=keep.filter(x=>x.result=="won").length,pr=keep.reduce((a,x)=>a+(x.result=="won"?10*(x.price-1):-10),0);
+  return `<div class="mute" style="font-size:12.5px;margin:-2px 0 8px;padding:6px 8px;border-radius:8px;background:var(--btn)">With the new, stricter rules, ${keep.length} of these ${xs.length} player value bets would have been shown${keep.length?`: ${w} won, pretend ${pr>=0?"+":""}${usd(pr)}`:""}.</div>`}
 function trackSummaryHTML(t){TRK=t;const K=t.by_kind||{legs:t.legs,value:t.value},C=t.combos;
     return `<div class="card"><h2 style="margin-top:0">How each kind of pick is doing</h2>
-      ${kindRow("⭐ Best picks",K.legs,"short prices, very likely")}${kindRow("🎯 Top player calls",K.calls,"Pts + Reb + Ast, over or under")}${kindRow("💎 Value bets",K.value,"bigger prices, lose more often")}
+      ${kindRow("⭐ Best picks",K.legs,"short prices, very likely")}${kindRow("🎯 Top player calls",K.calls,"Pts + Reb + Ast, over or under")}${kindRow("💎 Value bets",K.value,"bigger prices, lose more often")}${newRulesHTML(t)}
       <div class="kind"><div class="kh"><b>Daily combo</b><span class="mute">all picks in it must win</span></div><div class="kv"><div><span class="big">${C.n?C.won+"/"+C.n:"–"}</span><span class="mute">won</span></div><div><span class="big">${pc0(C.avg_p)}</span><span class="mute">app said</span></div><div></div></div></div></div>
      <div id="bankwrap">${bankPick()}</div><details class="card" ${trkOpen("tells")?"open":""} ontoggle="trkSet('tells',this.open)"><summary class="csum">What this tells us</summary><ul class="why" style="margin:0">${kindVerdict("Best picks",K.legs)}${K.calls?kindVerdict("Top player calls",K.calls):""}${kindVerdict("Value bets",K.value)}</ul>
       <p class="mute" style="margin:8px 0 0">Every pick is saved before the game and never edited, so these numbers are a fair test of the app.</p></details>`}

@@ -525,6 +525,12 @@ def _dd(r): return int(_cats(r) >= 2)
 def _td(r): return int(_cats(r) >= 3)
 
 MIN_EDGE, MIN_EDGE_UNSURE = 0.06, 0.09
+VALUE_LEAN = 0.5         # value bets: the app's chance is moved halfway to the bookmaker's before the gap is judged (was 30%; value bets won 41% when the app said 54%)
+VALUE_MAX_PRICE = 3.0    # no value bets on long shots: that is where the app was most often wrong
+
+def value_gap(p, price):
+    """The gap a value bet must clear: the app's chance after leaning halfway to the bookmaker, minus the bookmaker's own chance."""
+    return (1 - VALUE_LEAN) * (p - 1 / price)
 STALE_H = 8.0     # a bookmaker price older than this (hours) gets no VALUE label anywhere
 
 def is_stale(age_h):
@@ -1018,7 +1024,7 @@ def track_record(x_code: str = Header("")):
         d["start"] = min(known) if known else None       # the page shows this day by the viewer's own clock
     recent = sorted(days.values(), key=lambda d: d["day"], reverse=True)[:21]
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=36)).strftime("%Y-%m-%dT%H:%MZ")
-    waiting = [d for d in recent if any(x["result"] is None for x in d["legs"] + d["value"]) and not (d["start"] and d["start"] < cutoff)]
+    waiting = [d for d in recent if any(x["result"] is None for x in d["legs"] + d["value"] + d.get("calls", [])) and not (d["start"] and d["start"] < cutoff)]
     out["days"] = sorted(waiting, key=lambda d: d["start"] or d["day"]) + [d for d in recent if d not in waiting]    # days with picks still waiting first (soonest at the top, including games in play), then finished days newest first
     return out
 
@@ -1107,18 +1113,18 @@ def compute_value():
         for s in ("pts", "reb", "ast", "pra", "pr", "pa", "fg3m"):
             if s in POINTS_BASED and not POINTS_CLAIMS_ENABLED: continue
             for l in p["strip"].get(s, []):
-                if not l["price"]: continue
-                edge = l["p_over"] - 1 / l["price"]; adj = 0.7 * l["p_over"] + 0.3 / l["price"]; aedge = adj - 1 / l["price"]
-                if edge < min_edge(p) or l["n"] < 5: continue
+                if not l["price"] or l["price"] > VALUE_MAX_PRICE: continue
+                edge = l["p_over"] - 1 / l["price"]; aedge = value_gap(l["p_over"], l["price"]); adj = aedge + 1 / l["price"]
+                if aedge < min_edge(p) or l["n"] < 5: continue
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
                 out.append(dict(price_time=p.get("odds_at"), kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
                                 price=l["price"], book=l["book"], price_age_h=p.get("odds_age_h"), p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
                                 confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             b = p["book"].get(s)
-            if not b or not p.get("show_" + s): continue
-            edge = p[pk] - 1 / b["price"]; adj = 0.7 * p[pk] + 0.3 / b["price"]
-            if edge < min_edge(p): continue
+            if not b or not p.get("show_" + s) or b["price"] > VALUE_MAX_PRICE: continue
+            edge = p[pk] - 1 / b["price"]; adj = value_gap(p[pk], b["price"]) + 1 / b["price"]
+            if adj - 1 / b["price"] < min_edge(p): continue
             hk = p[f"{s}_hit"]
             out.append(dict(price_time=p.get("odds_at"), kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
                             p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0,
@@ -1141,7 +1147,7 @@ def compute_value():
         if g.get("source") != "market": continue   # without a market line our own team model has no proven edge, so no team value claims
         for side, pk, nmx in (("home", "p_home", g["home"]), ("away", "p_away", g["away"])):
             pr = (b.get("h2h") or {}).get(side)
-            if pr and g[pk] - 1 / pr[0] >= 0.04:
+            if pr and pr[0] <= VALUE_MAX_PRICE and g[pk] - 1 / pr[0] >= 0.04:
                 ranked.append(dict(kind="team", price_time=(dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=lage[gid])).isoformat() if lage.get(gid) is not None else None, start=g["start"], game_id=gid, stat="ml", side=side, line=0, text=f"{nmx} to win", price=pr[0], book=pr[1], p=g[pk], edge=g[pk] - 1 / pr[0],
                                    adj_edge=g[pk] - 1 / pr[0], confidence="Medium" if g[pk] - 1 / pr[0] >= 0.06 else "Speculative",
                                    evidence=[f"Betting-market consensus (DraftKings) puts {nmx} at {g[pk]*100:.0f}% to win; {bkName_(pr[1])}'s price implies only {100/pr[0]:.0f}%",
