@@ -178,6 +178,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 
 #upd{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:60;background:var(--card);color:var(--mute);border:1px solid var(--btn);border-radius:20px;padding:3px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);pointer-events:none}
 .lockh{font-weight:700;margin:12px 0 2px;font-size:14px}.lockrow{opacity:.92;border-top:1px solid var(--btn);padding-top:4px;margin-top:4px}.lockmeta{font-size:12px;margin:-2px 0 4px}
+.npl.bad{background:var(--bad,#d33)}.pbar.bust i{background:var(--bad,#d33)}
 </style>
 </head>
 <body>
@@ -819,7 +820,7 @@ function playerLegProgress(l,r){
     hit=atleast?cur>=line:under?cur<line:cur>line;level=!atleast&&Number.isInteger(line)&&cur===line;
     if(level)txt=`${cur} ${nm} – exactly on the line (level); not counted`;
     else if(atleast)txt=hit?`${cur} ${nm} – ${line} or more reached`:`${cur} ${nm} – needs ${line-cur} more`;
-    else if(under)txt=hit?`${cur} ${nm} – under the line so far; it must stay under`:`${cur} ${nm} – already over the line, this under has lost`;
+    else if(under)txt=hit?`${cur} ${nm} so far – ${+(line-cur).toFixed(1)} to spare, must stay under ${line}`:`${cur} ${nm} – already over ${line}, this under has lost`;
     else txt=hit?`${cur} ${nm} – cleared`:`${cur} ${nm} – needs ${tgt-cur} more`;
   }
   const progress=under?(tgt-cur)/Math.max(1,tgt):cur/Math.max(1,tgt);
@@ -845,7 +846,10 @@ function legProg(l){if(["ml","spread","total","tt","band"].includes(l.stat))retu
   const progress=playerLegProgress(l,r);if(!progress)return `<div class="prog">${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">Stats are temporarily unavailable</span></div>`;
   const {hit,txt,percent,level}=progress;
   const done=g.state=="post",verdict=done?(level?' <b>Level</b>':hit?' <b class="good">✔ Won</b>':' <b class="bad">✖ Missed</b>'):"";
-  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)}</span></span><span>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?`${progress.cur} of ${progress.tgt} categories at 10+`:txt}${verdict}</span></div>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?catBars(r):l.side!="under"&&progress.tgt>0?ticksBar(progress.cur,progress.tgt,hit):`<div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div>`}</div>`}
+  return `<div class="prog"><div style="display:flex;justify-content:space-between;gap:8px"><span>${who}<b>${name}</b>${liveDot(l.game_id)} <span class="mute">${legDesc(l)}</span></span><span>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?`${progress.cur} of ${progress.tgt} categories at 10+`:txt}${verdict}</span></div>${(l.stat=="dd"||l.stat=="td")&&l.side!="under"?catBars(r):l.side!="under"&&progress.tgt>0?ticksBar(progress.cur,progress.tgt,hit):l.side=="under"&&Number.isFinite(Number(l.line))?underBar(progress.cur,Number(l.line),hit):`<div class="pbar ${hit?"hit":""}"><i style="width:${percent}%"></i></div>`}</div>`}
+// an under: the number so far sits on the bar, the line it must stay below sits at the far end; green while under, red once over
+function underBar(cur,line,ok){const pct=Math.max(0,Math.min(100,cur/line*100));
+  return `<div class="tbar"><div class="trk"><div class="pbar ${ok?"hit":"bust"}"><i style="width:${pct}%"></i></div><span class="npl ${ok?"hit":"bad"}" style="left:min(max(${pct}%,15px),calc(100% - 110px))">${Math.round(cur)}</span><span class="npl tg">under ${line}</span></div></div>`}
 // one bar per category for double-double and triple-double picks: points, rebounds, assists, plus steals or blocks once they reach 5
 function catBars(r){const cats=[["PTS",r.pts||0],["REB",r.reb||0],["AST",r.ast||0],["STL",r.stl||0],["BLK",r.blk||0]].filter(([k,v],i)=>i<3||v>=5);
   return cats.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span class="mute" style="width:34px;font-size:12px">${k}</span><div style="flex:1">${ticksBar(v,10,v>=10)}</div></div>`).join("")}
