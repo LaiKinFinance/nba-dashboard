@@ -1979,6 +1979,22 @@ def _safe(fn, default=None):
     try: return fn()
     except Exception: return default
 
+# Past bookmaker prices for the owner-approved study (bought with the odds credits; no friends' data). Read-only, behind a private key:
+# only the SHA-256 of the key is stored here, so the key itself is never in the code.
+EXPORT_KEY_SHA256 = "9c767a0c230700b61bc213733f36b46045f110d88268a99652d598c3fb87d536"
+
+@app.get("/api/export/hist_odds")
+def export_hist_odds(key: str = ""):
+    import hashlib, hmac
+    if not hmac.compare_digest(hashlib.sha256(key.encode()).hexdigest(), EXPORT_KEY_SHA256): raise HTTPException(404, "Not found")
+    with closing(con()) as c:
+        try: rows = c.execute("SELECT h.game_id, h.snapshot, h.player, h.stat, h.line, h.side, h.price, h.book, g.date, g.home, g.away FROM hist_odds h LEFT JOIN games g ON g.game_id=h.game_id").fetchall()
+        except sqlite3.OperationalError:
+            try: rows = [tuple(r) + (None, None, None) for r in c.execute("SELECT game_id, snapshot, player, stat, line, side, price, book FROM hist_odds")]
+            except sqlite3.OperationalError: rows = []
+    cols = ["game_id", "snapshot", "player", "stat", "line", "side", "price", "book", "date", "home", "away"]
+    return dict(cols=cols, rows=[list(r) for r in rows])
+
 @app.get("/api/health")
 def health():
     """Public, secret-free status in plain terms. Always answers with useful text, even when the database or storage cannot be read."""
