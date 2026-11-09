@@ -180,6 +180,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 .lockh{font-weight:700;margin:12px 0 2px;font-size:14px}.lockrow{opacity:.92;border-top:1px solid var(--btn);padding-top:4px;margin-top:4px}.lockmeta{font-size:12px;margin:-2px 0 4px}
 .npl.bad{background:var(--bad,#d33)}.pbar.bust i{background:var(--bad,#d33)}
 .kind{border-top:1px solid var(--btn);padding:10px 0 8px}.kind:first-of-type{border-top:0}.kh{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:4px}.kv>div{display:flex;flex-direction:column}.kv .big{font-size:20px;font-weight:800}.kv .mute{font-size:12px}.seg.sm button{font-size:13px;padding:6px 4px}
+.lockrow{cursor:pointer}.lockhint{opacity:.7}.lockgame{margin:2px 0 8px;padding:8px 10px;border-radius:10px;background:var(--btn)}.lgtop{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;margin-bottom:4px}
 </style>
 </head>
 <body>
@@ -476,12 +477,22 @@ async function loadPlayingBoxes(){const ids=[...new Set(playingLegs().map(l=>l.g
   await Promise.all(ids.map(async id=>{try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(r.ok)boxes[id]=await r.json()}catch(e){}}))}
 function playingHTML(){const L=LOCK(),n=L.legs.length+L.calls.length+L.value.length+(L.combo?1:0);if(!n)return"";
   const live=new Set(playingLegs().map(l=>l.game_id).filter(id=>LIVEIDS.has(id))).size;
-  const row=x=>`<div class="lockrow">${legProg(asLeg(x))}<div class="mute lockmeta">🔒 ${x.p!=null?`chance ${pc0(x.p)}`:""}${x.price?` · price ${x.price.toFixed(2)}`:""}${x.in_combo?" · in combo":""}${x.result?` · ${resIcon(x.result)}`:""}</div></div>`;
-  const grp=(title,xs)=>xs.length?`<div class="lockh">${title}</div>${xs.map(row).join("")}`:"";
-  const cb=L.combo?`<div class="lockh">Daily combo${L.combo.joint?` <span class="mute" style="font-weight:400">· ${pc0(L.combo.joint)} together${L.combo.fair_odds?` · worth it at ${L.combo.fair_odds.toFixed(2)} or more`:""}</span>`:""}${L.combo.result?` · ${resIcon(L.combo.result)}`:""}</div>${L.combo.legs.map(l=>`<div class="lockrow">${legProg(asLeg(l))}</div>`).join("")}`:"";
+  const row=(x,kind)=>{const k=lockKey(x,kind);return `<div class="lockrow" onclick="togLock('${k}')">${legProg(asLeg(x))}<div class="mute lockmeta">🔒 ${x.p!=null?`chance ${pc0(x.p)}`:""}${x.price?` · price ${x.price.toFixed(2)}`:""}${x.in_combo?" · in combo":""}${x.result?` · ${resIcon(x.result)}`:""}${lockClock(x.game_id)}</div>${lockOpen.has(k)?lockGameHTML(x.game_id):""}</div>`};
+  const grp=(title,xs,kind)=>xs.length?`<div class="lockh">${title}</div>${xs.map(x=>row(x,kind)).join("")}`:"";
+  const cb=L.combo?`<div class="lockh">Daily combo${L.combo.joint?` <span class="mute" style="font-weight:400">· ${pc0(L.combo.joint)} together${L.combo.fair_odds?` · worth it at ${L.combo.fair_odds.toFixed(2)} or more`:""}</span>`:""}${L.combo.result?` · ${resIcon(L.combo.result)}`:""}</div>${L.combo.legs.map(l=>{const k=lockKey(l,"combo");return `<div class="lockrow" onclick="togLock('${k}')">${legProg(asLeg(l))}<div class="mute lockmeta">${lockClock(l.game_id).replace(/^ · /,"")}</div>${lockOpen.has(k)?lockGameHTML(l.game_id):""}</div>`}).join("")}`:"";
   return `<details class="card lockcard" ${playingOpen?"open":""} ontoggle="playingOpen=this.open"><summary style="color:var(--ink);font-size:17px;font-weight:700;margin:0">🔒 Locked picks <span class="mute" style="font-weight:400;font-size:14px">(${n}${live?` · ${live} game${live>1?"s":""} live`:""})</span></summary>
    <div class="mute" style="font-size:13px;margin:6px 0 2px">Saved before tip-off, so they can no longer be added. Follow them here; they move to Results the next morning.</div>
-   ${grp("Best picks",L.legs)}${cb}${grp("Top player calls",L.calls)}${grp("Value bets",L.value)}</details>`}
+   ${grp("Best picks",L.legs,"leg")}${cb}${grp("Top player calls",L.calls,"call")}${grp("Value bets",L.value,"value")}</details>`}
+// tap a locked pick to see its game: score, time left and the score by quarter (kept open across the 20-second refreshes)
+const lockOpen=new Set();
+const lockKey=(x,kind)=>[kind,x.game_id,x.player_id,x.stat,x.line].join("_").replace(/[^\w.-]/g,"");
+function togLock(k){if(lockOpen.has(k))lockOpen.delete(k);else lockOpen.add(k);const w=$("#playingWrap");if(w)w.innerHTML=playingHTML()}
+function clockText(g){if(!g)return"";if(g.state=="pre")return `starts ${timeOf(g.start)}`;if(g.state=="post")return"final";
+  const m=/^([\d:.]+)\s*-\s*(\S+)/.exec(g.detail||"");return m?`${m[1]} left in the ${m[2]}`:(g.detail||"live")}
+function lockClock(id){const g=LG.find(x=>x.game_id==id);return g?` · ⏱ ${clockText(g)} <span class="lockhint">· tap for score</span>`:""}
+function lockGameHTML(id){const g=LG.find(x=>x.game_id==id);if(!g)return `<div class="lockgame mute">This game isn't on today's scoreboard.</div>`;
+  const side=t=>`<span><img src="${logo(t.team)}" alt="" style="width:20px;height:20px;vertical-align:middle;margin-right:6px">${nm(t.team)} <b>${t.score??""}</b></span>`;
+  return `<div class="lockgame"><div class="lgtop">${side(g.away)}<span class="mute">${esc(clockText(g))}</span>${side(g.home)}</div>${lineScore(g)}</div>`}
 async function refreshPlaying(){if(tab!="best"||bestView!="today"||document.visibilityState!="visible")return;
   LG=await quietLive();LIVEIDS=liveSet(LG);await loadPlayingBoxes();const w=$("#playingWrap");if(w)w.innerHTML=playingHTML()}
 /* ---------- Top player calls: the 3 clearest over/under calls on each team's top player (pts + reb + ast) ---------- */
