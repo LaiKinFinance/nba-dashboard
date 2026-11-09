@@ -472,9 +472,17 @@ def who(x_user, x_code):
     if not x_user or len(x_user.strip()) < 2: raise HTTPException(400, "Enter your name first")
     return x_user.strip()[:30]
 
+KIDS_CODE = os.environ.get("KIDS_ACCESS_CODE", "")   # optional second code: a kids' version with scores, lineups, box scores and stats only
+
 def check(x_code):
+    """Full access only. The kids' code is refused here, so every page that is not on the kids' list stays closed to it by default."""
     if not ACCESS_CODE and os.environ.get("FLY_APP_NAME"): raise HTTPException(503, "Server has no access code configured")   # never run open on the internet
     if ACCESS_CODE and x_code != ACCESS_CODE: raise HTTPException(401, "Wrong access code")
+
+def role(x_code):
+    """'full' or 'kids' for the pages kids may see (scores, lineups, box scores, team and player stats); anything else is refused."""
+    if KIDS_CODE and KIDS_CODE != ACCESS_CODE and x_code == KIDS_CODE: return "kids"
+    check(x_code); return "full"
 
 def projections_all():
     with closing(con()) as c:
@@ -491,13 +499,13 @@ def odds_status():
 
 @app.get("/api/meta")
 def meta(x_code: str = Header("")):
-    check(x_code)
+    if role(x_code) == "kids": return dict(role="kids")
     b, why = model_status(projections_all())
     with closing(con()) as c:
         last = c.execute("SELECT max(date) d FROM games").fetchone()["d"]
         made = c.execute("SELECT max(made_at) m FROM projections").fetchone()["m"]
     return dict(data_through=last, projections_made=made, trained_through=(b or {}).get("trained_through"), model_current=why is None, model_note=why,
-                odds_api=__import__("odds").available(), open_access=not ACCESS_CODE, odds=__import__("odds").status(c) if False else odds_status())
+                odds_api=__import__("odds").available(), open_access=not ACCESS_CODE, odds=__import__("odds").status(c) if False else odds_status(), role="full")
 
 def _cats(r): return sum(int(r[k] >= 10) for k in ("pts", "reb", "ast", "stl", "blk"))   # official double/triple-double count five categories
 def has_started(start_iso):
@@ -1433,7 +1441,7 @@ def _startup_prefetch():
 @app.get("/api/lineups")
 def lineups_tab(x_code: str = Header("")):
     """Ad-free starting lineups (Rotowire data) with photos, our top-3 picks flagged, and starters who differ from the team's last game."""
-    check(x_code)
+    kids = role(x_code) == "kids"
     fetch = _lu_fetch
     if time.time() - _lu_cache["t"] > 300:
         if _lu_cache["data"]:                          # show the last lineups at once and refresh them in the background
@@ -1448,7 +1456,14 @@ def lineups_tab(x_code: str = Header("")):
             try: fetch()
             except Exception:
                 logging.exception("lineups fetch failed"); raise HTTPException(502, "Lineups are temporarily unavailable")
-    return cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])     # matched once per new lineups or data change, shared by every phone
+    res = cached_calc("lineups", _lineups_build, extra=_lu_cache["t"])     # matched once per new lineups or data change, shared by every phone
+    if kids:
+        import copy; res = copy.deepcopy(res)
+        for g in res:
+            for side in (g["away"], g["home"]):
+                for lst in (side["starters"], side["out"]):
+                    for r in lst: r.pop("top3", None)
+    return res
 
 def _lineups_build():
     with closing(con()) as c:
@@ -1478,7 +1493,7 @@ def _lineups_build():
 @app.get("/api/started")
 def who_started(x_code: str = Header("")):
     """Finished games of the last two and a half days with the five players who actually started for each team, from the box scores already saved."""
-    check(x_code)
+    role(x_code)
     cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=60)).strftime("%Y-%m-%dT%H:%MZ"); out = []
     with closing(con()) as c:
         for g in c.execute("SELECT game_id, tip_utc, home, away, home_pts, away_pts FROM games WHERE tip_utc >= ? ORDER BY tip_utc DESC, game_id", (cutoff,)).fetchall():
@@ -1489,7 +1504,7 @@ def who_started(x_code: str = Header("")):
 
 @app.get("/api/live")
 def live_scores(x_code: str = Header("")):
-    check(x_code)
+    role(x_code)
     import live
     try: return live.scoreboard()
     except Exception: logging.exception("scoreboard failed"); raise HTTPException(502, "Live scores are temporarily unavailable")
@@ -1497,12 +1512,11 @@ def live_scores(x_code: str = Header("")):
 @app.get("/api/live/{game_id}")
 def live_box(game_id: str, x_code: str = Header("")):
     """Live box score plus which players are our tracked top-3 for this game, with their pre-game projections."""
-    check(x_code)
+    kids = role(x_code) == "kids"
     import live
     try: box = live.boxscore(game_id)
     except Exception: logging.exception("boxscore failed"); raise HTTPException(502, "Live stats are temporarily unavailable")
-    box["tracked"] = {p["player_id"]: p["proj"] for p in projections_all() if p["game_id"] == game_id}
-    return box
+    return dict(box, tracked={}) if kids else dict(box, tracked={p["player_id"]: p["proj"] for p in projections_all() if p["game_id"] == game_id})
 
 def results_stamp(c):
     """Changes only when new game results or roster moves are saved: the Teams tab is rebuilt then, and not otherwise."""
@@ -1527,7 +1541,7 @@ def _with_current_team(df, c):
 
 @app.get("/api/players")
 def players(q: str = "", x_code: str = Header("")):
-    check(x_code)
+    role(x_code)
     if len(q.strip()) < 2: return []
     with closing(con()) as c:
         rows = c.execute("""SELECT player_id, player, team, max(date) d FROM player_games WHERE player LIKE ? GROUP BY player_id ORDER BY d DESC, player LIMIT 12""", (f"%{q.strip()}%",)).fetchall()
@@ -1577,14 +1591,14 @@ def steady_board(c):
 
 @app.get("/api/steady")
 def steady(x_code: str = Header("")):
-    check(x_code)
+    role(x_code)
     if _steady_cache["data"] and _serve_last(): return _steady_cache["data"]      # the background warmer rebuilds it when new results arrive
     with closing(con()) as c: return steady_board(c)
 
 @app.get("/api/team/{abbr}")
 def team_players(abbr: str, x_code: str = Header("")):
     """The players on one team's current roster who have played this season, most minutes first, with their season averages."""
-    check(x_code)
+    role(x_code)
     abbr = abbr.upper()[:5]
     with closing(con()) as c:
         stamp = results_stamp(c); hit = _team_cache.get(abbr)
@@ -1606,7 +1620,7 @@ def _team_rows(c, abbr):
 @app.get("/api/player/{pid}")
 def player(pid: str, x_code: str = Header("")):
     """Plain data for the player page: last 20 games (newest first), double/triple-double counts, tonight's projection if any."""
-    check(x_code)
+    kids = role(x_code) == "kids"
     with closing(con()) as c:
         d = pd.read_sql("SELECT date,opp,home,min,pts,reb,ast,season,player,team FROM player_games WHERE player_id=? ORDER BY date DESC", c, params=(pid,))
         rm = _roster_team_map(c)
@@ -1618,7 +1632,8 @@ def player(pid: str, x_code: str = Header("")):
     return dict(player=d.player.iloc[0], team=((rm[pid] or "") if pid in rm else d.team.iloc[0]), games=d.head(20)[["date", "opp", "home", "min", "pts", "reb", "ast", "dd", "td"]].to_dict("records"),
                 season=dict(games=len(cur), dd=int(cur.dd.sum()), td=int(cur.td.sum()), pts=float(cur.pts.mean()), reb=float(cur.reb.mean()), ast=float(cur.ast.mean()), min=float(cur["min"].mean())),
                 last20=dict(dd=int(d.head(20).dd.sum()), td=int(d.head(20).td.sum())),
-                tonight=dict(game_id=tonight["game_id"], opp=tonight["opp"], home=tonight["home"], start=tonight["start"], proj=tonight["proj"], p_dd=tonight["p_dd"], p_td=tonight["p_td"]) if tonight else None)
+                tonight=(dict(game_id=tonight["game_id"], opp=tonight["opp"], home=tonight["home"], start=tonight["start"]) if kids else
+                         dict(game_id=tonight["game_id"], opp=tonight["opp"], home=tonight["home"], start=tonight["start"], proj=tonight["proj"], p_dd=tonight["p_dd"], p_td=tonight["p_td"])) if tonight else None)
 
 TEAM_STATS = ("ml", "spread", "total", "tt", "band")
 PLAYER_STATS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "pra", "pr", "pa", "dd", "td")
@@ -1768,7 +1783,7 @@ PHONE_TIMES = deque(maxlen=400)     # how long pages took on people's phones (pa
 
 @app.post("/api/timing")
 def phone_timing(body: dict = Body(...), x_code: str = Header("")):
-    check(x_code)
+    role(x_code)
     now = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
     for e in (body.get("t") or [])[:50] if isinstance(body.get("t"), list) else []:
         try:

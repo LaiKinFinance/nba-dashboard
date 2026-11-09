@@ -34,3 +34,11 @@ test('old saved copies (over 18 hours) and unlisted pages are never used', async
   assert.deepEqual(await m.savedFirst('best', async () => ['new']), ['new']);
   assert.deepEqual(await m.savedFirst('picks', async () => ['mine']), ['mine']);
 });
+test('the one redraw never reuses saved copies, so it cannot repeat itself', async () => {
+  const store = { 'nbaSaved:live': JSON.stringify({ t: Date.now(), v: ['old'] }) };
+  const [m, env] = load(store);
+  await m.savedFirst('live', async () => ['new']); await tick();
+  assert.equal(env.renders, 1);
+  assert.deepEqual(await m.savedFirst('live', async () => ['newer']), ['newer']);   // the redraw's own requests wait for fresh data
+  await tick(); assert.equal(env.renders, 1);
+});

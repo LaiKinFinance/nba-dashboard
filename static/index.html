@@ -181,6 +181,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 .npl.bad{background:var(--bad,#d33)}.pbar.bust i{background:var(--bad,#d33)}
 .kind{border-top:1px solid var(--btn);padding:10px 0 8px}.kind:first-of-type{border-top:0}.kh{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:4px}.kv>div{display:flex;flex-direction:column}.kv .big{font-size:20px;font-weight:800}.kv .mute{font-size:12px}.seg.sm button{font-size:13px;padding:6px 4px}
 .lockrow{cursor:pointer}.lockhint{opacity:.7}.lockgame{margin:2px 0 8px;padding:8px 10px;border-radius:10px;background:var(--btn)}.lgtop{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;margin-bottom:4px}
+body.kids #slipwrap{display:none!important}body.kids #mlogo{cursor:default}.kidsbars .bar i{background:var(--acc)}
 </style>
 </head>
 <body>
@@ -194,7 +195,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 const INTRO_T0=Date.now();function endIntro(now){const el=document.getElementById("intro");if(!el||el.classList.contains("out"))return;setTimeout(()=>{el.classList.add("out");setTimeout(()=>el.remove(),400)},now?0:Math.max(0,1050-(Date.now()-INTRO_T0)))}
 setTimeout(()=>endIntro(1),1300);</script>
 <header><div class="hw">
-  <div class="brand" style="display:flex;align-items:center;gap:9px"><img id="mlogo" src="/icon-v2-192.png" alt="Model" title="Results, how it works and MythBusters" onclick="go('model')" style="width:30px;height:30px;border-radius:7px;cursor:pointer">NBA <b>TOP-3</b></div>
+  <div class="brand" style="display:flex;align-items:center;gap:9px"><img id="mlogo" src="/icon-v2-192.png" alt="Model" title="Results, how it works and MythBusters" onclick="if(!KIDS)go('model')" style="width:30px;height:30px;border-radius:7px;cursor:pointer">NBA <b>TOP-3</b></div>
   <nav id="nav"></nav>
   <div class="who"><button id="thm" onclick="toggleTheme()" title="Switch light / dark theme"></button><button class="inst" id="inst" style="display:none" onclick="installApp()">Install app</button><button id="me" onclick="showLogin()" title="Change name or access code"></button></div>
 </div></header>
@@ -206,7 +207,8 @@ const $=s=>document.querySelector(s);
 const TABS=[["best","Best picks"],["today","Games"],["pk","Picks"],["players","Teams"]];      // the Model page opens from the logo
 try{if(!localStorage.seenModel)document.getElementById("mlogo").classList.add("glow")}catch(e){}      // the logo glows a few times until the Model page has been opened once
 const NAMES={ATL:"Hawks",BOS:"Celtics",BKN:"Nets",CHA:"Hornets",CHI:"Bulls",CLE:"Cavaliers",DAL:"Mavericks",DEN:"Nuggets",DET:"Pistons",GS:"Warriors",HOU:"Rockets",IND:"Pacers",LAC:"Clippers",LAL:"Lakers",MEM:"Grizzlies",MIA:"Heat",MIL:"Bucks",MIN:"Timberwolves",NO:"Pelicans",NY:"Knicks",OKC:"Thunder",ORL:"Magic",PHI:"76ers",PHX:"Suns",POR:"Trail Blazers",SAC:"Kings",SA:"Spurs",TOR:"Raptors",UTAH:"Jazz",WSH:"Wizards"};
-let tab="best";   // the app always opens on Best picks (the home tab)
+let KIDS=(()=>{try{return localStorage.role=="kids"}catch(e){return false}})();      // kids' code: Games and Teams only, no odds (the website also refuses them everything else)
+let tab=KIDS?"today":"best";   // the app always opens on Best picks (the home tab); kids open on Games
 let slate=[],best=null,legs=[],playerId=null,meta={},calc=null,openGames=new Set(),filt={q:"",day:"all",start:false},slipMin=true,snaps={},alerts=[],live={};
 const hdr=()=>({"Content-Type":"application/json","X-User":localStorage.user||"","X-Code":localStorage.code||""});
 const TIMES=[];const tnote=(p,ms)=>{if(TIMES.length<60)TIMES.push({p,ms:Math.round(ms)})};
@@ -225,7 +227,7 @@ function savedFirst(p,real){      // real() fetches fresh data; while the app is
   fresh.catch(()=>{}).finally(()=>{if(--svPend)return;showUpd(false);if(!svUsed)return;svUsed=false;
     for(const k in memo)delete memo[k];lastLoad=0;      // drop the saved copies so the redraw uses fresh data
     const f=document.activeElement;if(f&&/INPUT|TEXTAREA|SELECT/.test(f.tagName))return;      // never wipe what someone is typing
-    quietRender=true;render().finally(()=>{quietRender=false})});
+    booting=false;quietRender=true;render().finally(()=>{quietRender=false})});
   return Promise.resolve(old)}
 function api(p,o={}){return o.method?apiNet(p,o):savedFirst(p,()=>apiNet(p,o))}
 async function apiNet(p,o={}){const t0=performance.now();const r=await fetch("/api/"+p,{...o,headers:{...hdr(),...(o.headers||{})}});if(!o.method)tnote(p.split("/")[0],performance.now()-t0);
@@ -236,7 +238,8 @@ const memo={};const apiMemo=(p,ms=30e3)=>{const m=memo[p];if(m&&Date.now()-m.t<m
 function showLogin(msg){$("#modal").innerHTML=`<div class="modal"><form class="card" onsubmit="saveLogin(event)"><h2>Welcome</h2>${msg?`<p class="bad">${msg}</p>`:`<p class="mute">Enter your name (shown on your picks) and the access code you were given.</p>`}
   <label class="mute">Your name</label><input class="inp" id="ln" value="${esc(localStorage.user||"")}" autocomplete="nickname" style="margin:4px 0 10px">
   <label class="mute">Access code</label><input class="inp" id="lc" value="${esc(localStorage.code||"")}" autocomplete="off" style="margin:4px 0 14px"><button class="btn p" style="width:100%">Continue</button></form></div>`;setTimeout(()=>$("#ln").focus(),50)}
-function saveLogin(e){e.preventDefault();const n=$("#ln").value.trim(),c=$("#lc").value.trim();if(n.length<2){return}localStorage.user=n;localStorage.code=c;location.reload()}
+function saveLogin(e){e.preventDefault();const n=$("#ln").value.trim(),c=$("#lc").value.trim();if(n.length<2){return}localStorage.user=n;localStorage.code=c;
+  try{Object.keys(localStorage).filter(k=>k.startsWith("nbaSaved:")).forEach(k=>localStorage.removeItem(k));localStorage.removeItem("role")}catch(e){}location.reload()}      // a new code starts clean: nothing saved under the old code is shown
 /* ---------- welcome: shown once on each phone, and kept as "About this app" on the Model page ---------- */
 const welcomeBody=()=>`<p style="margin:0 0 10px">This app predicts how NBA players will do in tonight's games.</p>
   <b>How it works</b><ul class="why" style="margin:4px 0 10px">
@@ -271,9 +274,10 @@ const BK={sportsbet:"SB",tab:"TAB",ladbrokes_au:"LAD",ladbrokes:"LAD",neds:"NEDS
 const bk=b=>BK[b]||String(b||"").slice(0,4).toUpperCase();
 const bkName=b=>b=="sportsbet"?"Sportsbet":(b||"");
 
-function nav(){$("#nav").innerHTML=TABS.map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
+function nav(){$("#nav").innerHTML=(KIDS?TABS.filter(([k])=>k=="today"||k=="players"):TABS).map(([k,l])=>`<button class="${k==tab?"on":""}" onclick="go('${k}')">${l}</button>`).join("")}
 let picksView="mine";
 function go(t,pid){if(t=="players"&&!pid)ptTeam=null;if(t=="bets"){picksView="mine";t="pk"}else if(t=="picks"){picksView="friends";t="pk"}else if(t=="live"||t=="lineups")t="today";      // old links still land somewhere sensible
+  if(KIDS&&t!="today"&&t!="players")t="today";
   tab=t;localStorage.tab=t;if(pid)playerId=pid;else if(t=='players')playerId=null;nav();render();scrollTo(0,0)}
 /* phone Back button: every page change adds a history step, and Back restores the previous page instead of closing the app */
 const navSnap=()=>({tab,playerId,ptTeam,picksView,modelView});
@@ -281,8 +285,8 @@ let navFromBack=false;
 function navSync(){try{const s=navSnap(),c=history.state;if(!c||!c.nba)history.replaceState({nba:1,...s},"");
   else if(!navFromBack&&(c.tab!=s.tab||c.playerId!=s.playerId||c.ptTeam!=s.ptTeam||c.picksView!=s.picksView||c.modelView!=s.modelView))history.pushState({nba:1,...s},"")}catch(e){}}
 addEventListener("popstate",e=>{const s=e.state;if(!s||!s.nba)return;navFromBack=true;try{tab=s.tab;playerId=s.playerId;ptTeam=s.ptTeam;picksView=s.picksView;modelView=s.modelView||"track";nav();render();scrollTo(0,0)}finally{navFromBack=false}});
-async function render(){navSync();const T0=performance.now(),T_TAB=tab+(tab=="best"?"/"+bestView:"");const a=$("#app");if(!quietRender)a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",!SLIPTABS.includes(tab));
-  clearInterval(liveTimer);try{await({today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip();paintAddBtns();tnote("tab:"+T_TAB,performance.now()-T0)}
+async function render(){navSync();const T0=performance.now(),T_TAB=tab+(tab=="best"?"/"+bestView:"");const a=$("#app");if(!quietRender)a.innerHTML='<p class="mute">Loading…</p>';$("#wrap").classList.toggle("nos",KIDS||!SLIPTABS.includes(tab));
+  clearInterval(liveTimer);try{await(KIDS?{today:kidsToday,players}:{today,best:bestTab,pk:picksTab,players,model:modelTab})[tab](a)}catch(e){console.error(e)};drawSlip();paintAddBtns();tnote("tab:"+T_TAB,performance.now()-T0)}
 
 /* ---------- finding players on the slate ---------- */
 const findP=(g,pid)=>{for(const x of slate)if(x.game_id==g)for(const t of Object.values(x.teams))for(const p of t.players)if(p.player_id==pid)return p;return null};
@@ -306,7 +310,7 @@ let tmr;function recalc(){clearTimeout(tmr);tmr=setTimeout(async()=>{if(!legs.le
   try{const r=await post("parlay",{legs:legsPayload()});calc={r};drawSlip()}catch(x){}},250)}
 const SLIPTABS=["today","best"];
 let slipDone={saved:false,shared:false,sig:""};     // which buttons have been used for the pick list as it is now; a change to the list starts afresh
-function drawSlip(){const w=$("#slipwrap");if(!SLIPTABS.includes(tab)){w.innerHTML="";return}
+function drawSlip(){const w=$("#slipwrap");if(KIDS||!SLIPTABS.includes(tab)){w.innerHTML="";return}
   const sig=legs.map(key).sort().join("~");if(slipDone.sig!==sig)slipDone={saved:false,shared:false,sig};
   const fid=document.activeElement&&document.activeElement.id,note=($("#note")||{}).value||"",r=calc&&calc.r;
   const mine=alerts.filter(a=>legs.some(l=>l.player_id==a.pid));
@@ -786,12 +790,12 @@ function drawPlayer(){const d=pdata;d.games.forEach(g=>{g.pra=g.pts+g.reb+g.ast}
   const hits=vals.filter(v=>v>line).length,mx=Math.max(line,...vals,1)*1.12;
   const t=d.tonight,s=d.season,label={pts:"points",reb:"rebounds",ast:"assists",pra:"PRA"}[pstat];
   const verdict=hits>=8?"good":hits<=3?"bad":"";
-  $("#pbody").innerHTML=`<button class="btn" onclick="playerId=null;render()">← All players</button>${strip()}<div class="card" style="margin-top:12px"><div class="pt">${photo(playerId,d.player,"xl")}<div><h2 style="margin:0;font-size:20px">${esc(d.player)}</h2><div class="mute">${NAMES[d.team]||d.team} · this season: <b style="color:var(--ink)">${s.pts.toFixed(1)}</b> pts · <b style="color:var(--ink)">${s.reb.toFixed(1)}</b> reb · <b style="color:var(--ink)">${s.ast.toFixed(1)}</b> ast · <b style="color:var(--ink)">${(s.pts+s.reb+s.ast).toFixed(1)}</b> PRA in ${s.games} games</div></div></div>
-   ${t?`<div class="note" style="margin:12px 0 0">Playing ${t.home?"vs":"at"} ${NAMES[t.opp]||t.opp} at ${timeOf(t.start)}. Model projects <b style="color:var(--ink)">${t.proj.pts.toFixed(1)}</b> pts, <b style="color:var(--ink)">${t.proj.reb.toFixed(1)}</b> reb, <b style="color:var(--ink)">${t.proj.ast.toFixed(1)}</b> ast. <a href="#" style="color:var(--gold)" onclick="openGames.add('${t.game_id}');go('today');return false">See prices →</a></div>`:`<p class="mute" style="margin-bottom:0">Not shown: he has no game soon, or isn't one of his team's top 3 players.</p>`}</div>
-   <div class="card"><h2>How consistent are they?</h2><p class="mute" style="margin:0 0 10px">Their last ${vals.length} games, oldest to newest. Green bars cleared the dashed line; red bars did not.</p>
-   <div style="display:flex;gap:6px">${["pts","reb","ast","pra"].map(k=>`<button class="pill ${pstat==k?"on":""}" onclick="pstat='${k}';drawPlayer()">${{pts:"Points",reb:"Rebounds",ast:"Assists",pra:"PRA"}[k]}</button>`).join("")}</div>
-   <div class="bars">${g10.map(x=>`<div class="bar ${x[pstat]>line?"hit":""}"><b>${x[pstat]}</b><i style="height:${Math.max(2,x[pstat]/mx*100*0.78)}%"></i><span>${x.home?"vs ":"@"}${x.opp}</span></div>`).join("")}<div class="thr" style="bottom:calc(${line/mx*100*0.78}% + 17px)"></div></div>
-   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px"><div class="step"><button class="btn" onclick="pline[pstat]=Math.max(0.5,pline[pstat]-1);drawPlayer()">−</button><div><div class="mute" style="font-size:11px">Line</div><b style="font-size:18px">Over ${line}</b></div><button class="btn" onclick="pline[pstat]+=1;drawPlayer()">+</button></div>
+  $("#pbody").innerHTML=`<button class="btn" onclick="playerId=null;render()">← All players</button>${strip()}<div class="card" style="margin-top:12px"><div class="pt">${photo(playerId,d.player,"xl")}<div><h2 style="margin:0;font-size:20px">${esc(d.player)}</h2><div class="mute">${NAMES[d.team]||d.team} · this season: <b style="color:var(--ink)">${s.pts.toFixed(1)}</b> pts · <b style="color:var(--ink)">${s.reb.toFixed(1)}</b> reb · <b style="color:var(--ink)">${s.ast.toFixed(1)}</b> ast · <b style="color:var(--ink)">${(s.pts+s.reb+s.ast).toFixed(1)}</b> Pts + Reb + Ast in ${s.games} games</div></div></div>
+   ${KIDS?(t?`<div class="note" style="margin:12px 0 0">Next game: ${t.home?"vs":"at"} ${NAMES[t.opp]||t.opp}, ${timeOf(t.start)}</div>`:""):t?`<div class="note" style="margin:12px 0 0">Playing ${t.home?"vs":"at"} ${NAMES[t.opp]||t.opp} at ${timeOf(t.start)}. Model projects <b style="color:var(--ink)">${t.proj.pts.toFixed(1)}</b> pts, <b style="color:var(--ink)">${t.proj.reb.toFixed(1)}</b> reb, <b style="color:var(--ink)">${t.proj.ast.toFixed(1)}</b> ast. <a href="#" style="color:var(--gold)" onclick="openGames.add('${t.game_id}');go('today');return false">See prices →</a></div>`:`<p class="mute" style="margin-bottom:0">Not shown: he has no game soon, or isn't one of his team's top 3 players.</p>`}</div>
+   <div class="card"><h2>${KIDS?"Last 10 games":"How consistent are they?"}</h2><p class="mute" style="margin:0 0 10px">Their last ${vals.length} games, oldest to newest.${KIDS?"":" Green bars cleared the dashed line; red bars did not."}</p>
+   <div style="display:flex;gap:6px">${["pts","reb","ast","pra"].map(k=>`<button class="pill ${pstat==k?"on":""}" onclick="pstat='${k}';drawPlayer()">${{pts:"Points",reb:"Rebounds",ast:"Assists",pra:"P+R+A"}[k]}</button>`).join("")}</div>
+   <div class="bars${KIDS?" kidsbars":""}">${g10.map(x=>`<div class="bar ${!KIDS&&x[pstat]>line?"hit":""}"><b>${x[pstat]}</b><i style="height:${Math.max(2,x[pstat]/mx*100*0.78)}%"></i><span>${x.home?"vs ":"@"}${x.opp}</span></div>`).join("")}${KIDS?"":`<div class="thr" style="bottom:calc(${line/mx*100*0.78}% + 17px)"></div>`}</div>
+   <div style="display:${KIDS?"none":"flex"};align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px"><div class="step"><button class="btn" onclick="pline[pstat]=Math.max(0.5,pline[pstat]-1);drawPlayer()">−</button><div><div class="mute" style="font-size:11px">Line</div><b style="font-size:18px">Over ${line}</b></div><button class="btn" onclick="pline[pstat]+=1;drawPlayer()">+</button></div>
    <div class="${verdict}" style="font-size:16px"><b>${hits} of ${vals.length}</b> games over ${line} ${label} <span class="mute">(${vals.length?Math.round(hits/vals.length*100):0}%)</span></div></div></div>
    <div class="card"><h2>Double-doubles and triple-doubles</h2><div class="tiles" style="margin:0"><div class="tile"><div class="v">${d.last20.dd}</div><div class="k">double-doubles in last 20</div></div><div class="tile"><div class="v">${d.last20.td}</div><div class="k">triple-doubles in last 20</div></div><div class="tile"><div class="v">${s.td}</div><div class="k">triple-doubles this season</div></div></div></div>
    <details class="card" open><summary>Game log</summary><table class="t" style="margin-top:8px"><tr><th>Date</th><th>Opp</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>P+R+A</th></tr>${(()=>{const n=Math.max(1,d.games.length),av=k=>(d.games.reduce((a,g)=>a+g[k],0)/n).toFixed(1);return `<tr style="font-weight:700;background:var(--card2)"><td colspan="2">Average (last ${d.games.length})</td><td>${av("min")}</td><td>${av("pts")}</td><td>${av("reb")}</td><td>${av("ast")}</td><td>${av("pra")}</td></tr>`})()}${d.games.map(g=>`<tr><td>${g.date}</td><td>${g.home?"vs":"@"} ${g.opp}</td><td>${Math.round(g.min)}</td><td>${g.pts}</td><td>${g.reb}</td><td>${g.ast}</td><td><b>${g.pra}</b></td></tr>`).join("")}</table></details>`}
@@ -816,10 +820,10 @@ function boxHTML(g){const b=boxes[g.game_id];if(g.state=="pre")return'<p class="
   return `<div style="display:flex;gap:6px;margin:6px 0"><button class="pill ${fullStats?"on":""}" onclick="fullStats=!fullStats;drawLive()">More stats</button><button class="pill ${sa?"on":""}" onclick="showAll.has('${g.game_id}')?showAll.delete('${g.game_id}'):showAll.add('${g.game_id}');drawLive()">All players</button></div>`+
   b.teams.map(t=>{const rows=(sa?t.players:t.players.slice(0,8));LUG.v="box"+g.game_id;const sc=g.home&&g.home.team==t.team?g.home.score:g.away&&g.away.team==t.team?g.away.score:"";
     return luWrap(t.team,`<img src="${logo(t.team)}" alt="" style="width:22px;height:22px">${NAMES[t.team]||t.team}<span>${sc!==""?esc(String(sc)):""}</span>`,`${t.players.some(r=>r.starter)?`<div class="mute" style="font-size:12px;margin:0 0 4px">Started: ${t.players.filter(r=>r.starter).map(r=>esc(r.player)).join(", ")}</div>`:""}<div style="overflow-x:auto"><table class="bx"><tr><th>Player</th><th>MIN</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>STL</th><th>BLK</th>${fullStats?"<th>FG</th><th>TO</th><th>+/-</th>":""}</tr>
-    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${g.state=="in"&&r.oncourt?'<span class="live-dot" title="On the court" style="margin:0 0 0 6px"></span>':""}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td><td>${r.fg3m}</td><td>${r.stl}</td><td>${r.blk}</td>${fullStats?`<td>${esc(r.fg)}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`)}).join("")+'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>'}
+    ${rows.map(r=>{const trk=b.tracked&&b.tracked[r.player_id];return `<tr class="${trk?"trk":""}"><td>${trk?"⭐ ":""}${esc(r.player)}${g.state=="in"&&r.oncourt?'<span class="live-dot" title="On the court" style="margin:0 0 0 6px"></span>':""}${tag(r)}${trk?`<div class="mute" style="font-size:10.5px;font-weight:400">proj ${trk.pts.toFixed(0)}/${trk.reb.toFixed(0)}/${trk.ast.toFixed(0)}</div>`:""}</td><td>${r.min}</td><td><b>${r.pts}</b></td><td>${r.reb}</td><td>${r.ast}</td><td>${r.fg3m}</td><td>${r.stl}</td><td>${r.blk}</td>${fullStats?`<td>${esc(r.fg)}</td><td>${r.tov}</td><td>${r.pm>0?"+":""}${r.pm}</td>`:""}</tr>`}).join("")}</table></div>`)}).join("")+(KIDS?'':'<div class="mute" style="font-size:11px">⭐ = our top-3 pick for that team, with the pre-game projection (pts/reb/ast).</div>')}
 function liveHTML(g){const hw=g.home.score>g.away.score,aw=g.away.score>g.home.score,fin=g.state!="pre";
   const side=(t,w,r)=>`<div class="lt ${r?"r":""}">${r?"":`<img src="${logo(t.team)}" alt="">`}<div><div style="font-weight:700"><span class="nm">${NAMES[t.team]||t.team}</span><span class="ab">${t.team}</span></div><small>${t.record||""}</small></div>${fin?`<div class="sc ${w?"w":"l"}">${t.score}</div>`:""}${r?`<img src="${logo(t.team)}" alt="">`:""}</div>`;
-  return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+boxHTML(g):""}</div></div>`}
+  return `<div class="lv ${openLive.has(g.game_id)?"open":""}" id="lv${g.game_id}"><button class="lh" onclick="togLive('${g.game_id}')">${side(g.away,aw,false)}<div class="ls"><div class="st">${g.state=="in"?'<span class="live-dot"></span>':""}${esc(stLabel(g))}</div>${g.state=="pre"?'<div class="ft">tip-off</div>':g.state=="post"?"":'<div class="ft">LIVE</div>'}</div>${side(g.home,hw,true)}</button><div class="lb2">${openLive.has(g.game_id)?lineScore(g)+(KIDS?kidsLineups(g)+(g.state=="pre"?"":`<div class="sbt" style="margin:10px 0 4px">Box score</div>`):"")+(KIDS&&g.state=="pre"?"":boxHTML(g)):""}</div></div>`}
 function legNow(l){const b=boxes[l.game_id];if(!b)return null;for(const t of b.teams){const r=t.players.find(p=>p.player_id==l.player_id);if(r)return r}return null}
 function teamProg(l){const g=LG.find(x=>x.game_id==l.game_id),name=teamLegLogos(l)+esc(l.text||"")+liveDot(l.game_id);      // red dot while the game is live, like player picks
   if(!g)return `<div class="prog"><b>${name}</b> <span class="mute">${legDesc(l)} · game not on today's scoreboard</span></div>`;
@@ -918,6 +922,12 @@ function drawLive(){Object.keys(gameIdx).forEach(paintLiveSections);LG.forEach(l
 async function loadBox(id){try{const r=await fetch("/api/live/"+id,{headers:hdr()});if(!r.ok)return;boxes[id]=await r.json()}catch(e){return}
   const l=LG.find(x=>x.game_id==id);if(gameIdx[id])paintLiveSections(id);else{const el=$("#lv"+id);if(el&&l&&openLive.has(id))el.outerHTML=liveHTML(l)}}
 function togLive(id){if(openLive.has(id))openLive.delete(id);else openLive.add(id);const l=LG.find(x=>x.game_id==id),el=$("#lv"+id);if(l&&el)el.outerHTML=liveHTML(l);if(openLive.has(id)&&l&&l.state!="pre")loadBox(id)}
+async function kidsToday(a){slate=[];const [lg,lu,st]=await Promise.all([quietLive(),quietGet("lineups"),quietGet("started")]);LG=lg;LIVEIDS=liveSet(lg);LU=lu||[];luAt=Date.now();STARTED=st||[];
+  a.innerHTML=`${daySwitch(gamesDay,"setGamesDay")}<div class="tools"><input id="q" placeholder="Search team" value="${esc(filt.q)}" oninput="filt.q=this.value;drawGames()"></div><div id="liveAt" class="mute" style="font-size:12px;margin:0 0 6px"></div><div class="mute" style="font-size:13px;margin:0 0 8px">Tap a game for the score by quarter, the lineups and the box score.</div><div id="glist"></div>`;
+  drawGames();stampLive();liveTimer=setInterval(refreshGames,15000)}
+function kidsLineups(g){const id=g.game_id,e=LU.find(x=>x.away.team==g.away.team&&x.home.team==g.home.team),st=STARTED.find(x=>x.game_id==id),b=boxes[id];LUG.v=id;
+  const body=e&&g.state=="pre"?`${luSide(e.away)}${luSide(e.home)}`:st?`${startedSide(st.away)}${startedSide(st.home)}`:b&&b.teams?b.teams.map(tm=>startedSide({team:tm.team,score:"",starters:tm.players.filter(p=>p.starter).map(p=>({player_id:p.player_id,name:p.player}))})).join(""):e?`${luSide(e.away)}${luSide(e.home)}`:"";
+  return body?`<div class="sbt" style="margin:10px 0 4px">Lineups</div><div class="lu">${body}</div>`:'<p class="mute">No lineup posted yet.</p>'}
 let luAt=0;
 async function refreshGames(){if(tab!="today"||document.visibilityState!="visible")return;
   if(!LU.length||Date.now()-luAt>60000){luAt=Date.now();quietGet("lineups").then(lu=>{const had=JSON.stringify(LU);LU=lu||[];if(tab=="today"&&JSON.stringify(LU)!=had)drawGames()})}      // lineups keep coming in after the page opens
@@ -940,6 +950,8 @@ if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this 
 (async()=>{paintTheme();$("#me").textContent=localStorage.user||"Sign in";nav();
   if(!localStorage.user){showLogin()}
   try{meta=await api("meta")}catch(e){}
+  if(meta&&meta.role){const k=meta.role=="kids";try{localStorage.role=meta.role}catch(e){}if(k!==KIDS){location.reload();return}}
+  if(KIDS){document.body.classList.add("kids");try{localStorage.welcomed=1}catch(e){}}
   render().finally(()=>{booting=false;endIntro();if(localStorage.user&&!localStorage.welcomed)setTimeout(showWelcome,1100)})})();
 </script>
 </body>
