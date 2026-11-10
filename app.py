@@ -838,6 +838,33 @@ def _conf(p, s, line, hit, n, edge, with_evidence):
     if edge >= 0.10: pts += 1
     return "Strong" if pts >= 4 else "Medium" if pts >= 3 else "Speculative"
 
+WHY_NAME = {"pts": "points", "reb": "rebounds", "ast": "assists", "pra": "points + rebounds + assists", "pr": "points + rebounds",
+            "pa": "points + assists", "fg3m": "threes", "stl": "steals", "blk": "blocks"}
+
+def plain_why(p, s, line, side="over"):
+    """One or two plain sentences on why a pick is there, built only from facts the app already holds (no guessing, no AI cost)."""
+    try:
+        if s in ("dd", "td"):
+            hk = p.get(f"{s}_hit") or {}
+            return f"Got a {'double' if s == 'dd' else 'triple'}-double in {hk.get('k', 0)} of his last {hk.get('n', 0)} games." if hk.get("n") else ""
+        parts = COMBO_PARTS.get(s, (s,)); nm = WHY_NAME.get(s, s); under = side == "under"; out = []
+        absent = [a for a in (p.get("absent") or []) if a.get("weight", 0) >= 0.85]
+        if absent and not under:
+            names = " and ".join(a["name"] for a in absent[:2])
+            out.append(f"{names} {'is' if len(absent[:2]) == 1 else 'are'} out tonight, which leaves more {nm} for him.")
+        l10 = [sum(r.get(c, 0) for c in parts) for r in (p.get("last10") or [])]
+        if l10:
+            k = sum(1 for v in l10 if (v < line if under else v > line))
+            out.append(f"{'Stayed under' if under else 'Went over'} {line:g} {nm} in {k} of his last {len(l10)} games.")
+        proj = sum((p.get("proj") or {}).get(c, 0) for c in parts)
+        if proj and len(out) < 2: out.append(f"The app expects about {proj:.0f} {nm} tonight.")
+        of = (p.get("opp_factor") or {}).get(s) if s in ("pts", "reb", "ast") else None
+        if of and abs(of - 1) >= 0.05 and len(out) < 2 and ((of > 1) != under):
+            out.append(f"{p.get('opp', 'The other team')} has given up {'more' if of > 1 else 'fewer'} {nm} than usual lately.")
+        return " ".join(out[:2])
+    except Exception:
+        return ""
+
 def _evidence(p, s, line, prob, price, edge, adj):
     parts = COMBO_PARTS.get(s, (s,)); pv = sum(p["proj"][c] for c in parts); lab = {"pra": "pts+reb+ast", "pr": "pts+reb", "pa": "pts+ast", "fg3m": "3PM"}.get(s, s)
     ev = [f"Model chance {prob*100:.0f}% vs price implies {100/price:.0f}% (edge {edge*100:+.0f} pts; ranked on 70% of that gap to stay cautious)"]
@@ -1127,7 +1154,7 @@ def compute_value():
                 evd = bool(p.get("evidence")) and l.get("boost", 0) >= 0.03
                 out.append(dict(price_time=p.get("odds_at"), kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=l["line"], side="over",
                                 price=l["price"], book=l["book"], price_age_h=p.get("odds_age_h"), p=l["p_over"], edge=edge, adj_edge=aedge, hit=l["hit"], n=l["n"], boost=l.get("boost", 0),
-                                confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
+                                confidence=_conf(p, s, l["line"], l["hit"], l["n"], edge, evd), why=plain_why(p, s, l["line"]), evidence=_evidence(p, s, l["line"], l["p_over"], l["price"], edge, adj)))
         for s, pk in (("dd", "p_dd"), ("td", "p_td")):
             b = p["book"].get(s)
             if not b or not p.get("show_" + s) or b["price"] > VALUE_MAX_PRICE: continue
@@ -1135,7 +1162,7 @@ def compute_value():
             if adj - 1 / b["price"] < min_edge(p): continue
             hk = p[f"{s}_hit"]
             out.append(dict(price_time=p.get("odds_at"), kind="player", start=p["start"], game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=p["team"], stat=s, line=0, side="over", price=b["price"], book=b["book"],
-                            p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0,
+                            p=p[pk], edge=edge, adj_edge=adj - 1 / b["price"], hit=hk["k"], n=hk["n"], boost=0, why=plain_why(p, s, 0),
                             confidence="Medium" if edge >= 0.1 and hk["k"] / max(hk["n"], 1) >= 0.25 else "Speculative",
                             evidence=[f"Model chance {p[pk]*100:.1f}% vs price implies {100/b['price']:.1f}%", f"Did it in {hk['k']} of his last {hk['n']} games"] +
                                      [f"Teammate {a['name']} ({a['pts']:.1f} ppg) is out" for a in (p.get('absent') or [])[:2]]))
@@ -1274,6 +1301,8 @@ def compute_best():
         legs = [dict(game_id=x["game_id"], player_id=x["player_id"], stat=x["stat"], line=x["line"], side="over") for x in combo]
         res = pl.parlay(legs, pmap, alph["alphas"], alph["corr"], n=60000)
         if (res["fair_odds"] or 0) >= 2.0 or len(combo) == 3: break
+    for c in cands[:8] + combo:
+        if "why" not in c: c["why"] = plain_why(pmap.get((c["game_id"], c["player_id"])) or {}, c["stat"], c["line"])
     return dict(legs=cands[:8], combo=dict(legs=combo, joint=res["joint"] if res else None, fair_odds=res["fair_odds"] if res else None), playing=playing_picks())
 
 CALL_MIN_P = 0.60          # Top player calls: only calls the model rates at least this likely
@@ -1328,7 +1357,7 @@ def compute_calls():
             if p.get("absent"): tags.append(f"{len(p['absent'])} teammate{'s' if len(p['absent']) > 1 else ''} out")
             l10 = [x["pts"] + x["reb"] + x["ast"] for x in (p.get("last10") or [])]
             out.append(dict(price_time=p.get("odds_at"), game_id=p["game_id"], player_id=p["player_id"], player=p["player"], team=team, opp=p["opp"], home=p["home"], start=p["start"],
-                            stat="pra", line=e["line"], side=side, p=chance, price=price, book=e.get("book"), expects=round(pra, 1), tags=tags,
+                            stat="pra", line=e["line"], side=side, why=plain_why(p, "pra", e["line"], side), p=chance, price=price, book=e.get("book"), expects=round(pra, 1), tags=tags,
                             last10=l10, minutes=p.get("min"), absent=[a["name"] for a in (p.get("absent") or [])][:3]))
     out.sort(key=lambda x: -x["p"])
     return dict(calls=out[:3])
