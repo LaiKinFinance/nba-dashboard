@@ -95,3 +95,7 @@ def test_a_failed_request_is_recorded_and_not_repeated_in_a_loop(monkeypatch):
 def test_off_when_budget_is_zero(monkeypatch):
     monkeypatch.setattr(history, "_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not call")))
     assert history.download_step(_season_db("20000"), budget=0)["ran"] is False
+
+
+def test_november_has_the_approved_extra_5000_and_other_months_do_not():
+    assert history.month_budget("2026-11") == 10000 and history.month_budget("2026-12") == 5000

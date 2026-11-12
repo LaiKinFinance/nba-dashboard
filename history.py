@@ -14,6 +14,10 @@ import odds
 HISTORY_MARKETS = "player_points,player_rebounds,player_assists,player_points_rebounds_assists"
 HISTORY_REGIONS = "au"
 HISTORY_MONTHLY_BUDGET = 5000       # credits a month for past prices (owner approved option B, 5,000 a month)
+HISTORY_EXTRA = {"2026-11": 5000}   # one-off extra the owner approved for November 2026 (spare credits, more past games sooner)
+
+def month_budget(month=None):
+    return HISTORY_MONTHLY_BUDGET + HISTORY_EXTRA.get(month or _month(), 0) if HISTORY_MONTHLY_BUDGET > 0 else 0
 DOWNLOAD_MARKETS = "player_points_rebounds_assists"   # option B: the market the top player calls use
 DOWNLOAD_MIN_CREDITS = 3000         # never buy past prices with fewer credits than this left (the app's normal fetches come first)
 EST_EVENTS, EST_GAME = 1, 10        # usual cost of a day's game list and of one game's PRA prices, for requests whose cost was never recorded
@@ -124,7 +128,7 @@ def _cost(h):
 
 def download_step(con, budget=None):
     """Buy one past game day (if the month's budget and the credit balance allow). Returns what it did."""
-    init(con); budget = HISTORY_MONTHLY_BUDGET if budget is None else budget
+    init(con); budget = month_budget() if budget is None else budget
     if budget <= 0: return dict(ran=False, reason="off")
     bal = odds.valid_balance((odds.status(con) or {}).get("remaining"))
     used = spent(con)
@@ -173,6 +177,6 @@ def summary(con):
     """For /api/health: this month's spend and what has been stored so far."""
     init(con)
     g = con.execute("SELECT count(*), coalesce(sum(prices),0) FROM hist_fetch WHERE kind='game' AND state='done'").fetchone()
-    return dict(budget=HISTORY_MONTHLY_BUDGET, month=_month(), spent_this_month=spent(con), games_stored=g[0], prices_stored=g[1],
+    return dict(budget=month_budget(), month=_month(), spent_this_month=spent(con), games_stored=g[0], prices_stored=g[1],
                 days_tried=con.execute("SELECT count(DISTINCT substr(k, 8, 10)) FROM hist_fetch WHERE kind='events'").fetchone()[0],
                 failed=con.execute("SELECT count(*) FROM hist_fetch WHERE state='failed'").fetchone()[0])
