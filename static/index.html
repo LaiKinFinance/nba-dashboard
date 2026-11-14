@@ -184,6 +184,7 @@ table.tm2{width:100%;table-layout:fixed;font-size:13px}table.tm2 th:not(:first-c
 body.kids #slipwrap{display:none!important}body.kids #mlogo{cursor:default}.kidsbars .bar i{background:var(--acc)}
 .why1{font-size:12.5px;color:var(--ink);opacity:.85;margin-top:3px;line-height:1.35}
 .plink{cursor:pointer;text-decoration:underline;text-decoration-color:rgba(127,127,127,.35);text-underline-offset:3px}.plink:hover{text-decoration-color:currentColor}
+.tipb{position:absolute;z-index:90;background:var(--card);color:var(--ink);border:2px solid var(--gold);border-radius:12px;padding:10px 12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-size:14px}.tipb>div{flex:1 1 100%}.tipb::before{content:'';position:absolute;top:-9px;left:calc(var(--ax) - 8px);border:8px solid transparent;border-top:0;border-bottom-color:var(--gold)}
 </style>
 </head>
 <body>
@@ -194,8 +195,8 @@ body.kids #slipwrap{display:none!important}body.kids #mlogo{cursor:default}.kids
 <g class="tip"><path d="M318 188H366V236" fill="none" stroke="#0e2452" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/><circle cx="136" cy="350" r="15" fill="#fff" stroke="#0e2452" stroke-width="8"/><circle cx="214" cy="282" r="15" fill="#fff" stroke="#0e2452" stroke-width="8"/><circle cx="268" cy="316" r="15" fill="#fff" stroke="#0e2452" stroke-width="8"/></g></svg>
 <div class="it">NBA <b>TOP-3</b></div></div></div>
 <script>/* opening intro: about a second while the first page loads, never longer than 1.3 s, tap to skip */
-const INTRO_T0=Date.now();function endIntro(now){const el=document.getElementById("intro");if(!el||el.classList.contains("out"))return;setTimeout(()=>{el.classList.add("out");setTimeout(()=>el.remove(),400)},now?0:Math.max(0,1050-(Date.now()-INTRO_T0)))}
-setTimeout(()=>endIntro(1),1300);</script>
+const INTRO_T0=Date.now();function endIntro(now){const el=document.getElementById("intro");if(!el||el.classList.contains("out"))return;setTimeout(()=>{el.classList.add("out");setTimeout(()=>el.remove(),400)},now?0:Math.max(0,600-(Date.now()-INTRO_T0)))}
+setTimeout(()=>endIntro(1),900);</script>
 <header><div class="hw">
   <div class="brand" style="display:flex;align-items:center;gap:9px"><img id="mlogo" src="/icon-v2-192.png" alt="Model" title="Results, how it works and MythBusters" onclick="if(!KIDS)go('model')" style="width:30px;height:30px;border-radius:7px;cursor:pointer">NBA <b>TOP-3</b></div>
   <nav id="nav"></nav>
@@ -237,9 +238,9 @@ async function apiNet(p,o={}){const t0=performance.now();const r=await fetch("/a
   if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||"Something went wrong");throw e}return r.json()}
 const post=(p,b)=>api(p,{method:"POST",body:JSON.stringify(b)});
 const memo={};const apiMemo=(p,ms=30e3)=>{const m=memo[p];if(m&&Date.now()-m.t<ms)return m.v;const v=api(p);memo[p]={t:Date.now(),v};v.catch(()=>{delete memo[p]});return v};      // switching back to a tab within 30 s shows what was just loaded
-function showLogin(msg){$("#modal").innerHTML=`<div class="modal"><form class="card" onsubmit="saveLogin(event)"><h2>Welcome</h2>${msg?`<p class="bad">${msg}</p>`:`<p class="mute">Enter your name (shown on your picks) and the access code you were given.</p>`}
+function showLogin(msg){$("#modal").innerHTML=`<div class="modal"><form class="card" onsubmit="saveLogin(event)"><h2>Welcome</h2>${msg?`<p class="bad">${msg}</p>`:`<p class="mute">Enter your name and the code you were given.</p>`}
   <label class="mute">Your name</label><input class="inp" id="ln" value="${esc(localStorage.user||"")}" autocomplete="nickname" style="margin:4px 0 10px">
-  <label class="mute">Access code</label><input class="inp" id="lc" value="${esc(localStorage.code||"")}" autocomplete="off" style="margin:4px 0 14px"><button class="btn p" style="width:100%">Continue</button></form></div>`;setTimeout(()=>$("#ln").focus(),50)}
+  <label class="mute">Access code</label><input class="inp" id="lc" value="${esc(localStorage.code||"")}" autocomplete="off" style="margin:4px 0 14px"><button class="btn p" style="width:100%">Let's go</button></form></div>`;setTimeout(()=>$("#ln").focus(),50)}
 function saveLogin(e){e.preventDefault();const n=$("#ln").value.trim(),c=$("#lc").value.trim();if(n.length<2){return}localStorage.user=n;localStorage.code=c;
   try{Object.keys(localStorage).filter(k=>k.startsWith("nbaSaved:")).forEach(k=>localStorage.removeItem(k));localStorage.removeItem("role")}catch(e){}location.reload()}      // a new code starts clean: nothing saved under the old code is shown
 /* ---------- welcome: shown once on each phone, and kept as "About this app" on the Model page ---------- */
@@ -255,6 +256,17 @@ const welcomeBody=()=>`<p style="margin:0 0 10px">This app predicts how NBA play
   <li><b>Teams</b>: rosters, player averages and the most consistent players.</li>
   <li><b>Tap the logo</b> (top left): results, how the app works and MythBusters.</li></ul>
   <p class="mute" style="margin:0">A prediction app for fun. No real money is involved.</p>`;
+/* first-time tips: three tiny bubbles, shown once, each pointing at the real thing on screen */
+const TIPS=[[".card.best .btn.p","Tap <b>Add to pick list</b> to save a pick"],[".plink","Tap a player's name to see his stats"],["#mlogo","Tap the logo for results and how the app works"]];
+function tipsDone(){try{return !!localStorage.tipsDone}catch(e){return true}}
+function startTips(i=0){if(tipsDone()||tab!="best"){return}const t=$("#tip");if(t)t.remove();
+  while(i<TIPS.length&&!document.querySelector(TIPS[i][0]))i++;      // skip a tip when its target isn't on screen today
+  if(i>=TIPS.length){try{localStorage.tipsDone=1}catch(e){}return}
+  const el=document.querySelector(TIPS[i][0]);el.scrollIntoView({block:"center"});
+  setTimeout(()=>{const r=el.getBoundingClientRect(),b=document.createElement("div");b.id="tip";b.className="tipb";
+    b.innerHTML=`<div>${TIPS[i][1]}</div><button class="btn p" onclick="startTips(${i+1})">${i==TIPS.length-1?"Got it":"Next"}</button><span class="mute" style="font-size:11px">${i+1} of ${TIPS.length}</span>`;
+    document.body.appendChild(b);const w=Math.min(280,innerWidth-24),left=Math.max(12,Math.min(innerWidth-w-12,r.left+r.width/2-w/2));
+    b.style.width=w+"px";b.style.left=left+"px";b.style.top=(r.bottom+10+scrollY)+"px";b.style.setProperty("--ax",(r.left+r.width/2-left)+"px")},250)}
 function showWelcome(){$("#modal").innerHTML=`<div class="modal"><div class="card wel"><h2 style="display:flex;align-items:center;gap:10px;margin-top:0"><img src="/icon-v2-192.png" alt="" style="width:30px;height:30px;border-radius:7px">Welcome to NBA Dashboard</h2>${welcomeBody()}<button class="btn p" style="width:100%;margin-top:14px" onclick="closeWelcome()">Let's go</button></div></div>`}
 function closeWelcome(){try{localStorage.welcomed="1"}catch(e){}$("#modal").innerHTML=""}
 function needName(){if(!localStorage.user){showLogin();return false}return true}
@@ -958,7 +970,7 @@ if(ios&&!localStorage.iosHint){setTimeout(()=>{if(confirm("Tip: to install this 
   try{meta=await api("meta")}catch(e){}
   if(meta&&meta.role){const k=meta.role=="kids";try{localStorage.role=meta.role}catch(e){}if(k!==KIDS){location.reload();return}}
   if(KIDS){document.body.classList.add("kids");try{localStorage.welcomed=1}catch(e){}}
-  render().finally(()=>{booting=false;endIntro();if(localStorage.user&&!localStorage.welcomed)setTimeout(showWelcome,1100)})})();
+  render().finally(()=>{booting=false;endIntro();if(localStorage.user&&!KIDS)setTimeout(startTips,900)})})();
 </script>
 </body>
 </html>
