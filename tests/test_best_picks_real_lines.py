@@ -24,7 +24,8 @@ def best(monkeypatch):
     return app.compute_best()
 
 def test_the_combined_pick_uses_only_lines_a_bookmaker_offers(best):
-    assert [l["player_id"] for l in best["combo"]["legs"]] == ["real"] and best["combo"]["legs"][0]["price"] == 1.8
+    # only one pick has a real bookmaker line here, so there is no combo (a combo needs 2+ picks); the unpriced leg never joins one
+    assert best["combo"]["legs"] == [] and [l["player_id"] for l in best["legs"]] == ["real"] and best["legs"][0]["price"] == 1.8
 
 def test_a_leg_with_no_bookmaker_line_is_never_shown(best):
     assert {l["player_id"] for l in best["legs"]} == {"real"} and all(l["real"] and l["price"] for l in best["legs"])

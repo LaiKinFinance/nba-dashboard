@@ -516,8 +516,11 @@ function callsHTML(){const c=CALLS;if(!c)return"";const L=c.calls||[],rec=c.reco
    ${n?`<div class="mute" style="margin-top:6px">Calls so far: ${rec.won} of ${n} right (${Math.round(rec.won/n*100)}%)</div>`:""}</details>`}
 function bestHTML(){if(!best)return"";const c=best.combo;
   const more=best.legs.map((l,i)=>`<button class="sl" data-lks="${lks([bestLeg(l)])}" data-rem="<b>Remove</b><small>${esc(l.player)} · Over ${l.line} ${statName[l.stat]}</small>" onclick="addBestLeg(${i})"><b class="plink" ${pgo(l.player_id)}>${esc(l.player)}</b><small>Over ${l.line} ${statName[l.stat]} · ${pct(l.p)} · ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</small></button>`).join("");
-  if(!c.legs.length)return"";
   const L=l=>`<div class="bl">${photo(l.player_id,l.player)}<div class="x"><b class="plink" ${pgo(l.player_id)}>${esc(l.player)}</b><span class="mute">Over ${l.line} ${statName[l.stat]} · ${NAMES[l.team]||l.team}${l.starting?"":" · starter not confirmed"}</span>${l.why?`<div class="why1">${esc(l.why)}</div>`:""}</div><div style="text-align:right"><b>${pct(l.p)}</b><div class="mute">hit ${l.hit}/${l.n}${l.price?` · ${l.price.toFixed(2)}`:""}</div></div></div>`;
+  if(c.legs.length<2){const i=best.legs.findIndex(l=>l.real!==false&&l.price);if(i<0)return"";      // only one pick qualified today: no combo, just the day's best pick
+    return `<div class="card best"><h2>⭐ Today's best pick</h2><p class="mute" style="margin:0 0 6px">Only one pick qualified today, so there's no combo.</p>${L(best.legs[i])}
+     <div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn p" data-lks="${lks([bestLeg(best.legs[i])])}" onclick="addBestLeg(${i})">Add to pick list</button></div>
+     ${best.legs.length>1?`<details><summary>More likely picks (${best.legs.length})</summary><div class="pillrow">${more}</div></details>`:""}</div>`}
   return `<div class="card best"><h2>⭐ Today's best picks</h2><p class="mute" style="margin:0 0 6px">Picks joined into one bet. Each one is likely, came true in most of the player's last 10 games, and has a real bookmaker line.</p>
    ${c.legs.map(L).join("")}
    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px;flex-wrap:wrap"><div><span class="mute">${c.legs.length==2?"Both":"All "+c.legs.length} win:</span> <b style="font-size:18px">${pct(c.joint)}</b> <span class="mute">${c.fair_odds?`· worth it at ${c.fair_odds.toFixed(2)} or more`:""}</span></div>

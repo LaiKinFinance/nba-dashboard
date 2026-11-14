@@ -1301,6 +1301,7 @@ def compute_best():
         legs = [dict(game_id=x["game_id"], player_id=x["player_id"], stat=x["stat"], line=x["line"], side="over") for x in combo]
         res = pl.parlay(legs, pmap, alph["alphas"], alph["corr"], n=60000)
         if (res["fair_odds"] or 0) >= 2.0 or len(combo) == 3: break
+    if len(combo) < 2: combo, res = [], None                         # a "combo" of one pick is not a combo: show it as the day's best pick instead
     for c in cands[:8] + combo:
         if "why" not in c: c["why"] = plain_why(pmap.get((c["game_id"], c["player_id"])) or {}, c["stat"], c["line"])
     return dict(legs=cands[:8], combo=dict(legs=combo, joint=res["joint"] if res else None, fair_odds=res["fair_odds"] if res else None), playing=playing_picks())
